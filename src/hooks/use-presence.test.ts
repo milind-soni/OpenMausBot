@@ -39,18 +39,18 @@ function rerender(state: AppState, dispatch: (action: Action) => void) {
 }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-type Listener = { scope: "window" | "document"; name: string; fn: () => void; options?: unknown };
+type Listener = { scope: "window" | "document"; name: string; fn: (event?: unknown) => void; options?: unknown };
 function stubDom(options: { visibilityState?: "visible" | "hidden"; ogb?: unknown } = {}) {
   const added: Listener[] = [];
   const removed: Listener[] = [];
   const target = (scope: Listener["scope"]) => ({
-    addEventListener: (name: string, fn: () => void, listenerOptions?: unknown) => { added.push({ scope, name, fn, options: listenerOptions }); },
-    removeEventListener: (name: string, fn: () => void) => { removed.push({ scope, name, fn }); },
+    addEventListener: (name: string, fn: (event?: unknown) => void, listenerOptions?: unknown) => { added.push({ scope, name, fn, options: listenerOptions }); },
+    removeEventListener: (name: string, fn: (event?: unknown) => void) => { removed.push({ scope, name, fn }); },
   });
   const doc = { ...target("document"), visibilityState: options.visibilityState ?? "visible" };
   vi.stubGlobal("window", { ogb: options.ogb, ...target("window") });
   vi.stubGlobal("document", doc);
-  const fire = (name: string) => { for (const listener of added.filter((entry) => entry.name === name)) listener.fn(); };
+  const fire = (name: string, event?: unknown) => { for (const listener of added.filter((entry) => entry.name === name)) listener.fn(event); };
   return { added, removed, doc, fire };
 }
 
@@ -171,6 +171,32 @@ describe("usePresence", () => {
     for (const name of ["pointerdown", "keydown"]) {
       expect(dom.added.find((listener) => listener.scope === "window" && listener.name === name)?.options).toEqual({ passive: true });
     }
+  });
+
+  it("says at once that the person is typing in the open chat's composer, then once a minute at most while they type there", async () => {
+    const dom = stubDom();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    fixture.api.mockResolvedValue({ ok: true, returned: false });
+    render(loaded, vi.fn());
+    await flush();
+    const inComposer = { closest: (selector: string) => (selector === "[data-composer-row]" ? {} : null) };
+    const elsewhere = { closest: () => null };
+    const bodies = () => fixture.api.mock.calls.map(([, init]) => JSON.parse((init as { body: string }).body));
+    now.mockReturnValue(1_000_000 + 5_000);
+    dom.fire("keydown", { type: "keydown", target: elsewhere });
+    await flush();
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+    dom.fire("keydown", { type: "keydown", target: inComposer });
+    await flush();
+    expect(bodies()[1]).toMatchObject({ threadId: "chief-main", typing: true });
+    now.mockReturnValue(1_000_000 + 30_000);
+    dom.fire("keydown", { type: "keydown", target: inComposer });
+    await flush();
+    expect(fixture.api).toHaveBeenCalledTimes(2);
+    now.mockReturnValue(1_000_000 + 65_000);
+    dom.fire("keydown", { type: "keydown", target: inComposer });
+    await flush();
+    expect(bodies()[2]).toMatchObject({ threadId: "chief-main", typing: true });
   });
 
   it.each([

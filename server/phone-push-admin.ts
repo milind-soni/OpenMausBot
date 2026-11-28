@@ -6,6 +6,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 
 import { PHONE_ACTIVITY_RELAY_PATH, PHONE_PUSH_RELAY_PATHS } from "../shared/phone-push.ts";
+import { cloudSignedTimestamp } from "./cloud-clock.ts";
 
 /** What a Cloud home signs with: its Admin, its machine id and its bootstrap secret (server/cloud-home.ts). */
 export interface CloudHomePushAccess {
@@ -42,7 +43,7 @@ export function cloudHomePushRequest(access: CloudHomePushAccess, path: string, 
   const action = CLOUD_HOME_PUSH_ACTIONS[path];
   if (!action) return null;
   const raw = JSON.stringify(body);
-  const timestamp = String(Math.floor(now / 1000)), nonce = randomBytes(18).toString("base64url");
+  const timestamp = cloudSignedTimestamp(now), nonce = randomBytes(18).toString("base64url");
   return {
     url: `${access.admin}${CLOUD_HOME_PUSH_ADMIN_PATH}${action}`,
     init: {

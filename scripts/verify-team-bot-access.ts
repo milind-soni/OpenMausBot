@@ -302,7 +302,7 @@ try {
     { name: "department-access-preview", who: "ada", query: "mode=simple", act: async () => {
       for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
       await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
-      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Settings for all bots")); item?.click(); return Boolean(item); })()`, "Settings for all bots");
       await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
       const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
       await pick("Everyone in Acme", "chat");
@@ -312,7 +312,7 @@ try {
     { name: "department-access-applied", who: "ada", query: "mode=simple", act: async () => {
       for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
       await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
-      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Settings for all bots")); item?.click(); return Boolean(item); })()`, "Settings for all bots");
       await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
       const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
       await pick("Everyone in Acme", "chat");

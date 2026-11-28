@@ -1,7 +1,8 @@
 // Written by scripts/gen-settings-places.ts from Settings' own index and the English catalog; edit those, then run it.
 
 /** A real place in Settings, as the person reads it in English. `advanced`: only Advanced mode shows it; `simplePath`:
- * where Simple mode shows it instead. `only`: the one kind of place or app it shows on. */
+ * where Simple mode shows it instead. `only`: the one kind of place or app it shows on. `note`: what it is and the state
+ * it depends on, said with the path. */
 export interface SettingsPlace {
   id: string;
   path: string;
@@ -9,6 +10,7 @@ export interface SettingsPlace {
   advanced?: true;
   simplePath?: string;
   only?: string;
+  note?: string;
 }
 
 export const SETTINGS_HOW_TO_OPEN = "Settings opens from the menu under the person's name at the bottom of the sidebar (or Cmd+, on a Mac, Ctrl+, elsewhere). Its first entry is named after the place (This computer, My Cloud, or the server's name).";
@@ -74,7 +76,7 @@ export const SETTINGS_PLACES = [
   {"id":"bring-in","path":"Settings → Import & export → Bring things in","words":["import","move from","bring"]},
   {"id":"backup-export","path":"Settings → Import & export → Take things out → Export full backup","words":["backup","backups","export","full backup","download"]},
   {"id":"take-out","path":"Settings → Import & export → Take things out","words":["export","backup"]},
-  {"id":"move","path":"Settings → Import & export → Move to My Cloud","words":["keep here","move back","bring back","move to cloud"],"only":"the desktop app, on this computer's own page"},
+  {"id":"move","path":"Settings → Import & export → Move to My Cloud","words":["keep here","move back","bring back","move to cloud"],"only":"the desktop app, on this computer's own page","note":"it is the switch \"Keep this computer's bots on this computer\", shown only with a My Cloud of the person's own; off, this computer's bots move there. A Team plan's Cloud is a team, not My Cloud: there is no one-step move into it, and this computer's bots stay and keep working here. To bring bots from another app into the team, switch to the team's Cloud and use its Settings → Import & export → Bring things in (Move from Grok Bot, or From your AI apps). Never suggest Import backup on a team's Cloud: it replaces everything there"},
   {"id":"storage","path":"Settings → Data → Storage","words":["attachments","clear attachments","event log","cleanup","retention"],"advanced":true},
   {"id":"activity","path":"Settings → Data → Activity","words":["activity","audit","audit log","history","who did what"],"advanced":true,"only":"MausBot in a browser"},
   {"id":"members","path":"Settings → People → Members","words":["invite","roles","admins"],"only":"a team's or a self-hosted server's Settings, for admins"},
@@ -101,6 +103,7 @@ export const SETTINGS_PLACES = [
   {"id":"layout","path":"Settings → Appearance → Layout","words":["show your computers","rail","window frame","title bar","threads","tools layout","pinned","circles","universal pins","pinned panels"],"advanced":true},
   {"id":"skill-burger-switch","path":"Settings → Features → Skill Burger","words":["skill burger","skill burgers","burger","saved runs","workflows"]},
   {"id":"thread-tabs","path":"Settings → Features → Thread tabs","words":["tabs","threads"]},
+  {"id":"suggested-replies","path":"Settings → Features → Suggested replies","words":["suggestions","autocomplete","next reply","tab"]},
   {"id":"apps","path":"the Apps panel (Connect apps, at the bottom of the sidebar)","words":["apps","gmail","slack","calendar","notion","connect app","integrations"]},
   {"id":"bot-settings","path":"a bot's own Settings (click the bot's name at the top of its chat)","words":["a bot's own settings","approvals","safety","routines","memory","bot's notifications"]},
   {"id":"shortcuts","path":"the keyboard shortcut list (the menu under the person's name → Keyboard shortcuts)","words":["keyboard shortcuts","hotkeys","cheat sheet"]},

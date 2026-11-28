@@ -74,6 +74,16 @@ function setup(options: { team?: boolean; github?: GithubConnection; fetchTempla
   return { host, dataDir, request, call, made: () => host.export({ scope: "bot", bot: helper }, []) };
 }
 
+describe("Publish over HTTP", () => {
+  it("refuses an email address or a non-name in Published by, and offers the folder where publishing isn't available", async () => {
+    const { request, made } = setup();
+    const card = made().card;
+    expect(await request(ADMIN, "POST", `/api/share/${card.id}/publish`, { author: "olive@acme.test" })).toEqual({ status: 400, body: { error: "Put a name in Published by, not an email address." } });
+    expect(await request(ADMIN, "POST", `/api/share/${card.id}/publish`, { author: 42 })).toMatchObject({ status: 400 });
+    expect(await request(ADMIN, "POST", `/api/share/${card.id}/publish`, { author: " Olive " })).toMatchObject({ status: 200, body: { id: card.id, status: "draft", fallback: "unavailable" } });
+  });
+});
+
 describe("a team's own templates", () => {
   it("an admin adds one under team-files/templates/<slug>/; adding again replaces it and keeps the old one as <slug>.previous/", async () => {
     const { request, made, dataDir } = setup();

@@ -38,11 +38,11 @@ beforeEach(() => {
 });
 
 describe("How your phone reaches this computer", () => {
-  it("with nothing paired and no way in on, folds the ways in into one row that says adding a phone turns them on", () => {
+  it("with nothing paired and no way in on, keeps its heading over one row that says they are off and adding a phone turns them on", () => {
     const html = page(true);
-    expect(html).toContain("How your phone reaches this computer");
-    expect(html).toContain("Adding a phone turns these on. You can change them here.");
-    expect(html).toContain("data-reach-fold");
+    expect(html).toMatch(/<h3[^>]*>How your phone reaches this computer<\/h3>[\s\S]*data-reach-fold/);
+    expect(html).toMatch(/data-reach-fold[^>]*>[\s\S]*Off · Adding a phone turns these on/);
+    expect(html).not.toContain("You can change them here");
     expect(html).not.toContain('data-route-row="wifi"');
     expect(html).toContain('data-settings-block="more-ways"');
   });
@@ -135,15 +135,16 @@ describe("Add a phone's steps", () => {
   const steps = (overrides: Partial<CompanionState> = {}) =>
     renderToStaticMarkup(createElement(PairPhoneSteps, { c: c(), state: state(overrides), codeView: "PAIRING_CODE_VIEW" })).replaceAll("&#x27;", "'");
 
-  it("asks how the phone will reach this computer, as two choices with Same Wi-Fi first, before anything listens", () => {
+  it("asks how the phone will reach this computer, as two ways it may pick both of, Same Wi-Fi first, before anything listens", () => {
     const html = steps();
     expect(html).toContain("How will your phone reach this computer?");
-    expect(html.match(/type="radio"/g)).toHaveLength(2);
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     const input = (route: string) => html.match(new RegExp(`<input[^>]*value="${route}"[^>]*>`))![0];
     expect(input("wifi")).toContain('checked=""');
-    expect(input("relay"), "signed out: Anywhere can't be chosen yet, and says why").toContain('disabled=""');
+    expect(input("relay"), "signed out: Anywhere can't be picked yet, and says why").toContain('disabled=""');
+    expect(input("relay")).not.toContain('checked=""');
     expect(html).toContain("Needs a free MausBot sign-in.");
-    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain('type="radio"');
     expect(html).toContain(">Turn on and show code<");
     expect(html).toContain("You can turn these off any time in Devices.");
     expect(html).not.toContain(">Cancel<");
@@ -161,6 +162,7 @@ describe("route words", () => {
     expect(routeStateText({ on: true, since: NOV_7 }, 0)).toBe("On · waiting for a paired device");
     expect(reachLine({ routes: routes() })).toBe("No way in is on yet.");
     expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your private network and anywhere through MausBot.");
+    expect(reachLine({ routes: routes({ wifi: true }) })).toBe("Reaches this computer on the same Wi-Fi.");
   });
 });
 

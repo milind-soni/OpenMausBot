@@ -193,17 +193,22 @@ function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void
   if (!names.length) return;
   const root = join(dataDir, "box-uploads");
   const dirs = (path: string) => { try { return readdirSync(path); } catch { return []; } };
+  // One listing of each folder for every name at once: a folder per conversation times a name each was minutes of work
+  // when a delete took thousands of uploads.
+  const going = new Set(names);
   for (const bot of dirs(root)) {
     for (const thread of dirs(join(root, bot))) {
-      for (const name of names) {
-        try { rmSync(join(boxUploadsDir(dataDir, bot, thread), name), { force: true }); } catch { /* best effort: a file still in use stays */ }
+      const folder = boxUploadsDir(dataDir, bot, thread);
+      for (const name of dirs(folder)) {
+        if (!going.has(name)) continue;
+        try { rmSync(join(folder, name), { force: true }); } catch { /* best effort: a file still in use stays */ }
       }
     }
   }
 }
 
-/** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
-export function deleteAttachment(path: string): void {
+/** True when the upload is gone (removed now or already); an upload still on disk (a busy file on Windows) stays. */
+function unlinkAttachment(path: string): boolean {
   try {
     const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
     unlinkSync(path);
@@ -211,13 +216,23 @@ export function deleteAttachment(path: string): void {
       committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
     }
   } catch (error) {
-    // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
   }
-  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) {
-    dropBoxUploadCopies([basename(path)]);
-    dropKeptOriginals([basename(path)]);
-  }
+  return true;
+}
+
+/** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
+export function deleteAttachment(path: string): void {
+  deleteAttachments([path]);
+}
+
+/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. A path
+ * outside the attachments folder is not ours to remove, so it is left alone before anything is unlinked. */
+export function deleteAttachments(paths: readonly string[]): void {
+  const ours = paths.filter((path) => resolve(dirname(path)) === resolve(ATTACHMENTS_DIR));
+  const gone = ours.filter((path) => unlinkAttachment(path)).map((path) => basename(path));
+  dropBoxUploadCopies(gone);
+  dropKeptOriginals(gone);
 }
 
 /** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
@@ -558,6 +573,10 @@ export async function saveFile(
  * upload (507 when it is full), written under a partial name cleanup knows, never over a file already here, and never
  * leaving a partial file behind. `stored`: false when the same file was here already. */
 export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Uint8Array>, expectedBytes?: number): Promise<{ stored: boolean }> {
+  // Security: the name arrives from another computer, and this join is the only thing between it and the data folder.
+  if (!name || name === "." || name === ".." || name !== basename(name) || name.includes("/") || name.includes("\\")) {
+    throw statusError(400, "name must be a filename, not a path");
+  }
   if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);

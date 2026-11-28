@@ -1,7 +1,8 @@
 // Settings → Devices → Always-on home: a spare computer (a Mac mini, say) as the person's own Cloud at home. On
 // that computer, one switch makes it one; on their main computer, the steps to add it and what it then does for them.
-import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Check, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/cn";
 import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { makeHome } from "@/lib/places";
@@ -100,6 +101,24 @@ function ThisComputerHome({ home, setHome, c, state, onAddPhone, onAddComputer, 
   );
 }
 
+/** The computer's own settings to check, folded under one quiet button. */
+function SystemSettings({ lines }: { lines: LocaleKey[] }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <button type="button" data-always-on-system-toggle="" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}
+        className="settings-quiet -ms-1.5 inline-flex cursor-pointer items-center gap-1">
+        {t("alwaysOn.macSettingsToCheck")}
+        <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
+      </button>
+      <ul id={id} hidden={!open} data-always-on-system="" className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
+        {lines.map((key) => <li key={key}>{t(key, { app: productName() })}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 function AlwaysOnDetails({ home, c, onAddPhone, onAddComputer, blocked }: { home: AlwaysOnHomeState; c: PhoneSetupController; onAddPhone: () => void; onAddComputer: () => void; blocked: string | null }) {
   const system = systemSettingLines(home.platform);
   return (
@@ -119,11 +138,7 @@ function AlwaysOnDetails({ home, c, onAddPhone, onAddComputer, blocked }: { home
           onClick={onAddComputer}>{t("alwaysOn.addComputer")}</button>
       </div>
       {blocked && <p role="status" className="text-[12px] leading-4 text-ink-secondary">{blocked}</p>}
-      {system.length > 0 && (
-        <ul data-always-on-system="" className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
-          {system.map((key) => <li key={key}>{t(key, { app: productName() })}</li>)}
-        </ul>
-      )}
+      {system.length > 0 && <SystemSettings lines={system} />}
     </div>
   );
 }

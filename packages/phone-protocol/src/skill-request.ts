@@ -17,6 +17,14 @@ export function skillSwitchVerb(action: SkillSwitchAction): string {
   return action === "enable" ? "turn on" : action === "disable" ? "turn off" : "delete";
 }
 
+/** One skill a Chief of Staff turns on or off for a teammate, as part of a change to several at once. */
+export interface TeammateSkillChange {
+  botId: string;
+  botName: string;
+  name: string;
+  action: "enable" | "disable";
+}
+
 /** Kept on the receipt so Undo reverts the library write and the assignments together. */
 export interface SkillShareRecord {
   /** deduplicated: identical bytes were already in the library; assigned: it already was a library skill. */
@@ -53,6 +61,10 @@ export interface SkillRequestCardData {
   previous?: { preview: string; source: string; references?: Array<{ path: string; content: string }>; enabled?: boolean };
   shared?: SkillShareRecord;
   shareError?: string;
+  /** The change is to a skill on all of the person's bots, not this bot's own. */
+  allBots?: true;
+  /** A Chief of Staff's change to its teammates' skills: every one listed is turned on or off together. */
+  teammates?: TeammateSkillChange[];
 }
 
 /** The hash a current client may echo after it displayed the complete

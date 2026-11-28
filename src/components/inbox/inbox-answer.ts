@@ -69,14 +69,6 @@ export function headlineOf(row: InboxRow): string {
   return firstLine(textOf(row)) || subjectOf(row);
 }
 
-/** The muted line under the headline when there is more to say and no choices to show. */
-export function snippetOf(row: InboxRow): string | null {
-  const text = textOf(row).replace(/\s+/g, " ").trim();
-  const headline = headlineOf(row);
-  if (!text || text === headline) return null;
-  return text.startsWith(headline) ? text.slice(headline.length).trim() || null : text;
-}
-
 /** The search box keeps a line whose sender, conversation, headline, words or choices hold every word typed. */
 export function matchesSearch(row: InboxRow, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);

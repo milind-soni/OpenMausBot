@@ -13,7 +13,7 @@ import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { Routine } from "../routines.ts";
 import { fetchGithubTemplate, GithubTemplateError } from "../share-github.ts";
 import { publishToRepo, readRepoFolder, repoFolder, repoFolderOf, repoName, type GithubConnection } from "../share-github-repo.ts";
-import { cardText, readFolderFromDisk, ShareError, type ShareHost } from "../share.ts";
+import { cardText, creditName, readFolderFromDisk, ShareError, type ShareHost } from "../share.ts";
 import type { TeamTemplates } from "../team-templates.ts";
 import { zipFolder } from "../share-zip.ts";
 import type { BotRecord, GroupRecord } from "../store.ts";
@@ -103,7 +103,7 @@ async function readLink(url: string, readers: ImportReaders): Promise<ShareFolde
 export async function readImport(source: ImportSource, readers: ImportReaders): Promise<ShareFolder> {
   if ("library" in source) {
     if (!readers.library) throw new ShareError(NO_LIBRARY, 404);
-    return readShareFolder(readers.library.files(source.library));
+    return readShareFolder(readers.library.files(source.library), source.library);
   }
   if ("url" in source) return readLink(source.url, readers);
   if ("path" in source) {
@@ -243,7 +243,11 @@ export function createShareRoutes(deps: ShareRouteDeps): RouteHandler {
         host.delete(id);
         return json(res, 200, { ok: true });
       }
-      if (method === "POST" && m[2] === "/publish") return json(res, 200, await host.publish(id));
+      if (method === "POST" && m[2] === "/publish") {
+        const author = creditName(((await readBody(req)) as { author?: unknown } | null)?.author);
+        if (author === null) return json(res, 400, { error: "Put a name in Published by, not an email address." });
+        return json(res, 200, await host.publish(id, { ...(author === undefined ? {} : { author }), names: [deps.who?.(auth)] }));
+      }
       if (method === "POST" && m[2] === "/library") {
         if (!deps.library) return json(res, 404, { error: NO_LIBRARY });
         if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the team's admins add templates to its library." });

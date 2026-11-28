@@ -44,7 +44,7 @@ describe("Pi session spawn setup", () => {
       const started = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId);
       if (started?.type !== "session.started" || !started.sessionId) throw new Error("missing session file");
       const call = spawned.mock.calls.slice(before).find(([, args]) => args.includes("--session-dir"))!;
-      expect(call[2]!.box).toEqual({ rw: [dir, expect.stringContaining("omb-pi-mcp-")] });
+      expect(call[2]!.box).toEqual({ rw: [dir, expect.stringContaining("omb-pi-mcp-")], engine: "piAgent" });
       const setup = { dataDir: DATA_DIR, home: join(DATA_DIR, ".."), codeRoots: [], engineRoots: [], bridges: [] };
       const request = { command: cli, args: call[1], env: {}, audience: { teamReadOnly: audience !== "team" } };
       expect(visibleInBox(planBox(setup, request), dir)).toBe("none");

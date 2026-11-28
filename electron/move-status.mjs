@@ -1,6 +1,8 @@
 // Where this computer's one-time move to My Cloud stands (one-home.mjs), as the Admin keeps it per sign-in: POST
-// /api/cloud/desktop/move-status, sent when it changes and every 15 minutes otherwise, so an operator can see why a move
-// hasn't finished, or never started. Ids and codes only: never a name, a path or anything the person wrote.
+// /api/cloud/desktop/move-status, sent when it changes, and otherwise every 15 minutes while a move is under way and every
+// 6 hours while none is, so an operator can see why a move hasn't finished, or never started. Ids and codes only: never a
+// name, a path or anything the person wrote.
+import { createBackoff, jittered } from "./cloud-cadence.mjs";
 import { teamPlan } from "./cloud-team-plan.mjs";
 import { FAILURE_CODES, FAILURE_PHASES, safeSentence } from "./move-failure.mjs";
 import { awayIn } from "./one-home.mjs";
@@ -14,17 +16,21 @@ export const MOVE_REASONS = Object.freeze([
   "frozen_without_move", "local_unavailable", "already_moved", "cloud_outdated", "thaw_failed", "retry_wait", "waiting_quiet", "waiting_busy",
 ]);
 export const MOVE_BUSY = Object.freeze(["bot", "room", "sign-in", "other"]);
+/** While a move is under way, the same report goes again after this long (spread ±20%). */
 export const MOVE_STATUS_HEARTBEAT_MS = 15 * 60_000;
+/** While none is (`none`, `done`, `back`: nothing changes by itself), only after this long (spread ±20%). */
+export const MOVE_STATUS_IDLE_HEARTBEAT_MS = 6 * 3_600_000;
 /** A burst of changes (a pass's phases follow each other within seconds) goes as one report. */
 export const MOVE_STATUS_SETTLE_MS = 5_000;
 /** At most one report a minute, whatever changes. */
 export const MOVE_STATUS_GAP_MS = 60_000;
-/** An Admin that doesn't take reports yet (404) is asked again after this long. */
+/** An Admin that doesn't take reports yet (404) is asked again after this long (spread ±20%). */
 export const MOVE_STATUS_OFF_MS = 6 * 3_600_000;
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const moment = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 const STARTS = new Set(["none", "back"]);
+const SETTLED = new Set(["none", "done", "back"]);
 const WAITS = new Set(["wait", "freeze"]);
 
 /** Why no move starts on this computer, in the order one-home.mjs's run asks; null once one would start. */
@@ -115,12 +121,15 @@ export function moveStatus({ journal, state, kept, facts = { noted: null, waitin
 
 /**
  * Sends `status()` to the Admin with `send` (true once recorded, false when the Admin doesn't take reports yet) for the
- * sign-in `signIn()` names: a moment after it changes, at most once a minute, and every 15 minutes while it doesn't.
- * Fire and forget: a report that fails is only logged, and nothing about the move waits for it or changes with it.
+ * sign-in `signIn()` names: a moment after it changes, at most once a minute, and while it doesn't, every 15 minutes
+ * during a move and every 6 hours otherwise. A send that fails waits longer each time (1, 2, 5, 10, then 30 minutes,
+ * never before the Admin's Retry-After), whatever changes meanwhile. Fire and forget: a report that fails is only
+ * logged, and nothing about the move waits for it or changes with it.
  */
-export function createMoveStatusReport({ status, send, signIn, now = Date.now, log = () => {},
+export function createMoveStatusReport({ status, send, signIn, now = Date.now, log = () => {}, random = Math.random,
   timers = { set: (work, ms) => { const timer = setTimeout(work, ms); timer.unref?.(); return timer; }, clear: (timer) => clearTimeout(timer) } }) {
   let timer = null, dueAt = Infinity, sent = null, triedAt = -Infinity, offUntil = -Infinity, busy = false, again = false, closed = false;
+  const failing = createBackoff({ now, random });
   const plan = (ms) => {
     if (closed) return;
     if (timer) timers.clear(timer);
@@ -137,14 +146,20 @@ export function createMoveStatusReport({ status, send, signIn, now = Date.now, l
       try { who = signIn(); body = who ? status() : null; } catch (error) { log(`one home: the move's status could not be read (${error?.message ?? error})`); }
       if (!body) return plan(MOVE_STATUS_HEARTBEAT_MS);
       const at = now(), key = JSON.stringify(body), same = sent?.key === key && sent.who === who;
-      const wait = Math.max(same ? sent.at + MOVE_STATUS_HEARTBEAT_MS - at : 0, triedAt + MOVE_STATUS_GAP_MS - at, offUntil - at);
+      const wait = Math.max(same ? sent.at + sent.every - at : 0, triedAt + MOVE_STATUS_GAP_MS - at, offUntil - at, failing.until() - at);
       if (wait > 0) return plan(wait);
       triedAt = at;
+      const every = jittered(SETTLED.has(body.phase) ? MOVE_STATUS_IDLE_HEARTBEAT_MS : MOVE_STATUS_HEARTBEAT_MS, random);
+      let next = every;
       try {
-        if (await send(body)) sent = { key, who, at };
-        else offUntil = at + MOVE_STATUS_OFF_MS;
-      } catch (error) { log(`one home: the Admin hears where the move stands later (${error?.message ?? error})`); }
-      plan(MOVE_STATUS_HEARTBEAT_MS);
+        if (await send(body)) sent = { key, who, at, every };
+        else { next = jittered(MOVE_STATUS_OFF_MS, random); offUntil = at + next; }
+        failing.ok();
+      } catch (error) {
+        next = failing.failed(error) - now();
+        log(`one home: the Admin hears where the move stands later (${error?.message ?? error})`);
+      }
+      plan(next);
     } finally {
       busy = false;
       if (again) { again = false; changed(); }

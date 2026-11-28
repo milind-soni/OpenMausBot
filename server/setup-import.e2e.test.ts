@@ -159,8 +159,11 @@ describe("bringing in another AI tool's setup through the desktop app's own serv
     const told = await turn(later, "Review it");
     expect(told.system).not.toContain("review-pr");
     expect(told.linked(".agents", "review-pr")).toBeNull();
-    // There is one copy for all bots: nothing here deletes it.
-    expect((await api("DELETE", `/api/bots/${later.id}/skills/review-pr`)).status).toBe(404);
+    // Removing it here leaves the one shared copy, and every other bot, alone; switching it on here brings it back.
+    const removed = await api("DELETE", `/api/bots/${later.id}/skills/review-pr`);
+    expect(removed.status).toBe(200);
+    expect(JSON.parse(removed.text)).toEqual({ ok: true, scope: "bot", sourceFilesTouched: false });
+    expect(await enabled(later.id)).toEqual({ "release-notes": true });
     expect((await api("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
     expect(await enabled(starter.id)).toEqual({ "release-notes": true, "review-pr": true });
     expect((await api("PATCH", `/api/bots/${later.id}/skills/review-pr`, { enabled: true })).status).toBe(200);

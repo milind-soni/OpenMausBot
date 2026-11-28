@@ -12,7 +12,7 @@ import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
-import { MOTION_BEAT_MS } from "./mascot-beat";
+import { MOTION_FACE, useBeatState } from "./mascot-beat";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, mascotMaterialSchema, type BotAvatarCrop, type MascotFaceColor, type MascotMaterial } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
@@ -27,26 +27,6 @@ export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
 
 const POINTER_GAZE = { forward: 1, authored: 0.25 };
-
-interface MotionFaces
-  extends Partial<
-    Record<Exclude<MausMotion, "none">, { state?: MausState; blink?: boolean; spin?: number }>
-  > {}
-
-const MOTION_FACE: MotionFaces = {
-  arrive: { state: "spawning", spin: 900 },
-  switch: { state: "waking", spin: 620 },
-  customize: { state: "proud", blink: true },
-  alert: { state: "alerting" },
-  thinking: { state: "thinking" },
-  working: { state: "working" },
-  launch: { state: "loading" },
-  success: { state: "happy", blink: true },
-  celebrate: { state: "celebrate", spin: 700 },
-  blink: { blink: true },
-  surprise: { state: "surprised", blink: true },
-  failure: { state: "sad" },
-};
 
 function mix(hex: string, toward: string, t: number): string {
   const a = Number.parseInt(hex.slice(1), 16);
@@ -108,7 +88,7 @@ export type MausAvatarProps = {
   faceColor?: MascotFaceColor | null;
   /** A custom `#rrggbb` body colour; it wins over `color` for the body only. */
   bodyColor?: string | null;
-  /** Fluffy fur on a body the engine draws (the shapes and objects); the cursor and festival bodies stay flat. */
+  /** The finish (matte, metallic or fluffy fur) of a body the engine draws (the shapes and objects); the cursor and festival bodies stay flat. */
   material?: MascotMaterial | null;
   /** Whose face this is; a decorative mascot has none. */
   kind?: AvatarKind;
@@ -194,18 +174,12 @@ function GradientAvatarComponent(
     setExpression: (index: number) => inner.current?.setExpression(index),
   }));
 
-  const [motionState, setMotionState] = useState<MausState | null>(null);
+  const motionState = useBeatState(motion, motionKey, animated);
   useEffect(() => {
-    // A beat's face ends with it: a caller that stops animating mid-beat leaves the bot's own state, not the beat's.
-    if (motion === "none" || animated === false) return setMotionState(null);
+    if (motion === "none" || animated === false) return;
     const beat = MOTION_FACE[motion];
-    if (!beat) return;
-    if (beat.blink) inner.current?.blink();
-    if (beat.spin) inner.current?.spin(beat.spin);
-    if (!beat.state) return;
-    setMotionState(beat.state);
-    const timer = setTimeout(() => setMotionState(null), MOTION_BEAT_MS);
-    return () => clearTimeout(timer);
+    if (beat?.blink) inner.current?.blink();
+    if (beat?.spin) inner.current?.spin(beat.spin);
   }, [motion, motionKey, animated]);
 
   const live = animated ?? (ACTIVE_STATES.has(state) || motionState !== null);

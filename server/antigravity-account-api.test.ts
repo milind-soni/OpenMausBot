@@ -113,6 +113,22 @@ it("adds independent accounts, switches a bot between their models, and preserve
   expect(bots.body.bots.find((bot: any) => bot.id === created.body.bot.id).modelSelection).toMatchObject({ instanceId: ids[1], model: "gemini-fixture" });
 }, 40_000);
 
+it("renames the original and an added Antigravity account", async () => {
+  const created = await api("POST", "/api/instances/antigravity-accounts", { displayName: "Rename me", sourceInstanceId: "google-original" });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const id = created.body.instanceId as string;
+  for (const [target, name] of [[id, "Client work"], ["google-original", "Personal"]]) {
+    const renamed = await api("PATCH", `/api/instances/${target}`, { displayName: name });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+    expect(renamed.body.instances.find((row: { instanceId: string }) => row.instanceId === target).displayName).toBe(name);
+  }
+  expect((await api("PATCH", `/api/instances/${id}`, { configDir: "/elsewhere" })).status).toBe(400);
+  const saved = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+  expect(saved.instances[id]).toMatchObject({ displayName: "Client work", config: { cli } });
+  expect(saved.instances["google-original"].displayName).toBe("Personal");
+  expect(saved.instances[id]).not.toHaveProperty("configDir");
+});
+
 it("removes an unused added account but never the original Antigravity account", async () => {
   const created = await api("POST", "/api/instances/antigravity-accounts", { displayName: "Remove me", sourceInstanceId: "google-original" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);

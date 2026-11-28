@@ -53,7 +53,7 @@ export function settleAsk(run: RoutineRun, event: Resolved | undefined, now: num
   if (!ask || (event && ask.requestId && event.requestId && event.requestId !== ask.requestId)) return null;
   run.waitedMs = (run.waitedMs ?? 0) + Math.max(0, now - ask.since);
   delete run.asked;
-  return ask.approval && event?.source === "timeout" ? `Stopped: nobody answered the approval ${ask.subject}` : null;
+  return ask.approval && event?.source === "timeout" ? `Stopped: nobody answered the approval ${ask.subject}${event.heldReason ? ` (${event.heldReason})` : ""}` : null;
 }
 
 /** Time the run has worked: waiting on the person never counts toward its limit. */

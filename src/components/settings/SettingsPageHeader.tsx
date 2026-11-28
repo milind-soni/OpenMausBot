@@ -57,18 +57,21 @@ export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: Setti
   );
 }
 
-export function SettingsPageHeader({ page, ctx, place, narrow, missing, peek = false, sub = null }: {
+export function SettingsPageHeader({ page, ctx, place, narrow, missing, peek = false, sub = null, action = null }: {
   page: SettingsPage; ctx: SettingsContext; place: SettingsPlace; narrow: boolean; missing?: string;
   /** a page only Advanced lists, opened whole from Simple */
   peek?: boolean;
   /** A step inside the page: its title in the page's place, with the way back above it. */
   sub?: SettingsSub | null;
+  /** The page's one action: on the title's line, or beside the scope line where the window's own header holds the title. */
+  action?: ReactNode;
 }) {
   // A browser has no updates of its own, so its This app intro leaves them out.
   const intro = page.id !== "app" ? INTRO[page.id]
     : !ctx.desktop ? ctx.advanced ? "settings.app.introBrowserAdvanced" : "settings.app.introBrowser"
     : ctx.advanced ? INTRO.app : "settings.app.introSimple";
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
+  const shownAction = action && !sub ? <span data-settings-header-action="" className={cn("ms-auto flex shrink-0 items-center", !narrow && "pe-4")}>{action}</span> : null;
   return (
     // No fill and not sticky: on a glass skin any opaque fill reads as a white block over the sheet.
     <header data-settings-header="" className={cn("flex flex-col gap-1 pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4")}>
@@ -79,13 +82,16 @@ export function SettingsPageHeader({ page, ctx, place, narrow, missing, peek = f
         </button>
       )}
       {!narrow && (
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 id="settings-page-title" className="truncate text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{sub?.title ?? title}</h2>
+        <div className="flex h-6 min-w-0 items-center gap-2">
+          <h2 id="settings-page-title" className="min-w-0 truncate text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{sub?.title ?? title}</h2>
           {peek && <AdvancedSettingTag />}
+          {shownAction}
         </div>
       )}
       {narrow && peek && <div className="flex"><AdvancedSettingTag /></div>}
-      <ScopeLine page={page} ctx={ctx} place={place} />
+      {narrow && shownAction
+        ? <div className="flex min-w-0 items-center gap-3"><ScopeLine page={page} ctx={ctx} place={place} />{shownAction}</div>
+        : <ScopeLine page={page} ctx={ctx} place={place} />}
       {intro && <p data-settings-intro={intro} className="text-[13px] leading-[18px] text-ink-secondary">{t(intro, { place: place.name, app: productName() })}</p>}
       {missing && <p role="status" className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.missingHere", { page: missing, place: place.name })}</p>}
     </header>

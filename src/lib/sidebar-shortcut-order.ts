@@ -1,12 +1,14 @@
 /**
  * The bots that ⌘1…⌘9 and ⌘⇧[ / ⌘⇧] step through, in the order the sidebar shows them. Sections, a custom bot
  * order, collapsed sections, pinned tiles and a search all change that order, so it is read from the rendered rows
- * instead of being rebuilt from `state.bots`.
+ * instead of being rebuilt from `state.bots`. With the one list on, rows of the other place (keyed `place:id`,
+ * src/lib/place-rows.ts) are not numbered: ⌘1…⌘9 and ⌘⇧[ / ⌘⇧] go through this page's own bots, in the order shown,
+ * and never take the window to another place or wake My Cloud. A click on such a row opens it there.
  */
 export function shownBotIds(root: ParentNode | null | undefined): string[] {
   if (!root) return [];
   const ids = [...root.querySelectorAll<HTMLElement>("[data-sidebar-bot-row]")].map((row) => row.dataset.sidebarBotRow ?? "");
-  return [...new Set(ids.filter(Boolean))];
+  return [...new Set(ids.filter((id) => id && !id.includes(":")))];
 }
 
 /** `bots` in the sidebar's order; with no sidebar on screen, `bots` as they are. */

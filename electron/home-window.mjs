@@ -8,8 +8,10 @@
 // signed-out app (its automations would run twice). The page that counts as home is the main window's main frame at the
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
+import { REFRESH_MS } from "./cloud-cadence.mjs";
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
+import { cloudOperationAt, createOperationOutages, OPERATION_FRESH_MS, OPERATION_REFRESH_MS } from "./cloud-operation.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
 import { createPairWait, nameNotFound } from "./home-pairing.mjs";
@@ -255,6 +257,9 @@ export function createHomeWindow(deps) {
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
   let asked = null, naming = null;
   const clock = createReadyClock({ store: readyStore, now });
+  /** Each place's outage while this computer's screen says what has it down: it ends by itself past its hard end
+   * (cloud-operation.mjs `operationEndsAt`), and starts over once the place answers. */
+  const outages = createOperationOutages(now);
   /** The place the window was last sent to (My Cloud, or a team's Cloud), and the one being opened now. */
   let shown = null, opening = null, renewal = null, updatingAt = null;
   /** The window shows a place or this computer's screen, which this computer's page replaces once home is here again. */
@@ -357,12 +362,26 @@ export function createHomeWindow(deps) {
     goScreen();
   }
 
+  /** The operation the Admin says has the place being opened down now (an update, its rollback, a resize, a move, a restore or
+   * a start: cloud-operation.mjs), else null; null too past its outage's hard end, whatever the Admin says then. */
+  const operationNow = () => { const origin = otherPlace(opening) ? opening.origin : cloudOrigin(); return origin ? outages.shown(origin, cloudOperationAt(state(), origin)) : null; };
+  /** While an operation of the Admin's own has the place down, this computer's screen says what it is, never "can't be
+   * reached" or a plan problem, and looks again by itself (the session is read every OPERATION_REFRESH_MS meanwhile). True
+   * when it showed that screen. */
+  function working(token) {
+    const operation = operationNow();
+    if (!operation || !wanted(token)) return false;
+    toScreen({ screen: "working", operation });
+    later(RETRY_MS, undefined, OPERATION_REFRESH_MS);
+    return true;
+  }
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself.
    * `unreached`: My Cloud's address, named once its page has kept failing to connect from here (home-pairing.mjs) while the
    * Admin knows of nothing wrong. `held`: the origin whose next code waits: the screen looks again when that wait ends,
    * and says when for the Admin's own 429. */
   function offline(token, unreached = null, held = null) {
     if (!wanted(token)) return;
+    if (working(token)) return;
     const cause = otherPlace(opening) ? null : cloudUnreachableCause(state(), cloudOrigin());
     const host = !cause && unreached && !otherPlace(opening) ? waits.unreachedHost(unreached) : null;
     const until = held ? waits.until(held) : null, retryAt = held && waits.limited(held) ? until : null;
@@ -488,6 +507,9 @@ export function createHomeWindow(deps) {
     // My Cloud the session's list says isn't running: its own screen, never its address, and nothing to look again for.
     const listed = place.kind === "cloud" ? cloudScreen(myListed()) : null;
     if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
+    // A Cloud the Admin is starting again (a resume) reads as its setup otherwise: say what it is. Never a failed one: it keeps
+    // its own screen and its Try again.
+    if (machine?.operation && machine.status === "provisioning" && !machine.hold && working(token)) return;
     if (machine && (PLAN_PROBLEMS.has(machine.status) || (place.kind === "team" && machine.hold))) {
       toScreen(planScreen(PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped", place)); later(); return;
     }
@@ -505,6 +527,7 @@ export function createHomeWindow(deps) {
         if (naming) await forgetNames();
         const look = await answers(origin);
         waits.looked(origin, look);
+        if (look === "yes") outages.clear(origin);
         if (look === "no" || look === "failing") return unreachable(place, token);
         if (look === "asleep" && otherPlace(place)) return offline(token);
         if (look === "asleep") { power.hold(); asleep = true; if (wanted(token)) say("waking"); }
@@ -538,6 +561,7 @@ export function createHomeWindow(deps) {
         new Promise((done) => { slow = timers.set(() => done(false), OPEN_MS); })]);
       timers.clear(slow);
       if (!loaded) { log(`home: ${otherPlace(place) ? place.name : "My Cloud"} didn't load in ${OPEN_MS / 1000} s`); return offline(token); }
+      outages.clear(origin);
       if (place.kind === "cloud") { clearRenewal(); power.woke(); }
       else if (place.kind === "team") renewLater(place, grant || !session?.expiresAt ? TEAM_RENEW_MS : session.expiresAt - now() - TEAM_RENEW_EARLY_MS);
       else clearRenewal();
@@ -744,8 +768,12 @@ export function createHomeWindow(deps) {
     /** The place the window was last sent to: My Cloud, or a team's or another own Cloud (`{ kind: "team" | "own", id, name, origin }`). */
     shown: () => shown,
     /** The screen asked again (as it opens, back online, or the window focused); `pressed`: the person pressed Try again, which
-     * no wait holds except the Admin's own 429. */
-    retry: ({ pressed = false } = {}) => { if (pressed) waits.pressed(); return show(); },
+     * no wait holds except the Admin's own 429, and which also reads the session when its last read began a minute ago. */
+    async retry({ pressed = false } = {}) {
+      // The screen is drawn at once; a session read that was due draws it again when it lands, however long it takes.
+      if (pressed) { waits.pressed(); const reading = account()?.freshen?.(); if (reading) void Promise.resolve(reading).then(() => show(), () => {}).catch(() => {}); }
+      return show();
+    },
     /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
      * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
      * good only looks again. */
@@ -833,6 +861,20 @@ export function createHomeWindow(deps) {
     },
     /** `event` came from the shown place's own page in this window (My Cloud's while it is home, or a team's Cloud's). */
     homePage,
+    /** The operation the Admin says has the place on screen down now (cloud-operation.mjs), with a team's or other Cloud's
+     * `name`, else null: its own page asks while its live stream is down (backing off by itself), so it can say "Updating My
+     * Cloud" instead of "unable to connect"; the page keeps its own hard end. The session is read again first when the last
+     * read is OPERATION_FRESH_MS old or more (the Admin is the one that knows; the place doesn't answer); while the Admin itself
+     * is failing, only once its last read began a minute ago (cloud-account.mjs `failingUntil`, `lastAttemptAt`). */
+    async operation() {
+      const origin = placeOrigin(), current = state();
+      if (!origin || current?.status !== "connected") return null;
+      const client = account(), failing = Number(client?.failingUntil?.() ?? 0);
+      const tried = Number(client?.lastAttemptAt?.() ?? 0);
+      if (!(now() - (current.verifiedAt ?? 0) < OPERATION_FRESH_MS) && (!(failing > now()) || now() - tried >= REFRESH_MS)) await Promise.resolve(client?.refresh?.()).catch(() => {});
+      const operation = cloudOperationAt(state(), origin), name = otherPlace(shown) && shown.origin === origin ? shown.name : null;
+      return operation ? { ...operation, ...(name ? { name } : {}) } : null;
+    },
     updating(event) {
       if (!homePage(event)) return false;
       const reloaded = updatingAt !== null && now() - updatingAt < UPDATING_MS;
@@ -868,6 +910,7 @@ export function installHomeWindowIpc({ ipcMain, homeWindow, cloudPage }) {
   ipcMain.handle("home:remove", from("home:remove", screenPage, () => homeWindow.remove()));
   ipcMain.handle("home:sign-in", from("home:sign-in", (event) => screenPage(event) || cloudPage(event) === "cloud" || (homeWindow.homePage(event) && homeWindow.shown()?.kind === "own"), () => homeWindow.signIn()));
   ipcMain.handle("home:repair", from("home:repair", (event) => homeWindow.homePage(event), () => homeWindow.repair()));
+  ipcMain.handle("home:operation", from("home:operation", (event) => homeWindow.homePage(event), () => homeWindow.operation()));
   ipcMain.on("home:page", (event) => { try { event.returnValue = homeWindow.homePage(event); } catch { event.returnValue = false; } });
   ipcMain.on("home:updating", (event) => { try { event.returnValue = homeWindow.updating(event); } catch { event.returnValue = false; } });
 }

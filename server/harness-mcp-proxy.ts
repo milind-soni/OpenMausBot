@@ -4,13 +4,16 @@ import { pathToFileURL } from "node:url";
 import { failure, harnessMcpRequest, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES, parseHarnessMcpKind, type HarnessMcpKind, type RpcId } from "./harness-mcp-request.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import { toolLimitFromEnv } from "./tool-count-limit.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
+import { textOnlyToolsFromEnv } from "./mcp-text-only.ts";
 
 export { harnessMcpRequest } from "./harness-mcp-request.ts";
 
 const MAX_PENDING = 16;
 
 function run(kind: HarnessMcpKind): void {
-  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env[harnessMcpTokenEnv(kind)] ?? "", kind, toolLimit: toolLimitFromEnv() };
+  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env[harnessMcpTokenEnv(kind)] ?? "", kind, toolLimit: toolLimitFromEnv(),
+    schemaProfile: process.env[TOOL_SCHEMA_PROFILE_ENV], textOnly: textOnlyToolsFromEnv() };
   let input = Buffer.alloc(0);
   let pending = 0;
   const output = (message: unknown) => {

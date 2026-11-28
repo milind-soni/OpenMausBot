@@ -196,7 +196,7 @@ describe("the panel's top", () => {
     expect(top.map((button) => button.getAttribute("aria-label") ?? button.getAttribute("title"))).toEqual(["Share", "Bot settings", "Close settings"]);
     for (const button of [moreButton()!, top[1]!, top[2]!]) expect(button.querySelector("span, svg")).not.toBeNull();
     click(moreButton());
-    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["as-template", "copy", "download"]);
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["publish", "copy", "download"]);
     press(moreButton(), "Escape");
     click(top[2]!);
     expect(onClose).toHaveBeenCalledOnce();
@@ -312,10 +312,10 @@ describe("Escape in the bot panel", () => {
     back?.focus();
     const event = press(back, "Escape");
     expect(event.defaultPrevented).toBe(true);
-    expect([tab(), page()]).toEqual(["library", null]);
+    expect([tab(), page()]).toEqual(["details", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
     // On a tab, Escape is the dialog's: it closes the panel.
-    press(host.querySelector('[data-panel-tab="library"]'), "Escape");
+    press(host.querySelector('[data-panel-tab="details"]'), "Escape");
     expect(dialogCloses).toHaveBeenCalledTimes(1);
   });
 
@@ -340,7 +340,7 @@ describe("Escape in the bot panel", () => {
     expect(menu()).toBeNull();
     expect(page()).toBe("skills");
     press(moreButton(), "Escape");
-    expect([tab(), page()]).toEqual(["library", null]);
+    expect([tab(), page()]).toEqual(["details", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
   });
 });

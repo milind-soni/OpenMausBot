@@ -2,6 +2,7 @@ import { Check, FileText, Globe, Monitor, Signpost, Sparkles, Terminal, Users, X
 import { useEffect, useId, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 
 import { appMeta, BARE_READ } from "../../../shared/skill-burger/apps";
+import { composedFor } from "../../../shared/skill-burger/draft-view";
 import type { BurgerLayer } from "../../../shared/skill-burger/layers";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -136,7 +137,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
   };
 
   const toggleLabel = folded ? t("skillBurger.expand") : t("skillBurger.collapse");
-  const stepCount = draft ? draft.steps.filter((step) => !step.id.endsWith("_write") || !draft.steps.some((other) => `${other.id}_write` === step.id)).length : layers.length;
+  const stepCount = draft ? draft.steps.filter((step) => !draft.steps.some((other) => other.id === composedFor(step.id))).length : layers.length;
   const count = [stepCount === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: stepCount }), draft && !saved ? replayLine(draft.steps, skipped) : ""].filter(Boolean).join(" · ");
   const cooking = busy || live;
   const failed = !cooking && layers.some((layer) => layer.status === "failed");

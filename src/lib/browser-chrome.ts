@@ -1,7 +1,7 @@
 /** Safari on iPhone paints its bottom bar from the root scheme and from
  * theme-color. The skin lives in --color-app; the bar has to be told. */
 
-const SURFACE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3}){1,2}$/;
+const SURFACE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
 
 type ThemeColorMeta = {
   getAttribute(name: string): string | null;

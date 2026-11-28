@@ -2,7 +2,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { bridgedCallTarget } from "./drivers/agents-bridge.ts";
@@ -14,8 +13,11 @@ import { fitToolList } from "./mcp-tool-schema.ts";
 import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { descendantsOf, signalTree, stopTree, type TreeProcess } from "./proc-descendants.ts";
 import { killCliTree } from "./procs.ts";
+import { readStdioLines } from "./stdio-lines.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsListResultForSessionShare } from "./tool-list-share.ts";
+import { textOnlyToolsFromEnv, withoutResultImages } from "./mcp-text-only.ts";
 
 type Json = Record<string, unknown>;
 
@@ -47,6 +49,8 @@ const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
+/** Read from the process env, so the plain (non --config-env) mounts an ACP engine spawns carry it. */
+const TEXT_ONLY_TOOLS = textOnlyToolsFromEnv(process.env);
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -224,6 +228,9 @@ if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
 const childEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.env };
 for (const key of Object.keys(childEnv)) if (key.startsWith("OMB_GATE_")) delete childEnv[key];
+// The gate fits and records the list; a relay behind it doing so too would record the fitted list as the full one.
+delete childEnv[TOOL_LIST_SHARE_ENV];
+delete childEnv[TOOL_LIST_RECORD_ENV];
 
 // CreateProcess cannot exec an npm .cmd shim or a node-shebang script, and a shell would re-interpret JSON argv.
 const resolved = resolveCliSpawn(spec.command, spec.args ?? []);
@@ -288,7 +295,7 @@ function callTarget(name: string, args: unknown): string | undefined {
 /** JSON-RPC string and numeric IDs are separate, even when their text is equal. */
 const pending = new Map<string, Pending>();
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+readStdioLines(process.stdin, (line) => {
   let message: Json | undefined;
   if (line.trim()) {
     try {
@@ -353,7 +360,7 @@ process.stdin.on("end", () => {
   setTimeout(() => leave(0), END_OF_INPUT_GRACE_MS);
 });
 
-createInterface({ input: child.stdout }).on("line", (line) => {
+readStdioLines(child.stdout, (line) => {
   if (!line.trim()) return;
   let message: Json | undefined;
   try {
@@ -410,7 +417,13 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
     message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
+  if (request?.kind === "list" && message.error === undefined) {
+    message.result = toolsListResultForSessionShare(message.result, process.env, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
+  }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
+  if (TEXT_ONLY_TOOLS && request?.kind === "call" && message.error === undefined && isRecord(result) && withoutResultImages(result)) {
+    process.stderr.write(`mcp-gate(${NAME}): replaced an image in ${request.tool}'s result with a note: this model reads text only\n`);
+  }
   if (request?.kind === "call" && request.trim && isRecord(result)) {
     try {
       if (trimCallResult(result, request.tool)) {

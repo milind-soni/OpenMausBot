@@ -2,7 +2,7 @@ import { t } from "@/lib/i18n";
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
-import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError } from "../../../shared/app-frame/bridge";
+import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError, type PageRpcMethod } from "../../../shared/app-frame/bridge";
 import { randomUuid } from "@/lib/random-uuid";
 
 export function appDocumentPath(threadId: string, messageId: string): string {
@@ -84,7 +84,7 @@ export async function callAppRpc(args: {
   botId: string;
   threadId: string;
   messageId: string;
-  method: AppRpcMethod;
+  method: AppRpcMethod | PageRpcMethod;
   params: Record<string, unknown>;
 }): Promise<AppRpcOutcome> {
   try {

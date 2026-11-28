@@ -43,6 +43,30 @@ const hostName = (link: string): string | null => {
   try { return new URL(link).hostname.split(".")[0] || null; } catch { return null; }
 };
 
+/** The address and code to type on the other computer, folded under the link. */
+function TypeInstead({ address, code, expiresAt }: { address: string; code: string; expiresAt: number }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div data-pair-type-instead={open ? "open" : "closed"} className="flex flex-col items-start gap-2">
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}
+        className="settings-quiet -ms-1.5 inline-flex cursor-pointer items-center gap-1">
+        {t("devicesPage.addFlow.typeInstead")}
+        <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
+      </button>
+      <div id={id} hidden={!open} className="w-full rounded-lg bg-ink/[0.03] px-3 py-2.5">
+        <span className="flex flex-wrap gap-x-6 gap-y-2">
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[12px] leading-4 text-ink-tertiary">{t("connect.address")}</span>
+            <span data-pairing-address="" className="select-text break-all font-mono text-[13px] leading-6 text-ink">{address}</span>
+          </span>
+          <TypedCode label={t("connect.code")} code={code} expiresAt={expiresAt} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Who is asking here and whether this place makes pairing codes at all (an organization's Admin may sign people in
  * instead); null while unread. */
 export function usePairAccess(): { session: SessionState | null; pairingCodes: boolean | null } {
@@ -76,8 +100,6 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
   const { session, pairingCodes } = usePairAccess();
   const [scope, setScope] = useState<Scope>("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
-  const [typing, setTyping] = useState(false);
-  const typedId = useId();
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -182,32 +204,17 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
   return (
     <div className="flex flex-col gap-3" data-pair-panel={kind}>
       <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerPasteOther", { app: productName() })}</p>
-      {link && (
-        <div className="flex flex-col items-start gap-1.5">
-          <button type="button" onClick={copy} data-copy-link="" data-pair-link={link.link} className="ui-button ui-button-primary">
-            {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
-          </button>
-          {address && hostName(link.link) && <span className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.addFlow.linkOpens", { host: hostName(link.link)! })}</span>}
-        </div>
-      )}
-      <Waiting connected={connected} />
-      {link && <div data-pair-type-instead="" data-open={typing ? "" : undefined} className="flex flex-col text-[12px] leading-4 text-ink-secondary">
-        <button type="button" aria-expanded={typing} aria-controls={typedId} onClick={() => setTyping(!typing)}
-          className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-sm hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-          <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", typing && "rotate-90")} />
-          {t("devicesPage.addFlow.typeInstead")}
+      {link && <>
+        <button type="button" onClick={copy} data-copy-link="" data-pair-link={link.link} className="ui-button ui-button-primary w-fit">
+          {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
         </button>
-        <div id={typedId} hidden={!typing}>
-          <div className="mt-2 flex flex-col gap-2">
-            <span className="flex flex-col gap-0.5">
-              <span className="text-ink-tertiary">{t("connect.address")}</span>
-              <span data-pairing-address="" className="select-text break-all text-[13px] leading-[18px] text-ink">{link.address}</span>
-            </span>
-            <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />
-          </div>
-        </div>
-      </div>}
+        <p data-pair-send-link="" className="text-[13px] leading-[18px] text-ink-secondary">
+          {address && hostName(link.link) && <>{t("devicesPage.addFlow.linkOpens", { host: hostName(link.link)! })}{" "}</>}{t("devicesPage.addFlow.sendLinkOther")}
+        </p>
+        <TypeInstead address={link.address} code={offer.code} expiresAt={offer.expiresAt} />
+      </>}
       {!link && <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />}
+      <Waiting connected={connected} />
     </div>
   );
 }

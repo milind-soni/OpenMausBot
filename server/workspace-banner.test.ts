@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { BANNER_MAX_BYTES, BANNER_REFUSALS, bannerMime, checkBanner } from "./workspace-banner.ts";
+import { BANNER_MAX_BYTES, BANNER_REFUSALS, bannerMime, checkBanner, withoutPictureMetadata } from "./workspace-banner.ts";
 
 /** Small pictures a real encoder made, each carrying a camera make and model, a colour profile and text (EXIF, ICC, and a
  * comment or XMP or text chunks). */
@@ -45,6 +45,22 @@ describe("a workspace's banner picture, as the server keeps it", () => {
     const webp = kept(WEBP_WITH_METADATA).bytes;
     expect(webp.readUInt32LE(4) + 8).toBe(webp.length);
     expect(has(webp, "VP8")).toBe(true);
+  });
+
+  it("a template's picture keeps its colour profile and loses EXIF, GPS, XMP, text and anything after its end", () => {
+    const profiles = [[JPEG_WITH_METADATA, "ICC_PROFILE"], [WEBP_WITH_METADATA, "ICCP"], [PNG_WITH_METADATA, "iCCP"]] as const;
+    for (const [sample, profile] of profiles) {
+      const clean = withoutPictureMetadata(Buffer.concat([sample, Buffer.from("TRAILING GPS 37.7749,-122.4194", "latin1")]))!;
+      expect(has(clean, profile), profile).toBe(true);
+      for (const word of ["Secret", "Exif", "EXIF", "XMP", "tEXt", "iTXt", "eXIf", "GPS", "TRAILING"]) expect(has(clean, word), `${profile}: ${word}`).toBe(false);
+    }
+    const webp = withoutPictureMetadata(WEBP_WITH_METADATA)!;
+    expect(webp.readUInt32LE(4) + 8).toBe(webp.length);
+    expect(webp[20]! & 0x20).toBe(0x20);
+    // The banner still loses its profile.
+    for (const [sample, profile] of profiles) expect(has(kept(sample).bytes, profile)).toBe(false);
+    expect(withoutPictureMetadata(Buffer.from("<svg/>"))).toBeNull();
+    expect(withoutPictureMetadata(JPEG_WITH_METADATA.subarray(0, 40))).toBeNull();
   });
 
   it("anything but a PNG, JPEG or WebP is refused in plain words, and so is one too big, too wide, moving or broken", () => {

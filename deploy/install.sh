@@ -6,6 +6,11 @@
 #   ... | sudo sh -s -- --check --domain maus.example.com    only checks the server; changes nothing
 #   ... | sudo sh -s -- --uninstall                          stops the server; keeps your data
 #   ... | sudo sh -s -- --domain maus.example.com <code>     also connects the server to MausBot with a one-time code
+#   ... | sudo OMB_LICENSE_KEY="$(cat licence.txt)" sh -s -- --domain maus.example.com   also gives it its licence (kept in .env)
+#
+# A licence can also be put in later: the server reads license.key in its data folder (and OMB_LICENSE_KEY), checks the
+# file once a minute and takes a newer licence without a restart. From a file, so the licence stays out of your history:
+#   cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt
 #
 # Nothing runs until the last line calls main, so a download that is cut off part-way runs nothing. It sends no
 # telemetry. The addresses it contacts are the ones the checks name: the image registries, Let's Encrypt, GitHub's
@@ -44,6 +49,7 @@ settings() {
   DOMAIN=""
   EMAIL=""
   CODE=""
+  LICENSE_KEY="${OMB_LICENSE_KEY:-}"
   INSTALL_DOCKER="${OMB_INSTALL_DOCKER:-}"
   SANDBOX=yes
   FAILED=0
@@ -82,6 +88,8 @@ usage() {
   say "  --dir PATH         where the install lives (default /opt/openmausbot)"
   say "  --no-sandbox       do not prepare this server for the bots' sandbox (only for a server you alone sign in to)"
   say "  <code>             the one-time code MausBot shows, to also connect this server to MausBot"
+  say ""
+  say "  A licence goes in as OMB_LICENSE_KEY after sudo: ... | sudo OMB_LICENSE_KEY=\"\$(cat licence.txt)\" sh -s -- --domain ..."
 }
 
 parse() {
@@ -127,6 +135,12 @@ parse() {
   esac
   case "$CODE" in
     *[!A-Za-z0-9-]*) fail "That code doesn't look right. Copy the install command from MausBot again." ;;
+  esac
+  case "$LICENSE_KEY" in
+    "") ;;
+    *[!A-Za-z0-9._-]*) fail "OMB_LICENSE_KEY doesn't look like a MausBot licence. Copy it again: it is one line starting with omb1." ;;
+    omb1.?*.?*) ;;
+    *) fail "OMB_LICENSE_KEY doesn't look like a MausBot licence. Copy it again: it is one line starting with omb1." ;;
   esac
   case "$INSTALL_DIR" in
     /?*) ;;
@@ -681,6 +695,8 @@ services:
       OMB_SIGNIN_SMTP_FROM:
       # "1": phones pair by QR through MausBot Relay. Sign in once: docker compose exec omb openmausbot login --relay
       OMB_PHONE_RELAY:
+      # The licence, when .env sets it. A license.key in the data folder is read first, and again while the server runs.
+      OMB_LICENSE_KEY:
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
       interval: 30s
@@ -770,6 +786,7 @@ ENV
   fi
   set_env DOMAIN "$DOMAIN"
   set_env OMB_IMAGE "$IMAGE"
+  if [ -n "$LICENSE_KEY" ]; then set_env OMB_LICENSE_KEY "$LICENSE_KEY"; fi
   if [ -n "$EMAIL" ]; then
     current=$(env_value OMB_SIGNIN_EMAILS)
     case ",$(printf '%s' "$current" | tr -d ' ')," in
@@ -1100,8 +1117,24 @@ run_install() {
   fi
   if [ "$DOCKER_STATE" = missing ]; then offer_docker; fi
   install_server
+  report_licence
   if [ -n "$CODE" ]; then connect_server; fi
   finish
+}
+
+# When a licence was given, whether the server took it, in one line from its own edition notice. Never the licence:
+# the notice names what is wrong with a key, not the key, and a line that held it anyway is not printed.
+report_licence() {
+  [ -n "$LICENSE_KEY" ] || return 0
+  edition=$(compose exec -T omb curl -sf http://127.0.0.1:8799/api/edition 2>/dev/null || true)
+  case "$edition" in
+    *'"edition":"enterprise"'*) ok "The licence was accepted." ;;
+    *'"notice":"'*)
+      reason=$(printf '%s' "$edition" | tr -d '\r\n' | sed -n 's/.*"notice":"\([^"]*\)".*/\1/p' | cut -c1-300)
+      case "$reason" in *"$LICENSE_KEY"*) reason="see: cd $INSTALL_DIR && sudo docker compose logs omb" ;; esac
+      note "The licence was not accepted: $reason"
+      ;;
+  esac
 }
 
 run_check() {

@@ -12,7 +12,7 @@ describe("collapsed sidebar attention", () => {
       [{ unread: true }, { busyBotId: "writer" }],
     );
 
-    expect(attention).toEqual({ unread: 2, waiting: 1, working: 2 });
+    expect(attention).toEqual({ unread: 2, waiting: 1, working: 2, needsYou: 2 });
     expect(sidebarAttentionLabel(attention)).toBe(
       "1 waiting for you, 2 unread, 2 working",
     );
@@ -21,6 +21,14 @@ describe("collapsed sidebar attention", () => {
   it("does not count a waiting bot twice as working", () => {
     expect(
       sidebarSectionAttention([{ busy: true, activity: "waiting-on-you" }], []),
-    ).toEqual({ unread: 0, waiting: 1, working: 0 });
+    ).toEqual({ unread: 0, waiting: 1, working: 0, needsYou: 1 });
+  });
+
+  it("counts each row that needs the person once, though a waiting bot is unread too", () => {
+    const attention = sidebarSectionAttention(
+      [{ unread: true, activity: "waiting-on-you" }, { unread: true }, { unread: true }, { activity: "waiting-on-you" }, { busy: true }],
+      [{ unread: true }],
+    );
+    expect(attention).toMatchObject({ unread: 4, waiting: 2, needsYou: 5 });
   });
 });

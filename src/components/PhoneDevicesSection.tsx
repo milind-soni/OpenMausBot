@@ -53,6 +53,8 @@ export function deriveTailscalePairingStatus(
   if (state.tailscaleProblem === "needs-permission") return { kind: "signed-out", title: t("remote.tailscale.needsPermission", { app: productName() }), detail: "" };
   if (state.tailscaleProblem === "needs-approval") return { kind: "signed-out", title: t("remote.tailscale.needsApproval"), detail: "" };
   if (state.tailscaleProblem === "signed-out") return { kind: "signed-out", title: t("remote.tailscale.signIn"), detail: "" };
+  if (state.tailscaleProblem === "custom-name") return { kind: "magicdns", title: t("remote.tailscale.customName"), detail: t("remote.tailscale.customNameDetail") };
+  if (state.tailscaleProblem === "magicdns") return { kind: "magicdns", title: t("remote.tailscale.magicDns"), detail: t("remote.tailscale.magicDnsDetail") };
   if (state.error) return { kind: "error", title: t("remote.status.attention"), detail: state.error };
   const route = state.routes?.tailscale;
   if (!route?.on) return { kind: "off", title: t("remote.status.off"), detail: "" };
@@ -212,13 +214,14 @@ function RouteRow({ c, state, route, blocked, onSignIn }: { c: PhoneSetupControl
 
 export type PairStep = "consent" | "sign-in" | "pairing";
 type PairRoute = "wifi" | "relay";
+const PAIR_ROUTES: readonly PairRoute[] = ["wifi", "relay"];
 
 /** A short line keeps compound words such as "End-to-end" whole: its hyphens never break a line. */
 const keepWhole = (text: string) => text.replace(/(\p{L})-(?=\p{L})/gu, "$1\u2011");
 
-/** One route to choose, as a radio card: the name, a line, and what it still needs. A selected card has a 1 px ink edge. */
+/** One way in to pick, as a checkbox row: the name, a line, and what it still needs. Rows after the first part with a hairline. */
 function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
-  route: PairRoute; chosen: boolean; disabled?: boolean; onChoose: () => void; needs?: ReactNode;
+  route: PairRoute; chosen: boolean; disabled?: boolean; onChoose: (on: boolean) => void; needs?: ReactNode;
   /** under the needs line, at the text's edge: Sign in */
   action?: ReactNode;
   /** a note for this way only, under its line (the local network permission) */
@@ -226,10 +229,10 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
 }) {
   return (
     <div data-route-card={route} data-chosen={chosen ? "" : undefined}
-      className={cn("flex flex-col gap-1 rounded-[12px] bg-menu px-4 py-3", chosen ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
+      className="flex flex-col gap-1 py-3 [&+&]:shadow-[inset_0_0.5px_0_var(--settings-edge)]">
       <label className={cn("flex items-start gap-3", disabled ? "cursor-default" : "cursor-pointer")}>
-        <input type="radio" name="pair-route" value={route} checked={chosen} disabled={disabled} onChange={onChoose}
-          className="rounded-full mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
+        <input type="checkbox" name="pair-route" value={route} checked={chosen} disabled={disabled} onChange={(event) => onChoose(event.target.checked)}
+          className="mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("text-[14px] leading-5", disabled ? "text-ink-secondary" : "text-ink")}>{t(ROUTE_TEXT[route].name, { app: productName() })}</span>
           {/* One measure for the card's text: the line wraps like the hint under it (no early "pretty" wrap). */}
@@ -257,7 +260,13 @@ export type PairAsk = "https" | "sign-in" | null;
 export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSetupController; state: CompanionState; ask?: PairAsk; codeView: ReactNode }) {
   const signedIn = c.account?.status === "ready";
   const relayAvailable = c.account?.available !== false;
-  const [picked, setPicked] = useState<PairRoute>(signedIn && relayAvailable ? "relay" : "wifi");
+  const [picked, setPicked] = useState<ReadonlySet<PairRoute>>(() => new Set([signedIn && relayAvailable ? "relay" : "wifi"]));
+  const pick = (route: PairRoute, on: boolean) => setPicked((now) => {
+    const next = new Set(now);
+    if (on) next.add(route); else next.delete(route);
+    return next;
+  });
+  const ways = PAIR_ROUTES.filter((route) => picked.has(route) && (route !== "relay" || (signedIn && relayAvailable)));
   const [step, setStep] = useState<PairStep>(() => (ask === "sign-in" && !signedIn ? "sign-in" : firstPairStep(state, ask === "https")));
   const { start } = c;
   const startAsked = useRef(ask === "https" || (ask === "sign-in" && !signedIn));
@@ -270,7 +279,7 @@ export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSet
   const signingIn = useRef(false);
   useEffect(() => {
     if (step !== "sign-in") return;
-    if (signedIn) { setPicked("relay"); setStep("consent"); return; }
+    if (signedIn) { setPicked((now) => new Set([...now, "relay"])); setStep("consent"); return; }
     if (c.phase === "sign-in") signingIn.current = true;
     else if (signingIn.current) { signingIn.current = false; setStep("consent"); }
   }, [step, signedIn, c.phase]);
@@ -285,20 +294,20 @@ export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSet
     return () => { mounted.current = false; window.setTimeout(() => { if (!mounted.current && opened.current) cancel.current(); }, 0); };
   }, []);
   const begin = async () => {
-    if (!await c.act((bridge) => setRoute(bridge, picked, true))) return;
+    for (const route of ways) if (!await c.act((bridge) => setRoute(bridge, route, true))) return;
     setStep("pairing");
     c.useLocal();
   };
-  const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
+  const localHint = picked.has("wifi") && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
   if (step === "sign-in") return <PhoneSetupFlowView controller={c} />;
   if (step === "pairing") return <>{codeView}</>;
   return <>
     <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
-    <div role="radiogroup" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
-      <RouteCard route="wifi" chosen={picked === "wifi"} onChoose={() => setPicked("wifi")}
+    <div role="group" aria-label={t("phone.pair.howReach")} className="-my-3 flex flex-col">
+      <RouteCard route="wifi" chosen={picked.has("wifi")} onChoose={(on) => pick("wifi", on)}
         hint={localHint ? <span data-local-network-hint="">{t("phone.pair.localNetworkHint", { app: productName() })}</span> : undefined} />
       {relayAvailable && (
-        <RouteCard route="relay" chosen={picked === "relay"} disabled={!signedIn} onChoose={() => setPicked("relay")}
+        <RouteCard route="relay" chosen={signedIn && picked.has("relay")} disabled={!signedIn} onChoose={(on) => pick("relay", on)}
           needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}
           action={!signedIn && (
             <button type="button" className="ui-button ui-button-md mt-1 rounded-full" data-pair-sign-in=""
@@ -309,7 +318,7 @@ export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSet
     <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footHere")}</p>
     {c.error && <p role="alert" className="text-[12px] leading-4 text-danger">{c.error}</p>}
     <div className="flex gap-2">
-      <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
+      <button type="button" disabled={c.busy || ways.length === 0} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
     </div>
   </>;
 }
@@ -330,11 +339,11 @@ export function OpenCodeRow({ c, state }: { c: PhoneSetupController; state: Comp
   );
 }
 
-/** "Reaches this computer on Same Wi-Fi and anywhere through MausBot." */
+/** "Reaches this computer on the same Wi-Fi and anywhere through MausBot." */
 export function reachLine(state: Pick<CompanionState, "routes">): string {
   const on = (route: CompanionRoute) => state.routes?.[route]?.on === true;
   const ways = [
-    on("wifi") && t("devices.reach.wifi"),
+    on("wifi") && t("devices.reach.sameWifi"),
     on("tailscale") && t("devices.reach.privateNetwork"),
     on("https") && t("devices.reach.https", { app: productName() }),
     on("relay") && t("devices.reach.relay", { app: productName() }),
@@ -360,9 +369,9 @@ export function ReachSection({ c, state, simple, moreWaysAsked, managedBy, onPai
   const httpsShown = (!simple || httpsOn || httpsPeek) && showHttpsAddressRow(state, c.account, companionBridge());
   if (!(showRoutes || state.devices.length > 0 || anyRoute || moreWaysAsked)) {
     return (
-      <SettingsGroup block="reach" footnote={t("phone.reach.footAdding")}>
+      <SettingsGroup label={t("phone.reach.title")} block="reach">
         <SettingsRows>
-          <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
+          <SettingsLinkRow title={t("phone.reach.offAdding")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
         </SettingsRows>
         <span data-settings-block="more-ways" className="contents" />
       </SettingsGroup>

@@ -12,6 +12,7 @@ export function RenameTitle({
   onEditingChange,
   onActivate,
   showEditButton = false,
+  editable = true,
   editRequest = 0,
   title,
   className,
@@ -23,6 +24,8 @@ export function RenameTitle({
   onEditingChange?: (editing: boolean) => void;
   onActivate?: () => void;
   showEditButton?: boolean;
+  /** False: the name is shown and opens `onActivate`, with no way to rename it here (a My Cloud bot open in place). */
+  editable?: boolean;
   editRequest?: number;
   title?: string;
   className?: string;
@@ -45,7 +48,7 @@ export function RenameTitle({
   useEffect(() => {
     if (editRequest === handledRequest.current) return;
     handledRequest.current = editRequest;
-    if (editRequest === 0) return;
+    if (editRequest === 0 || !editable) return;
     setDraft(value);
     setMode(true);
   }, [editRequest]);
@@ -108,7 +111,7 @@ export function RenameTitle({
         ) : (
           <span className={cn("min-w-0 truncate", className)}>{value}</span>
         )}
-        <button
+        {editable && <button
           type="button"
           onClick={startRename}
           aria-label={t("rename.named", { name: value })}
@@ -116,7 +119,7 @@ export function RenameTitle({
           className={cn("flex size-10 shrink-0 items-center justify-center rounded text-ink-secondary opacity-70 hover:bg-raised hover:text-ink hover:opacity-100", editButtonClassName)}
         >
           <Pencil size={12} />
-        </button>
+        </button>}
       </span>
     );
   }

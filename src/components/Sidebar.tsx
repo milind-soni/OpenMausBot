@@ -8,6 +8,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
 import { openBotRow } from "@/state/thread-navigation";
+import { openRoomRow } from "@/lib/last-room-thread";
 
 import { BotAvatar } from "./Avatar"; import { useMotionBeat } from "./mascot-beat";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
@@ -28,7 +29,7 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
-import { ImportDialog, ShareDepartmentDialog, TeamDialog, TeamLibraryPanel, TeamSettingsDialog } from "./lazy-screens";
+import { ImportDialog, ShareTemplateDialog, TeamDialog, TeamLibraryPanel, TeamSettingsDialog } from "./lazy-screens";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
 import { openCommandPalette } from "./CommandPalette";
 import { RenameTitle } from "./RenameTitle";
@@ -63,7 +64,7 @@ import { stepKey, type BotDropPlace } from "@/lib/sidebar-bot-drop";
 import { BotDropLine, botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
 import { useSidebarRoomDrag } from "./SidebarRoomDrag";
 import { useSidebarSections } from "./SidebarSections";
-import { departmentNames, moveBotsToSection } from "./bot-sections";
+import { departmentNames, moveBotsToSection, useDepartmentOrder } from "./bot-sections";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { SidebarFooter } from "./SidebarFooter";
@@ -73,7 +74,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
-import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceBots, OwnBotHomeMark } from "./OtherPlaceBots"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
+import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import { openPlacedMenu, PlacedBotMenuHost, PlacedRowActions } from "./PlacedBotMenu"; import { isPlaceId } from "@/lib/place-chat"; import { useOneList } from "./one-list-sidebar"; const NO_SECTIONS: string[] = []; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { TeamMenuItems } from "./SidebarTeamMenu";
@@ -85,8 +86,8 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread, useUnreadHold } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { useBotUnread } from "./unread-notice";
+import { attentionHasRunningWork, attentionJump, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -98,10 +99,10 @@ import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useAdvancedMode } from "@/lib/interface-mode";
+import { useAdvancedMode } from "@/lib/interface-mode"; import { useRoomFeed } from "./room-feed/use-room-feed"; import { feedPreview, roomFeedShows } from "@/lib/room-feed";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
-import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
+import { archiveBotWithNotice, onArchiveNotice, type ArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmProps, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows } from "./MoveToTeam"; import { MovedToMyCloudRow } from "./MoveToMyCloud";
 import { NewRoomPanel } from "./SidebarNewRoomPanel";
 import { SectionPicker } from "./SidebarSectionPicker";
@@ -137,19 +138,16 @@ export function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: str
   onMenu({ botId, x: event.clientX, y: event.clientY });
 }
 
-export const GroupListItem = memo(function GroupListItem({
-  group,
-  density,
-  query = "",
-  onMenu,
-}: {
+export const GroupListItem = memo(function GroupListItem({ group, viewerEmail, density, query = "", onMenu }: {
   group: Group;
+  viewerEmail?: string | null;
   density: SidebarDensity;
   query?: string;
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
-  const dispatch = useStoreDispatch(), bots = useStoreSelector((s) => s.bots, sameDrawnBots), instances = useStoreSelector((s) => s.instances);
-  const advanced = useAdvancedMode();
+  const store = useStoreRef(), { dispatch } = store;
+  const bots = useStoreSelector((s) => s.bots, sameDrawnBots), instances = useStoreSelector((s) => s.instances);
+  const advanced = useAdvancedMode(), feed = useRoomFeed(group);
   const selected = useStoreSelector((s) => s.activeView === "chat" && s.selectedId === group.id);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`group:${group.id}`, query ?? "", searchMatchesThreads(query ?? "", group.tasks), selected);
   const wasSelected = useRef(selected);
@@ -157,7 +155,7 @@ export const GroupListItem = memo(function GroupListItem({
     if (selected && !wasSelected.current) setThreadsOpen(true);
     wasSelected.current = selected;
   }, [selected]);
-  const hasThreadList = (group.tasks?.length ?? 1) > 1 || Boolean(query);
+  const hasThreadList = !feed && ((group.tasks?.length ?? 1) > 1 || Boolean(query));
   const expanded = !group.dm && threadsOpen && density !== "icons" && hasThreadList;
   const simpleRow = !advanced && density === "comfortable";
   const railTile = !advanced && density === "icons";
@@ -172,7 +170,7 @@ export const GroupListItem = memo(function GroupListItem({
     <button
       data-sidebar-group-row={group.id}
       aria-current={selected && !expanded ? "page" : undefined}
-      onClick={() => dispatch({ type: "select", id: group.id })}
+      onClick={() => openRoomRow(dispatch, group, store.state(), viewerEmail)}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
@@ -202,7 +200,7 @@ export const GroupListItem = memo(function GroupListItem({
           {simpleRow && !expanded && group.unread && <RowDot />}
         </div>
         {!expanded && <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || groupPreview(group, bots, instances, advanced)}</span>
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || (feed && feedPreview(group)) || groupPreview(group, bots, instances, advanced)}</span>
           {!simpleRow && group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
         {simpleRow && <RowStatusText unread={group.unread} />}
@@ -215,7 +213,7 @@ export const GroupListItem = memo(function GroupListItem({
       onClick={() => setThreadsOpen((open) => !open)} className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">
       <ChevronRight aria-hidden="true" size={12} className={cn("transition-transform", expanded && "rotate-90")} />
     </button>}
-    {!group.dm && density !== "icons" && <button type="button" disabled={roomBusy} aria-label={t("task.newShort")} title={t(roomBusy ? "task.newBusy" : "task.newShort")}
+    {!group.dm && density !== "icons" && <button type="button" disabled={roomBusy && !feed} aria-label={t("task.newShort")} title={t(roomBusy && !feed ? "task.newBusy" : "task.newShort")}
       onClick={() => { setThreadsOpen(true); dispatch({ type: "newGroupTask", groupId: group.id }); }}
       className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink disabled:opacity-40 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70 touch:disabled:opacity-40"><Plus size={16} /></button>}
     </div>
@@ -663,14 +661,14 @@ export interface BotRowProps {
   renameRequest?: number;
   botDrag?: BotRowDrag;
   botDrop?: BotDropPlace | null;
-  botDragging?: boolean;
+  botDragging?: boolean; /** With the one list on: this page's place, for each row's device mark (place-rows.ts). */ placeHere?: BotHome | null;
 }
 
 export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config" | "newChat">>(
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
-  layout: Pick<BotRowProps, "density" | "query" | "onMenu" | "renameRequest" | "botDrag" | "botDrop" | "botDragging">,
+  layout: Pick<BotRowProps, "density" | "query" | "onMenu" | "renameRequest" | "botDrag" | "botDrop" | "botDragging" | "placeHere">,
 ): BotRowProps {
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const reveal = state.revealThread;
@@ -700,12 +698,12 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, query, dispatch, onMenu, renameRequest, botDrag: drag, botDrop: drop, botDragging: dragging } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
-  const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
+  const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true, placed = isPlacedBot(bot);
   const [renaming, setRenaming] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
   useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
-  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
+  const hasThreadList = !placed && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query));
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
@@ -730,7 +728,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
   const { unread, noticing } = useBotUnread(bot); const beat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0);
-  const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
+  const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall), placeMark = rowPlaceMark(bot, working, props.placeHere);
   const body = (
     <>
       <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
@@ -743,7 +741,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           animated={beat || working || noticing}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
-        {(iconOnly || !simpleList) && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}
+        {(iconOnly || !simpleList) && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}{iconOnly && placed && <BotPlaceBadge mark={placeMark} />}
         {simpleRow && <AvatarActivityDot activity={working ? "working" : failed ? "failed" : teammateWait ? "teammate" : queued && !waiting ? "queued" : null} />}
         {!simpleRow && working && (
           <span
@@ -776,7 +774,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7")}>
           <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", "text-[14px] font-medium leading-5")}>
             {!simpleList && bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
-            <RenameTitle
+            {placed ? <span className="truncate" title={tooltip}>{bot.name}</span> : <RenameTitle
               key={iconOnly ? "icons" : "expanded"}
               value={bot.name}
               editRequest={renameRequest}
@@ -793,7 +791,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               onEditingChange={setRenaming}
               className="truncate"
               inputClassName={cn("w-full rounded bg-inset px-1 py-0.5", "text-[14px] font-medium")}
-            />
+            />}
             {!simpleList && bot.chiefOfStaff && !renaming && (
               <Crown size={13} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
                 <title>{t("sidebar.bot.chiefOfStaff")}</title>
@@ -804,7 +802,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
                 <title>{t("call.live.badge")}</title>
               </Phone>
             )}
-            {!renaming && <OwnBotHomeMark />}{!simpleList && title && !renaming && <SidebarBotRole role={title} />}
+            {!renaming && <BotPlaceMark mark={placeMark} />}{!simpleList && title && !renaming && <SidebarBotRole role={title} />}
           </span>
           {last && !renaming && !expanded && (
             <span className={cn(
@@ -829,7 +827,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               {working ? (
                 <SidebarWorkingStep bot={bot} last={last} />
               ) : (
-                <FadeLine>{waiting ? waitingHandoffPreview(visible) ?? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued && !failed ? t("task.queued") : failed ? lastLine(bot, visible, instances, advanced) : botPreview(bot, visible, instances, advanced)}</FadeLine>
+                <FadeLine>{waiting ? waitingHandoffPreview(visible) ?? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued && !failed ? t("task.queued") : failed ? lastLine(bot, visible, instances, advanced) : placed ? placedLine(bot, advanced) : botPreview(bot, visible, instances, advanced)}</FadeLine>
               )}
             </span>
           )}
@@ -863,7 +861,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           !renaming && iconOnly
             ? deleting
               ? t("sidebar.bot.deletingAria", { name: bot.name })
-              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : failed ? ` · ${t("sidebar.preview.failed")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
+              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : failed ? ` · ${t("sidebar.preview.failed")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}${placeMark ? ` · ${placeMark.label}` : ""}`
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
@@ -894,7 +892,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       {!renaming && iconOnly && unread && (
         <span className={cn("pointer-events-none absolute size-2 rounded-full border border-panel bg-accent", railTile ? "right-1 top-1" : "bottom-1.5 right-1.5")} />
       )}
-      {!renaming && !deleting && !iconOnly && <>
+      {!renaming && !deleting && !iconOnly && !placed && <>
         {showThreads && <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => { setThreadsOpen(true); dispatch({ type: "newTask", botId: bot.id }); }}
           className="pointer-events-none absolute right-[3.75rem] top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70"><Plus size={16} /></button>}
         {showThreads && <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
@@ -902,7 +900,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
           className={cn("absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink", simpleRow ? "end-[3px] top-1.5 size-6 translate-y-0 rounded-lg" : "right-1",
             selected && !simpleRow ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70")}><MoreHorizontal size={16} /></button>
-      </>}{!renaming && !deleting && simpleRow && <ThreadFoldChevron bot={bot} dispatch={dispatch} />}
+      </>}{!renaming && !deleting && simpleRow && !placed && <ThreadFoldChevron bot={bot} dispatch={dispatch} />}{placed && !iconOnly && <PlacedRowActions bot={bot} selected={selected} simpleRow={simpleRow} />}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
@@ -974,11 +972,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [importUrl, setImportUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
-  const [teamFeedback, setTeamFeedback] = useState<{
-    error: boolean;
-    text: string;
-    restoreBot?: { id: string; name: string };
-  } | null>(null);
+  const [teamFeedback, setTeamFeedback] = useState<ArchiveNotice | null>(null);
   const [query, setQuery] = useState("");
   const storedDensity = useSidebarDensity();
   const density = collapseToIcons ? "icons" : storedDensity;
@@ -1077,12 +1071,12 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     : undefined;
 
   const q = query.trim().toLowerCase();
-  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef });
+  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef, departments: useDepartmentOrder(state.sections, dispatch) });
   const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, onNamed: sections.focusHeader, onRenamed: sections.renamed,
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
   const sideLists = useTeamSideLists(state), matchingBots = sideLists.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !isPlaceId(b.id)) // a My Cloud bot open in place is drawn as its own row of the one list
     .filter(
       (b) =>
         !q ||
@@ -1093,19 +1087,18 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail();
-  const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), oneList = useOneList(matchingBots, placed, state.sections ?? NO_SECTIONS, dispatch, state.hydrated === true);
+  const parts = partitionSidebarBots(botDrag.preview(oneList?.bots ?? matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
-  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order of the
-  // rows left in place; a row Unread lists is in neither.
-  const floats = (bot: Bot) => { const { waiting, working } = sidebarBotStatus(bot, state.pendingQueued); return waiting || working; };
+  // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
+  // as a move to the top or into an Unread list. Only a pin, a drag, Alt+Up/Down or a move to a department moves a row.
+  const floats = () => false;
   const { primary, unsectionedChief } = saved;
-  const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, floats, !q,
-    useUnreadHold(state.activeView === "chat" ? state.selectedId : null, sideLists.bots, state.newChat?.botId));
+  const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, floats, false);
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
-  const sectionNames = sectionsInUse([...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
-  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: inPlace.unsectionedBots, sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
+  const sectionNames = sectionsInUse([...(oneList?.sections ?? state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: inPlace.unsectionedBots, sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats, route: oneList?.route });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
@@ -1122,14 +1115,14 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
-  const pendingBotUndo = teamFeedback?.restoreBot;
-  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
+  const restoreBot = teamFeedback?.restoreBot, pendingUndo = teamFeedback?.undo ?? (restoreBot ? () => void undoBotArchive(restoreBot) : undefined);
+  const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot, dispatch), bot, { density, query: q, onMenu: openPlacedMenu, placeHere, ...drops.row(bot.id) }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const railSearch = () => {
     if (collapseToIcons) return openCommandPalette();
     setSearchOpen(true);
     toggleCollapsed();
   };
-  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, newBotHere = useNewBotHereLabel();
+  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, plusRoom = state.activeView === "chat" ? state.groups.find((candidate) => candidate.id === state.selectedId && !candidate.dm) : undefined, plusRoomBusy = Boolean(plusRoom && !roomFeedShows(state.config, plusRoom) && (plusRoom.busyBotId || plusRoom.working)), newBotHere = useNewBotHereLabel();
   const plusControl = (
     <div ref={plusMenuRef} className="contents">
     <button
@@ -1162,7 +1155,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             <MessageSquarePlus size={16} className="text-ink-secondary" />
             {t("sidebar.newChat.title")}
           </button>}
-          {!advanced && plusBot && <><button role="menuitem" className={plusItem} onClick={() => { setPlusOpen(false); dispatch({ type: "newTask", botId: plusBot.id }); }}><SquarePen size={16} className="shrink-0 text-ink-secondary" /><span className="min-w-0 truncate" title={plusBot.name}>{t("sidebar.newConversationWith", { name: plusBot.name })}</span></button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}
+          {!advanced && plusBot && <><button role="menuitem" className={plusItem} onClick={() => { setPlusOpen(false); dispatch({ type: "newTask", botId: plusBot.id }); }}><SquarePen size={16} className="shrink-0 text-ink-secondary" /><span className="min-w-0 truncate" title={plusBot.name}>{t("sidebar.newConversationWith", { name: plusBot.name })}</span></button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}{plusRoom && <><button role="menuitem" data-plus-room-thread={plusRoom.id} disabled={plusRoomBusy} title={plusRoomBusy ? t("task.newBusy") : undefined} className={cn(plusItem, "disabled:opacity-40")} onClick={() => { setPlusOpen(false); dispatch({ type: "newGroupTask", groupId: plusRoom.id }); }}><SquarePen size={16} className="shrink-0 text-ink-secondary" /><span className="min-w-0 truncate" title={plusRoom.name}>{t("sidebar.newThreadIn", { name: plusRoom.name })}</span></button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}
           {(teamSettingsAllowed !== false || state.config?.team) && <button
             onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
             role="menuitem"
@@ -1241,7 +1234,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       )}
     >
       <GlassScrollFrame className="flex-1" fade><PlaceTint />
-      <GlassBar edge="top">
+      <GlassBar edge="top" className="z-20">
       <div
         data-sidebar-top-row={corner ? "corner" : simpleDesk ? "simple" : true}
         className={cn(
@@ -1334,7 +1327,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         <SidebarAttentionPanel
           entries={attention}
           onUnpin={() => setAttentionPinned(false)}
-          onJump={(entry) => dispatch(attentionJumpAction(entry))}
+          onJump={(entry) => attentionJump(dispatch, entry, state)}
           collapsed={sectionCollapsed(ATTENTION_SECTION_ID)}
           onToggle={layoutInteractive ? () => toggleSection(ATTENTION_SECTION_ID) : undefined}
         />
@@ -1349,7 +1342,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : simpleDesk ? "px-3" : "px-2"}>
         <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5 pb-2", !tiles && "pt-2") : advanced ? "gap-0.5" : "gap-1 pb-2 pt-2")}>
-          {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
+          {matchingBots.length === 0 && visibleGroups.length === 0 && !placed.length && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
           {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
@@ -1361,7 +1354,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             </div>
           ))}
           {sectionIds.map((id, index) => {
-            const sectionName = userSectionName(id);
+            const sectionName = userSectionName(id), editable = oneList?.mirror ? null : sectionName;
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)
               : [];
@@ -1409,20 +1402,20 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
                     line={simple} reserveMenu={simple && !remoteClient}
-                    onMenu={simple && !remoteClient && sectionName ? (button) => {
+                    onMenu={simple && !remoteClient && editable ? (button) => {
                       const rect = button.getBoundingClientRect();
-                      openTeamMenu(sectionName, rect.right - 256, rect.bottom + 4, button);
+                      openTeamMenu(editable, rect.right - 256, rect.bottom + 4, button);
                     } : undefined}
                     menuOpen={teamMenu !== null && teamMenu.name === sectionName}
-                    onContextMenu={!remoteClient && layoutInteractive && sectionName ? (event) => {
+                    onContextMenu={!remoteClient && layoutInteractive && editable ? (event) => {
                       event.preventDefault();
-                      openTeamMenu(sectionName, event.clientX, event.clientY, event.currentTarget.querySelector<HTMLElement>("button") ?? event.currentTarget);
+                      openTeamMenu(editable, event.clientX, event.clientY, event.currentTarget.querySelector<HTMLElement>("button") ?? event.currentTarget);
                     } : undefined}
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
                     {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
-                    onDelete={!simple && !remoteClient && sectionName ? () => setDeletingTeam(sectionName) : undefined} onShare={!simple && !remoteClient && sectionName ? () => setShareTeam(sectionName) : undefined}
+                    onDelete={!simple && !remoteClient && editable ? () => setDeletingTeam(editable) : undefined} onShare={!simple && !remoteClient && editable && !oneList?.virtual(editable) ? () => setShareTeam(editable) : undefined}
                   />
                 )}
                 {collapsed && queued.length > 0 && <button type="button" onClick={() => toggleSection(id)}
@@ -1436,6 +1429,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                       <GroupListItem
                         key={group.id}
                         group={group}
+                        viewerEmail={viewerEmail}
                         density={density}
                         query={q}
                         onMenu={setRoomMenu}
@@ -1450,8 +1444,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                         listItem={BotListItem}
                       />
                     ) : sectionBotItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
-                    {!remoteClient && sectionName && layoutInteractive && !drops.naming(sectionName) && (!simple || sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0) && (
-                      <button onClick={() => setMoveToTeam(sectionName)} aria-label={t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBotsIn" : "team.addBotsTo", { name: sectionName })}
+                    {!remoteClient && editable && layoutInteractive && !drops.naming(sectionName) && (!simple || sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0) && (
+                      <button onClick={() => void (oneList?.realize(editable) ?? Promise.resolve()).then(() => setMoveToTeam(editable), () => {})} aria-label={t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBotsIn" : "team.addBotsTo", { name: editable })}
                         className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
                         <Plus size={13} /> {t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBots" : "team.addBots")}
                       </button>
@@ -1462,7 +1456,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               </div>
             );
           })}
-          <OtherPlaceBots query={query} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          <OtherPlaceLine query={query} icons={density === "icons"} /><PlacedBotMenuHost /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}
@@ -1514,7 +1508,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         onCancel={cancelConfirm} returnFocusRef={sidebarRef} />
       <OwnerPickerHost />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
-      {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={sections.renamed} onClose={() => setRenameTeam(null)} />}
+      {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={(from, to) => { oneList?.renamed(from, to); sections.renamed(from, to); }} onClose={() => setRenameTeam(null)} />}
       {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
         <div role="menu" aria-label={teamMotion.value.name} style={{ left: teamMotion.value.x, top: teamMotion.value.y }}
           className={cn("absolute w-[256px] text-ink", MENU_SHEET, teamMotion.className)} {...teamMotion.exitProps}
@@ -1523,11 +1517,13 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             navigateThreadMenu(event);
           }}>
           <TeamMenuItems
-            department={teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); setMoveToTeam(teamMotion.value!.name); }}
-            onRename={() => { closeTeamMenu(); (advanced ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
-            onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
+            department={oneList?.virtual(teamMotion.value!.name) ? undefined : teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); const name = teamMotion.value!.name; void (oneList?.realize(name) ?? Promise.resolve()).then(() => setMoveToTeam(name), () => {}); }}
+            onMoveUp={phone && sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(-1); } : undefined}
+            onMoveDown={phone && sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(1); } : undefined}
+            onRename={() => { closeTeamMenu(); (advanced && !oneList?.virtual(teamMotion.value!.name) ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
+            onShare={oneList?.virtual(teamMotion.value!.name) ? undefined : () => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
-            onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
+            onSetForAll={teamSettingsAllowed === true && !oneList?.virtual(teamMotion.value!.name) ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
           />
         </div>
       </div>, document.body)}
@@ -1539,13 +1535,13 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           if (!name || teamDeleteRunning.current) return;
           teamDeleteRunning.current = true;
           setTeamDeletePending(true);
-          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+          const remove = () => api<{ sections: string[] }>(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" }); void (oneList ? oneList.deleteDepartment(name, remove) : remove())
             .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); setDeletingTeam(null); })
             .catch(cause => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }))
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
-      {shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}
+      {shareTeam !== null && <ShareTemplateDialog target={{ department: shareTeam }} onClose={() => setShareTeam(null)} />}
       {teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}
       <SectionPicker
           current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
@@ -1640,9 +1636,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           >
             <div className="flex items-center gap-3">
               <span>{teamFeedback.text}</span>
-              {pendingBotUndo && (
+              {pendingUndo && (
                 <button
-                  onClick={() => void undoBotArchive(pendingBotUndo)}
+                  onClick={() => { setTeamFeedback(null); void pendingUndo(); }}
                   className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised"
                 >
                   {t("common.undo")}

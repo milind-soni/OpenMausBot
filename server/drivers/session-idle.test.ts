@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
-  armedIdleCount, armIdleClose, engineIdleMs, idleEngineCap, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES,
+  armedIdleCount, armIdleClose, engineIdleMs, idleEngineCap, idleEnginesAllowed, keepWarm, OPENED_PRESTART_IDLE_MS, PRESTART_ENGINE_BYTES, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES,
   SMALL_BOX_IDLE_ENGINES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
   UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine, EXPENSIVE_IDLE_MS, EXPENSIVE_UNWATCHED_IDLE_MS, roomBesideIdle,
 } from "./session-idle.ts";
@@ -288,12 +288,28 @@ describe("the cap on idle engines", () => {
     expect(warmEngineKeys()).toEqual(["theirs", "routine"]);
   });
 
-  it("keeps an engine started ahead of a first message as the most recent, and never closes a held one", () => {
+  it("never lets an engine started ahead of a message close a used one, nor closes a held one: past the cap it closes itself", () => {
     const [used, held, spare] = [engine("used"), engine("held"), engine("spare")];
     capped(1)("held", { ...held.warm, held: () => true });
     capped(1)("used", used.warm);
     capped(1)("spare", { ...spare.warm, spare: () => true });
-    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([1, 0, 0]);
+    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([0, 0, 1]);
+    expect(warmEngineKeys()).toEqual(["used"]);
+  });
+
+  it("closes engines started ahead of a message first, even one in front of the person, when a used engine goes idle past the cap", () => {
+    const [unwatched, spare, older, next] = [engine("unwatched"), engine("spare"), engine("older-spare"), engine("next")];
+    sawThread("spare");
+    capped(3)("unwatched", unwatched.warm);
+    capped(3)("older-spare", { ...older.warm, spare: () => true });
+    capped(3)("spare", { ...spare.warm, spare: () => true });
+    capped(3)("next", next.warm);
+    expect([unwatched.state.closed, older.state.closed, spare.state.closed, next.state.closed]).toEqual([0, 1, 0, 0]);
+    // A waiting engine past the cap closes an older waiting one before itself, and never a used one.
+    const another = engine("another-spare");
+    capped(3)("another-spare", { ...another.warm, spare: () => true });
+    expect([unwatched.state.closed, spare.state.closed, next.state.closed, another.state.closed]).toEqual([0, 1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["unwatched", "next", "another-spare"]);
   });
 });
 
@@ -305,14 +321,35 @@ describe("engines started before a first message", () => {
   afterEach(() => { for (const key of warmEngineKeys()) stopIdleClose(key, null); });
 
   it("are for hosts where memory is not rationed: none on a small box, none where turns wait for room", () => {
-    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false })).toBe(true);
-    expect(prestartAllowed({ bytes: SMALL_BOX_BYTES }, { enabled: false })).toBe(false);
-    expect(prestartAllowed({ bytes: GB }, { enabled: false })).toBe(false);
-    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: true })).toBe(false);
+    const roomy = () => 8 * GB;
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, roomy, undefined)).toBe(true);
+    expect(prestartAllowed({ bytes: SMALL_BOX_BYTES }, { enabled: false }, roomy, undefined)).toBe(false);
+    expect(prestartAllowed({ bytes: GB }, { enabled: false }, roomy, undefined)).toBe(false);
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: true }, roomy, undefined)).toBe(false);
   });
 
-  it("wait no longer than an engine nobody is looking at is kept, and only a couple at once", () => {
+  it("are not started while one more waiting engine would take free memory below the floor admission keeps", () => {
+    // 16 GB: the floor is a tenth, 1.6 GB, and a waiting engine counts as PRESTART_ENGINE_BYTES.
+    const floor = 0.1 * DESKTOP;
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, () => floor + PRESTART_ENGINE_BYTES, undefined)).toBe(true);
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, () => floor + PRESTART_ENGINE_BYTES - 1, undefined)).toBe(false);
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, () => 300 * 1024 ** 2, undefined)).toBe(false);
+    // 4 GB: the floor is 409.6 MB, above the 320 MB minimum.
+    expect(prestartAllowed({ bytes: 4 * GB }, { enabled: false }, () => 0.39 * GB + PRESTART_ENGINE_BYTES, undefined)).toBe(false);
+    expect(prestartAllowed({ bytes: 4 * GB }, { enabled: false }, () => 0.41 * GB + PRESTART_ENGINE_BYTES, undefined)).toBe(true);
+  });
+
+  it("are off with OMB_ENGINE_PRESTART=0, and skip only the free-memory reading when it is `unmetered`", () => {
+    const short = () => 0;
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, () => 8 * GB, "0")).toBe(false);
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: false }, short, "unmetered")).toBe(true);
+    expect(prestartAllowed({ bytes: SMALL_BOX_BYTES }, { enabled: false }, short, "unmetered")).toBe(false);
+    expect(prestartAllowed({ bytes: DESKTOP }, { enabled: true }, short, "unmetered")).toBe(false);
+  });
+
+  it("wait no longer than an engine nobody is looking at is kept, a few minutes for a conversation opened, and only a couple at once", () => {
     expect(PRESTART_IDLE_MS).toBe(UNWATCHED_IDLE_MS);
+    expect(OPENED_PRESTART_IDLE_MS).toBe(3 * 60_000);
     expect(PRESTART_MOST).toBe(2);
   });
 

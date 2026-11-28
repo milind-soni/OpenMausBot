@@ -82,7 +82,7 @@ const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest &
 
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
-  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action));
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action) || card?.skillRequest?.allBots);
 
 export function titledCardAction(card: OptionCardData): string {
   if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);
@@ -100,6 +100,7 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const routineAction = card.routineRequest?.operation.action;
   if (routineAction) return t(ROUTINE_SETTLED_LABEL[routineAction]);
   const skillAction = card.skillRequest?.action;
+  if (card.skillRequest?.teammates) return t("approval.status.teammateSkills");
   if (skillAction) return t(SKILL_SETTLED_LABEL[skillAction]);
   if (card.profileRequest) return t("approval.status.profileUpdated");
   if (card.modelRequest) return t("approval.status.modelChanged");
@@ -190,7 +191,7 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   const skill = card.skillRequest;
   if (skill) {
     return {
-      line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.name }),
+      line: t(skill.teammates ? "approval.applied.skill.teammates" : SKILL_APPLIED_LINE[skill.action], { name, title: skill.allBots ? `${skill.name} · ${t("skills.allBots.tag")}` : skill.name }),
       canUndo: skill.action === "create" || skill.action === "enable" || skill.action === "disable" || Boolean(skill.previous),
     };
   }
@@ -223,6 +224,12 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
     return { line: t("approval.applied.teamMemory", { name, title: card.subtitle.split(" — ")[0] ?? "" }), canUndo: Boolean(card.teamMemoryRequest.revision) };
   }
   return undefined;
+}
+
+/** What Details shows under an applied change: for a teammate skills batch, each teammate's change. */
+export function appliedDetails(card: OptionCardData, name: string): string {
+  if (activeLocale() !== "en" && card.waitRequest) return t("approval.applied.waitFollowUp", { name, followUp: card.waitRequest.followUp ?? "" });
+  return card.skillRequest?.teammates && card.skillRequest.preview ? card.skillRequest.preview : card.subtitle;
 }
 
 function AppliedChangeLine({
@@ -335,7 +342,7 @@ function AppliedChangeLine({
           aria-label={t("approval.aria.appliedDetails")}
           className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
         >
-          {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
+          {appliedDetails(card, originalName ?? name)}
         </pre>
       )}
     </div>

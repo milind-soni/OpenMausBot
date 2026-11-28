@@ -1,4 +1,4 @@
-import { boatCapableEngine } from "@/lib/remote-desktop";
+import { boatCapableEngine } from "@/lib/remote-desktop"; import { isPlaceId } from "@/lib/place-chat";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
@@ -33,6 +33,7 @@ import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronCh
 import { partlyDone, routineRunLabel, routineRunsOn, routineRunText, routineRunTime, routineScheduleState } from "@/lib/routine-display";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { openRoomThreadThen } from "@/lib/room-feed";
 import { intlLocale, t } from "@/lib/i18n";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
@@ -232,7 +233,7 @@ function BotPicker({
   onChange: (ids: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = bots.filter((bot) => `${bot.name} ${bot.title}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = bots.filter((bot) => !isPlaceId(bot.id) && `${bot.name} ${bot.title}`.toLowerCase().includes(query.toLowerCase())); // a My Cloud bot open in place has no routines here
   return (
     <div className="rounded-xl border border-hairline/50 bg-inset/60 p-2">
       {!locked && bots.length > 5 && (
@@ -1201,8 +1202,7 @@ export function EventDetails({
   const openRunTask = () => {
     if (!executionThreadId) return;
     if (isRoomGoal && goalGroupId) {
-      dispatch({ type: "switchGroupTask", groupId: goalGroupId, threadId: executionThreadId });
-      onOpenRoom(goalGroupId);
+      openRoomThreadThen(dispatch, state, goalGroupId, executionThreadId, onOpenRoom);
     } else if (primary) {
       openBotThread(dispatch, primary, executionThreadId, showThreads);
     }

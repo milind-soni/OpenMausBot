@@ -2,10 +2,10 @@ import { z } from "zod";
 
 import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
-import { setImportedSkillEnabled } from "../imported-skills.ts";
+import { purgeImportedSkill, readImportedSkills, removeImportedSkillForBot, setImportedSkillEnabled } from "../imported-skills.ts";
 import { setNativeSkillEnabled } from "../native-skill-choices.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
-import { fetchSkillFromSource } from "../skill-fetch.ts";
+import { fetchSkillFromSource, skillImportToken } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
 import { installLibrarySkill, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillOptOut, setLibrarySkillReviewState, skillsLibraryEnabled, unassignLibrarySkill } from "../skill-library.ts";
 import {
@@ -13,6 +13,8 @@ import {
   type SkillListing, type StagedSkillWrite,
 } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { githubAudience } from "./github-sign-in.ts";
+import { withAllBotsOffer } from "./skills-for-all-bots.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotSkillsRouteDeps {
@@ -21,11 +23,12 @@ export interface BotSkillsRouteDeps {
   listBotSkills(bot: BotRecord, threadId?: string): SkillListing[];
   readBotSkillFile(bot: BotRecord, name: string): string | null;
   stagedSkillListing(staged: StagedSkillWrite): Omit<StagedSkillWrite, "files" | "baseSha256" | "baseAppliedStageId">;
+  team: boolean;
 }
 
 export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
-  const { store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing } = deps;
-  return async ({ req, res, url, path, method, json, readBody }) => {
+  const { store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing, team } = deps;
+  return async ({ req, res, url, path, method, json, readBody, auth }) => {
     let m: RegExpMatchArray | null = null;
     // Imports land DISABLED: a person enables one after reading SKILL.md and its scan warnings.
     m = path.match(/^\/api\/bots\/([\w-]+)\/skill-template$/);
@@ -55,14 +58,14 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         const { skills, library } = listBotSkillsWithOrigin(m[1]!, store.bot(m[1])!.assignedSkills);
         const names = new Set(skills.map((skill) => skill.name));
         return json(res, 200, {
-          skills: [...skills, ...listBotSkills(bot, threadId).filter((skill) => !names.has(skill.name))],
+          skills: withAllBotsOffer(bot, auth, [...skills, ...listBotSkills(bot, threadId).filter((skill) => !names.has(skill.name))]),
           library,
           assignedSkills: store.bot(m[1])!.assignedSkills,
           staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
         });
       }
       return json(res, 200, {
-        skills: listBotSkills(bot, threadId),
+        skills: withAllBotsOffer(bot, auth, listBotSkills(bot, threadId)),
         staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
       });
     }
@@ -70,7 +73,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       const parsed = z.object({ source: z.string().min(1).max(2000) }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "source must be a GitHub or skills.sh URL, or owner/repo" });
-      const fetched = await fetchSkillFromSource(parsed.data.source);
+      const fetched = await fetchSkillFromSource(parsed.data.source, fetch, undefined, () => skillImportToken(githubAudience(auth, team)));
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
       const results = fetched.skills.map((skill) => ({ skill, result: installSkill(m![1]!, skill.source, skill.files, skill.github) }));
       const errors = results.flatMap(({ result }) => ("error" in result ? [result.error] : []));
@@ -90,8 +93,9 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
       const bot = store.bot(m[1]);
-      // A skill from this computer that none of the bot's own or library skills shadows: this bot's switch for it.
-      if (bot && listBotSkills(bot).some((skill) => skill.name === m![2] && (skill as { origin?: string }).origin === "imported")) {
+      const shown = bot ? listBotSkills(bot).find((skill) => skill.name === m![2]) : undefined;
+      // A skill from this computer, listed or removed from this bot, that none of its own or library skills shadows.
+      if (bot && (shown ? (shown as { origin?: string }).origin === "imported" : Boolean(readImportedSkills()[m![2]!]))) {
         const result = setImportedSkillEnabled(bot.id, m[2]!, parsed.data.enabled);
         if ("error" in result) return json(res, 409, { error: result.error });
         return json(res, 200, { skill: result });
@@ -122,7 +126,19 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         }
       }
       const origin = (listBotSkills(bot).find((skill) => skill.name === name) as { origin?: string } | undefined)?.origin;
-      if (origin === "imported") return json(res, 404, { error: `"${name}" comes from this computer and can't be removed from one bot. Turn it off instead.` });
+      if (origin === "imported") {
+        const scope = url.searchParams.get("scope");
+        if (scope !== null && scope !== "bot" && scope !== "all-bots") return json(res, 400, { error: "scope must be bot or all-bots" });
+        if (scope === "all-bots") {
+          const purged = purgeImportedSkill(name);
+          if ("error" in purged) return json(res, 409, { error: purged.error });
+          removeImportedSkillForBot(bot.id, name);
+          return json(res, 200, { ok: true, scope: "all-bots", sourceFilesTouched: false });
+        }
+        const removedForBot = removeImportedSkillForBot(bot.id, name);
+        if ("error" in removedForBot) return json(res, 404, { error: removedForBot.error });
+        return json(res, 200, { ok: true, scope: "bot", sourceFilesTouched: false });
+      }
       if (origin === "native") return json(res, 404, { error: `"${name}" comes from this bot's engine and can't be removed here.` });
       return json(res, 404, { error: removed.error });
     }

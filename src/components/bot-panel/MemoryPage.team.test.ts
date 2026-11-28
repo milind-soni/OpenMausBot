@@ -12,7 +12,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 
 const { MemoryPage } = await import("./pages");
-const { LibraryTab } = await import("./LibraryTab");
+const { BotKeeps } = await import("./Keeps");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const bot = { id: "scout", threadId: "t1", name: "Scout", title: "", description: "", notifications: true, color: "green", unread: false, messages: [],
@@ -84,13 +84,13 @@ it("on a Team Cloud shows the person's own notes, topics included, as text they 
   }
 });
 
-it("shows no count on the Library tab, only whether it remembers anything", async () => {
-  await act(async () => root.render(createElement(LibraryTab, { bot, onOpen: () => {} })));
+it("shows no count on the Details tab, only whether it remembers anything", async () => {
+  await act(async () => root.render(createElement(BotKeeps, { bot, routines: [], onOpen: () => {} })));
   await settle();
   expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toBe("What it remembers");
   files["memory/food.md"] = "";
   files["MEMORY.md"] = "";
-  await act(async () => root.render(createElement(LibraryTab, { bot: { ...bot, threadId: "t2" }, onOpen: () => {} })));
+  await act(async () => root.render(createElement(BotKeeps, { bot: { ...bot, threadId: "t2" }, routines: [], onOpen: () => {} })));
   await settle();
   expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toContain("Nothing yet");
 });

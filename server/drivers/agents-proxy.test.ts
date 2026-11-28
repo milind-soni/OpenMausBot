@@ -654,6 +654,7 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -951,6 +952,13 @@ describe("agents-proxy MCP surface", () => {
     expect(none.result.content[0].text).toContain("no Local VM desktop");
     execStatus = 200;
     execResponse = { exitCode: 0, stdout: "PDF_OK\n", stderr: "", timedOut: false };
+  });
+
+  it("answers a call whose arguments hold a raw U+2028 or U+2029, which JSON.stringify leaves unescaped", async () => {
+    const command = "printf 'a\u2028b\u2029c'";
+    const reply = await callTool("vm_exec", { command });
+    expect(reply.result.content[0].text).toBe("exit code 0\n--- stdout ---\nPDF_OK");
+    expect(lastExecBody).toEqual({ command });
   });
 
   it("attach_file sends only the path and name, and tells the model the file is in the chat", async () => {
@@ -2203,7 +2211,7 @@ describe("agents-proxy MCP surface", () => {
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
     expect(manage.inputSchema.required).toEqual(["action"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "import", "enable", "disable", "delete"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "import", "enable", "disable", "delete", "teammates"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");

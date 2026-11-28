@@ -192,6 +192,7 @@ describe("configuration", () => {
     const described = describeVoice(cfg({ key: "sk-secret", voice: "v-1" }));
     expect(described).toEqual({ configured: true, ready: true, voice: "v-1", provider: "elevenlabs", baseUrl: "", model: "" });
     expect(JSON.stringify(described)).not.toContain("sk-secret");
+    expect(describeVoice(cfg({ key: "sk-secret", voice: "v-1", baseUrl: "http://127.0.0.1:4123" })).baseUrl).toBe("http://127.0.0.1:4123");
   });
 
   it("distinguishes 'no key' from 'no voice picked'", async () => {

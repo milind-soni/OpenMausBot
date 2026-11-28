@@ -38,7 +38,7 @@ function rewriteRefs(node: unknown, renamed: ReadonlyMap<string, string>): unkno
   if (!node || typeof node !== "object") return node;
   const record = node as Record<string, unknown>;
   if (typeof record.$step === "string" && renamed.has(record.$step)) return { ...record, $step: renamed.get(record.$step) };
-  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, key === "id" ? value : rewriteRefs(value, renamed)]));
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, rewriteRefs(value, renamed)]));
 }
 
 /** The workflow with `edit` made, or what is wrong with it. */

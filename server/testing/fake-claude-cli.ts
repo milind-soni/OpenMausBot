@@ -22,6 +22,8 @@
 //   FAKE_CLAUDE_MCP_RECONNECT  JSON-lines file: an mcp_reconnect control_request is appended to it and answered with
 //     success, as Claude Code 2.1.321 answers once the server is connected again; "refuse" answers it as a failure
 //   FAKE_CLAUDE_LAUNCHES  JSON-lines file every stream-json process appends its {pid, argv} to as it starts
+//   FAKE_CLAUDE_STARTUP_MS  ms a stream-json process takes to start up before it reads its input, as the real CLI takes
+//     seconds to load and connect its MCP servers
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_SIGNED_OUT_FILE  path: while it exists, every turn answers as not-logged-in (a sign-in that lapses and comes back)
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
@@ -548,7 +550,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   // Every new thread asks its engine for a title (server/thread-title-generate.ts), so that call stays out of the captures
   // below unless a test answers it: by FAKE_CLAUDE_TEXT_FILE or a FAKE_CLAUDE_TEXT_ROUTES marker. Otherwise it fails at
   // once and the thread keeps its first-message title. Answered, it still never overwrites the turn dump.
-  const titleCall = prompt.includes("Reply with only a short title: 3 to 6 words");
+  const titleCall = prompt.includes("Reply with only a short title");
   const routes = process.env.FAKE_CLAUDE_TEXT_ROUTES;
   const routed = () => {
     try { return Object.keys(JSON.parse(readFileSync(routes!, "utf8"))).some((marker) => prompt.includes(marker)); } catch { return false; }
@@ -1142,6 +1144,12 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
+  if (process.env.FAKE_CLAUDE_PROMPT_STATE) {
+    const path = join(process.env.FAKE_CLAUDE_PROMPT_STATE, `${sessionId}.txt`);
+    launchFiles ??= readLaunchFiles();
+    if (!argv.includes("--resume")) writeFileSync(path, String(launchFiles.systemPrompt ?? ""));
+    replyParts = [readFileSync(path, "utf8")];
+  }
   const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
   if (process.env.FAKE_CLAUDE_TURN_STATE) {
     let n = 0;
@@ -1431,6 +1439,11 @@ process.stdin.on("data", (c) => {
     }
   }
 });
+const startupMs = Number(process.env.FAKE_CLAUDE_STARTUP_MS);
+if (startupMs > 0) {
+  process.stdin.pause();
+  setTimeout(() => process.stdin.resume(), startupMs);
+}
 process.stdin.on("end", () => {
   stdinEnded = true;
   finishIfDone();

@@ -31,7 +31,12 @@ const render = (props: Parameters<typeof ComposerContextMenu>[0]) => act(async (
 const trigger = () => host.querySelector<HTMLButtonElement>("[data-composer-context] > button")!;
 const panel = () => host.querySelector<HTMLElement>("[data-context-panel]");
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-const words = () => panel()!.textContent!.replace(/\s+/g, " ");
+const withoutHints = (node: HTMLElement) => {
+  const clone = node.cloneNode(true) as HTMLElement;
+  for (const hidden of clone.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return clone.textContent ?? "";
+};
+const words = () => withoutHints(panel()!).replace(/\s+/g, " ");
 const requests = () => fetched.mock.calls.map(([url, init]) => [String(url).replace(/^.*(?=\/api\/)/, ""), JSON.parse(String((init as RequestInit).body))]);
 const advancedMode = () => localStorage.setItem(ADVANCED_MODE_KEY, "1");
 const posted = () => requests().filter(([path]) => !path.endsWith("/context"));
@@ -76,11 +81,25 @@ describe("the composer's context button", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
     expect(words()).toBe("Context68% usedCompact contextStart fresh");
     expect(panel()!.querySelector("[data-context-meter]")!.getAttribute("data-context-meter")).toBe("68");
-    expect([...panel()!.querySelectorAll("button")].map((button) => [button.textContent, button.disabled]))
+    expect([...panel()!.querySelectorAll("button")].map((button) => [withoutHints(button).trim(), button.disabled]))
       .toEqual([["Compact context", false], ["Start fresh", false]]);
     expect(requests()).toEqual([]);
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(panel()).toBeNull();
+  });
+
+  it("names the Start fresh chord on its menu row", async () => {
+    const win = globalThis.window as unknown as { ogb?: { platform?: string } };
+    win.ogb = { platform: "win32" };
+    try {
+      await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
+      await press(trigger());
+      const row = panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!;
+      expect(row.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+K Control+Shift+K");
+      expect(row.querySelector("kbd")!.textContent).toBe("Ctrl Shift K");
+    } finally {
+      delete win.ogb;
+    }
   });
 
   it("compacts through the chat's own route and stays open; starting fresh closes it", async () => {
@@ -103,6 +122,12 @@ describe("the composer's context button", () => {
     expect(words()).toContain("No reading yet");
     expect(panel()!.querySelector<HTMLButtonElement>("[data-context-compact]")!.disabled).toBe(true);
     expect(panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!.disabled).toBe(false);
+  });
+
+  it("offers neither action while a thread switch is pending", async () => {
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { switchingTo: "t2" }) });
+    await press(trigger());
+    expect([...panel()!.querySelectorAll("button")].map((button) => button.disabled)).toEqual([true, true]);
   });
 
   it("takes the focus when it opens, on no action yet, and gives it back to the button on Escape", async () => {

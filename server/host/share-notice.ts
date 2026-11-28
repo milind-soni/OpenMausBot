@@ -32,7 +32,7 @@ export function createShareNotice(deps: ShareNoticeDeps) {
     for (const email of newlyShared(before, after, deps.people())) {
       if (email === by) continue;
       deps.inbox().deliver(personKey({ id: "", email }), {
-        kind: "notice", from: { name, ...(by ? { email: by } : {}) }, ...(main ? { origin: { botId: bot.id, threadId: main.threadId } } : {}),
+        kind: "notice", reason: "shared", from: { name, ...(by ? { email: by } : {}) }, ...(main ? { origin: { botId: bot.id, threadId: main.threadId } } : {}),
         text: `${name} shared ${bot.name} with you.`, title: `${bot.name} is shared with you`, notify: "done",
       });
     }

@@ -6,7 +6,7 @@ import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./drivers/codex-instructions.ts";
 import { volatileContextNote, withVolatileNote } from "./drivers/prompt-split.ts";
 import { meetingsUnavailablePrompt } from "./meetings/prompt.ts";
-import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { replyHabitsPrompt } from "./reply-habits.ts";
 import { setupSystemPrompt } from "./setup-mode.ts";
 import { computerSelectionPrompt } from "./surface.ts";
 import { memoryRulesPrompt, workspaceDir } from "./workspace.ts";
@@ -35,8 +35,9 @@ const KINDS: ComputerPromptKind[] = ["vm-private", "vm-shared", "box", "vps", "l
 
 async function measured(): Promise<Record<string, number>> {
   const bytes = (text: string) => Buffer.byteLength(text, "utf8");
-  const chat = buildSystemPrompt(botPersona(BOT), "", directChatParts(false));
-  const setup = buildSystemPrompt(botPersona(BOT), "", directChatParts(true));
+  // A direct chat has the agents tools, so its reply habits carry the publishing sentence.
+  const chat = buildSystemPrompt(botPersona(BOT), "", directChatParts(false), { env: {} });
+  const setup = buildSystemPrompt(botPersona(BOT), "", directChatParts(true), { env: {} });
   const chief = chiefOfStaffSystemPrompt(BOT.id, [{ ...BOT, chiefOfStaff: true }] as never, true, undefined, [] as never);
   let resumed = "";
   await syncCodexInstructions("budget", "native-budget", chat.stable, "", true, async (_method, params) => {
@@ -44,7 +45,7 @@ async function measured(): Promise<Record<string, number>> {
     return {};
   });
   return {
-    "reply-habits": bytes(REPLY_HABITS_PROMPT),
+    "reply-habits": bytes(replyHabitsPrompt(true)),
     "tool-bridge": bytes(AGENTS_TOOL_BRIDGE_PROMPT),
     "sign-in": bytes(SIGN_IN_PROMPT),
     "chief-of-staff": bytes(chief),
@@ -66,7 +67,8 @@ async function measured(): Promise<Record<string, number>> {
  * stable half "memory-rules" too (with its own paths), both moved out of the volatile note: 8,895 before the move and the
  * rewording (when the two rode the note, about 3,800 more bytes per conversation), 8,391 + 2,048 after. */
 const PROMPT_BUDGET_BASELINE: Record<string, number> = {
-  "reply-habits": 2046,
+  // +278 on purpose: say what you will deliver, publish what others will open (only with publish_page), own an undone look-up.
+  "reply-habits": 2324,
   "tool-bridge": 593,
   "sign-in": 2552,
   "chief-of-staff": 4856,
@@ -84,11 +86,11 @@ const PROMPT_BUDGET_BASELINE: Record<string, number> = {
   "computer:box": 4034,
   "computer:vps": 4678,
   "computer:local": 4987,
-  "claude:direct-chat": 8391,
-  "claude:setup-chat": 10787,
+  "claude:direct-chat": 8718,
+  "claude:setup-chat": 11114,
   "claude:volatile-note": 178,
-  "codex:direct-chat": 8391,
-  "codex:setup-chat": 10787,
+  "codex:direct-chat": 8718,
+  "codex:setup-chat": 11114,
   "codex:resumed-instructions": 213,
   "codex:volatile-note": 97,
 };

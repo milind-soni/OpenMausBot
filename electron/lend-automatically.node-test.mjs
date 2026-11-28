@@ -383,6 +383,11 @@ test("the terminal is lent only once the person turns it on: every own Cloud get
   await restarted.lendTerminal(false);
   await until(() => homes[HOME].connects.length === 4, "the grant without the terminal to reach My Cloud");
   assert.equal(homes[HOME].connects[3].terminal, false);
+  // Turned off, it stays off across the next restart too (the together switch grants it only when turned on).
+  const again = mac.restart();
+  again.start();
+  await until(() => homes[HOME].connects.length === 5, "the kept grant after a second restart");
+  assert.equal(homes[HOME].connects[4].terminal, false, "still off after a restart");
 });
 
 test("a terminal choice that can't be saved is not kept, so nothing lends it later", async t => {

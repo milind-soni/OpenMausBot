@@ -14,6 +14,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
 import { piSessionDir } from "./pi-session.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { agentsStartupMs } from "./chat-mcp-tools.ts";
 import {
   applyPiLocalCatalog,
   decodePiFrame,
@@ -203,7 +204,7 @@ describe("buildMcpServers", () => {
     });
     expect(servers).toEqual({
       composio: { command: "node", args: ["c"], env: { A: "1" } },
-      agents: { command: "node", args: ["a"], env: { B: "2" } },
+      agents: { command: "node", args: ["a"], env: { B: "2" }, startupMs: agentsStartupMs() },
       phone: { command: "node", args: ["p"], env: {} },
     });
   });
@@ -832,6 +833,17 @@ describe("PiDriver turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
     expect(done).toMatchObject({ ok: false, stopReason: "failed" });
     expect(instance.adapter.hasSession("t-exit")).toBe(false);
+  });
+
+  it("fails the turn when omp reports the prompt failed before the agent started", async () => {
+    await create("omp-start-fail");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-omp-start-fail", text: "hi" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "failed" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: "System prompt changed repeatedly during before_agent_start; original input was not delivered.",
+    });
+    expect(instance.adapter.hasSession("t-omp-start-fail")).toBe(false);
   });
 
   it("surfaces a pi turn error instead of reporting an empty success", async () => {

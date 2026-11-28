@@ -8,6 +8,8 @@
 //  &home=on|off (Always-on home on this computer) &vps=default (a default SSH server too; page=ai&advanced=1 shows the
 //  Self-hosted VPS panel under AI's computers) &e2e=0 (an older phone link: a typed code beside the QR)
 //  &map=0|1 (the picture above the list off or on, whatever SHOW_DEVICE_MAP says)
+//  &updates=1 (Update all: the Mac mini and the Hetzner box can update, this app has one downloaded)
+//  &updateAll=open|running|done (its dialog with the skipped list open; rows mid-run; rows near the end)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { parseServerInput } from "../electron/server-address.mjs";
@@ -92,9 +94,33 @@ const lendViews: Record<string, DesktopLendView> = {
   mini: { name: "Studio Mac mini", lendable: true, on: true, connected: true, paused: false },
   vps: { name: "Hetzner box", lendable: true, on: false, connected: false, paused: false },
 };
+const updates = params.get("updates") === "1" || params.has("updateAll");
+const updateAllShot = params.get("updateAll");
+const failedRun = { why: "run", status: { mode: "button", current: "0.1.171", available: true, activeTurns: 0, run: { outcome: "rolled-back", from: "0.1.171", at: now - 3 * MIN } } };
+const updateView = updateAllShot === "running" ? { running: true, rows: {
+  vps: { phase: "restarting", since: now - MIN, latest: "0.1.175" },
+  lan: { phase: "updating", since: now - MIN, latest: "0.1.175" },
+  app: { phase: "waiting", since: now - 3 * MIN },
+} } : updateAllShot === "done" ? { running: true, rows: {
+  vps: { phase: "done", since: now - MIN, latest: "0.1.175", version: "0.1.175" },
+  lan: { phase: "failed", since: now - MIN, latest: "0.1.175", failure: failedRun },
+  app: { phase: "restarting", since: now - 10_000 },
+} } : { running: false, rows: {} };
+const updateSurvey = {
+  servers: [
+    { id: "mini", plan: { updates: false, why: "by-hand", current: "0.1.171", latest: "0.1.175", command: "npm install -g openmausbot@0.1.175" } },
+    { id: "vps", plan: { updates: true, current: "0.1.170", latest: "0.1.175", activeTurns: 1 } },
+    { id: "lan", plan: { updates: true, current: "0.1.171", latest: "0.1.175", activeTurns: 0 } },
+  ],
+  app: { version: "0.1.182", handoff: false }, view: updateView,
+};
 const ogb = {
   platform: "darwin",
   app: { version: "0.1.180" },
+  ...(updates && place === "computer" ? {
+    updater: { check: async () => {}, install: async () => {}, onState: (cb: (state: unknown) => void) => { cb({ status: "downloaded", version: "0.1.182", installMode: "restart" }); return () => {}; } },
+    updateAll: { survey: async () => updateSurvey, start: async () => updateView, retry: async () => updateView, onState: () => () => {} },
+  } : {}),
   ...(place === "computer" ? {
     companion: companionBridge,
     companionAccount: { state: async () => ({ available: true, status: "ready", email: "ada@example.com", ...(retired ? { tunnelRetired: true } : {}) }) },
@@ -187,6 +213,11 @@ createRoot(document.getElementById("root")!).render(
 const click = (selector: string) => document.querySelector<HTMLElement>(selector)?.click();
 const after = (ms: number, run: () => void) => window.setTimeout(run, ms);
 if (params.get("check") === "1") after(900, () => click("[data-network-action]"));
+if (updateAllShot === "open") after(900, () => { click("[data-update-all]"); after(200, () => click("[data-update-all-skipped]")); });
+if (updateAllShot === "running" || updateAllShot === "done") after(900, () => {
+  document.querySelector("[data-settings-block=group-computers]")?.scrollIntoView({ block: "start" });
+  document.body.dataset.shotReady = "";
+});
 const select = params.get("select");
 if (select) after(900, () => click(`[data-device-node="${select}"]`));
 const add = params.get("add");

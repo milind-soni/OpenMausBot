@@ -103,7 +103,10 @@ describe("summarizeDelete", () => {
       { deleted: ["a", "b"], refused: [{ threadId: "c", reason: "busy" }] },
       { deleted: ["d"], refused: [{ threadId: "e", reason: "not-found" }, { threadId: "f", reason: "busy" }] },
     ]);
-    expect(summary).toEqual({ deleted: 3, busy: 2, missing: 1 });
+    expect(summary).toEqual({ deleted: 3, busy: 2, missing: 1, notClosed: 0 });
+  });
+  it("counts threads a closed-only delete kept because they were no longer closed", () => {
+    expect(summarizeDelete([{ deleted: ["a"], refused: [{ threadId: "b", reason: "not-closed" }] }])).toEqual({ deleted: 1, busy: 0, missing: 0, notClosed: 1 });
   });
 });
 

@@ -203,7 +203,7 @@ describe("preloadScreens", () => {
     preloadScreens("cloud.example");
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
-    const rarelyOpened = [screens.CloudAddDialog, screens.GrokMoveDialog, screens.PhoneAppDialog, screens.ShareDepartmentDialog, screens.ImportDialog, screens.TeamLibraryPanel, screens.TeamFilesPage, screens.AnnouncementsPage];
+    const rarelyOpened = [screens.CloudAddDialog, screens.GrokMoveDialog, screens.PhoneAppDialog, screens.ShareTemplateDialog, screens.ImportDialog, screens.TeamLibraryPanel, screens.TeamFilesPage, screens.AnnouncementsPage];
     const stubbed = Object.values(screens).filter(isScreen);
     for (const screen of stubbed) expect(screen.preload).toHaveBeenCalledTimes(rarelyOpened.includes(screen as never) ? 0 : 1);
     expect(preloads.length).toBe(stubbed.length);
@@ -266,7 +266,7 @@ describe("launch bundle", () => {
     const deferred = [
       "ActivityPanel", "BotSettingsDialog", "CloudAddDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
       "LocalVmWorkspace", "NewBotDialog", "PhoneAppDialog", "PhoneSetupFlow", "PluginsPanel", "published-apps/PublishedAppsPage", "skill-burger/SkillBurgersPage", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
-      "RoutinesPage", "SettingsModal", "ShareDepartmentDialog", "ImportDialog", "TeamLibraryPanel", "TeamMapPage", "team-files/TeamFilesPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
+      "RoutinesPage", "SettingsModal", "ShareTemplateDialog", "ImportDialog", "TeamLibraryPanel", "TeamMapPage", "team-files/TeamFilesPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
       "inbox/InboxPanel", "TeamDialog", "TeamSettingsDialog", "VoiceSetupDialog", "usage/TraceView", "bot-access/ShareBotDialog", "CommandAllowlistDialog", "WorkspaceBackupSettings",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);

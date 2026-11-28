@@ -32,10 +32,11 @@ describe("reading tailscale status --json", () => {
     expect(readTailscaleStatusJson(status({ BackendState: "NeedsMachineAuth" }))?.state).toBe("needs-approval");
   });
 
-  it("drops a name that is not a MagicDNS name and addresses outside Tailscale's ranges", () => {
-    const read = readTailscaleStatusJson(status({}, { DNSName: "macmini.example.com.", TailscaleIPs: ["192.168.1.20", "100.64.0.7"] }));
-    expect(read?.name).toBeNull();
+  it("keeps a Headscale tailnet's own name, and drops a name that is no host name and addresses outside Tailscale's ranges", () => {
+    const read = readTailscaleStatusJson(status({ MagicDNSSuffix: "example.internal", CertDomains: null }, { DNSName: "macmini.example.internal.", TailscaleIPs: ["192.168.1.20", "100.64.0.7"] }));
+    expect(read?.name).toBe("macmini.example.internal");
     expect(read?.addresses).toEqual(["100.64.0.7"]);
+    for (const DNSName of ["macmini.", "100.64.0.7.", "mac mini.example.internal.", "-mac.example.internal.", ""]) expect(readTailscaleStatusJson(status({}, { DNSName }))?.name).toBeNull();
   });
 
   it("is null for the GUI's startup text and for anything not an object", () => {

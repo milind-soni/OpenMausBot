@@ -55,6 +55,8 @@ export interface QuotaSwitchDeps {
   resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }) => Promise<unknown>;
   enabled?: () => boolean;
   after?: (ms: number, run: () => void) => { cancel(): void };
+  /** The notice telling the person to sign `instanceId` in again, as this conversation shows it. */
+  signedOutNotice?: (threadId: string, instanceId: string, row: Message) => void;
 }
 
 export interface QuotaSwitch {
@@ -88,6 +90,11 @@ export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 
 const nameOf = (engine: QuotaSwitchEngine): string => engine.displayName || engine.driverKind;
 
+/** Only the person's own request: never a routine's, a webhook's, a relayed or a guest's. */
+export function ownRequest(request: QuotaRequest | undefined, turnId: string | undefined, internal: boolean): request is QuotaRequest {
+  return !internal && Boolean(request) && !request!.stopped && request!.origin?.kind === "user" && (!request!.turnId || !turnId || request!.turnId === turnId);
+}
+
 /** A line a bot delivered (peerAsk) is never resent in the person's name. */
 function resendable(store: Store, threadId: string, messageId: string | undefined): Message | undefined {
   if (!messageId) return undefined;
@@ -110,9 +117,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   /** A second press while the engine is read is the same answer, never another. */
   const answering = new Map<string, Promise<QuotaAnswer>>();
 
-  const notice = (threadId: string, text: string, ok: boolean, setup = false, words?: ServerText): void => {
+  const notice = (threadId: string, text: string, ok: boolean, setup = false, words?: ServerText): Message => {
     // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ...(words ? { nameCode: words.key, nameParams: words.params } : {}), ok, ...(setup ? { setup: true } : {}) } });
+    return store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ...(words ? { nameCode: words.key, nameParams: words.params } : {}), ok, ...(setup ? { setup: true } : {}) } });
   };
 
   const openCard = (threadId: string): Message | undefined => store.messagesFor(threadId)
@@ -228,13 +235,14 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       const resetsAt = scope === "signed-out" ? undefined : flags?.limitResetsAt;
       // A sign-out is told once, first and without a backup's name: what the person must do is sign in again.
       const told = scope === "signed-out" ? deps.takeover?.tell(thread, from, { scope }) : undefined;
-      if (told) notice(threadId, told, true, true);
+      if (told) {
+        const row = notice(threadId, told, true, true);
+        deps.signedOutNotice?.(threadId, from.instanceId, row);
+      }
       const tell = (backup?: ModelSelection) => {
         if (scope !== "signed-out") deps.takeover?.tell(thread, from, { ...(resetsAt ? { resetsAt } : {}), scope, ...(backup ? { backup } : {}) });
       };
-      // Only the person's own request: never a routine's, a webhook's, a relayed or a guest's.
-      const own = !internal && request && !request.stopped && request.origin?.kind === "user"
-        && (!request.turnId || !event.turnId || request.turnId === event.turnId);
+      const own = ownRequest(request, event.turnId, internal);
       const relayed = request?.messageId && store.messagesFor(threadId).find((message) => message.id === request.messageId)?.peerAsk;
       if (!own || !request || relayed || !enabled() || openCard(threadId)) {
         deps.takeover?.passedOver(thread, from, scope, skipped);

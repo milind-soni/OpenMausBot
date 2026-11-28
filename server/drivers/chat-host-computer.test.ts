@@ -146,6 +146,16 @@ describe("this desktop's own computer in a chat turn", () => {
     expect(lines[2]!.text.key).toBe("chat.notice.computerToolsDidNotStart");
   });
 
+  it("takes the stand-in's place out of the tool budget once, so a configured server that fits the rest is listed whole", async () => {
+    const plain = { command: process.execPath, args: [script], env: { ANSWERED: join(dirs[0]!, `answered-${randomUUID()}`) } };
+    // A limit of 3 leaves one tool after the runtime's own and the stand-in: exactly the configured server's one tool.
+    const session = await mountChatTools({ localComputer: computer(`budget-${randomUUID()}`, { MODE: "exit" }).server, custom: { notes: plain } } as SendTurnInput["integrations"],
+      controller.signal, true, undefined, undefined, undefined, undefined, undefined, 3, { startupMs: 5_000, hostComputerMs: 4_000 });
+    sessions.push(session);
+    expect(names(session)).toEqual([HOST_COMPUTER_STAND_IN, "notes_write"]);
+    expect(session.budget).toMatchObject({ limit: 3 });
+  });
+
   it("answers a call on the last start's tools with why this start failed, tells the person, and the turn goes on", async () => {
     const driver = `lost-${randomUUID()}`;
     await mount(computer(driver).server, 10_000, 20_000);

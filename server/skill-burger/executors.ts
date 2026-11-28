@@ -3,15 +3,68 @@
 // box (spawnCli as "bot"); one on its cloud computer goes through that computer's own route; an app action goes through
 // the connectors gate (grants, read or write scope, team rules) with a capability for this turn; a page opens in the
 // bot's own browser through its route; a file is written only inside the conversation's folder.
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve as resolvePath } from "node:path";
+import { closeSync, constants, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 
 import { appToolCall } from "../connector-app-tools.ts";
 import { toolData } from "../connected-reads.ts";
-import { spawnCli } from "../procs.ts";
+import { killCliTree, spawnCli } from "../procs.ts";
 import type { ExecResult, StepExecutors } from "./runner.ts";
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
+const FILE_OUTSIDE = "a saved step writes files only inside this conversation's folder";
+const NO_FOLLOW = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+
+function isInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith("../") && !isAbsolute(rel));
+}
+
+function writeInside(cwd: string, path: string, content: string): ExecResult {
+  const root = realpathSync(cwd);
+  const target = resolvePath(root, path);
+  const inside = relative(root, target);
+  if (!inside || !isInside(root, target)) return { ok: false, error: FILE_OUTSIDE };
+  const dir = dirname(target);
+  // Check the deepest existing ancestor before creating folders so a symlinked directory cannot escape mkdirSync.
+  for (let cur = dir; cur !== root;) {
+    try {
+      lstatSync(cur);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, error: FILE_OUTSIDE };
+      const parent = dirname(cur);
+      if (parent === cur) return { ok: false, error: FILE_OUTSIDE };
+      cur = parent;
+      continue;
+    }
+    try {
+      if (!isInside(root, realpathSync(cur))) return { ok: false, error: FILE_OUTSIDE };
+    } catch {
+      return { ok: false, error: FILE_OUTSIDE };
+    }
+    break;
+  }
+  mkdirSync(dir, { recursive: true });
+  if (!isInside(root, realpathSync(dir))) return { ok: false, error: FILE_OUTSIDE };
+  try {
+    if (lstatSync(target).isSymbolicLink()) return { ok: false, error: FILE_OUTSIDE };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, error: FILE_OUTSIDE };
+  }
+  let fd: number;
+  try {
+    fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NO_FOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") return { ok: false, error: FILE_OUTSIDE };
+    throw error;
+  }
+  try {
+    writeFileSync(fd, content);
+  } finally {
+    closeSync(fd);
+  }
+  return { ok: true, output: inside };
+}
 
 export interface ExecutorContext {
   botId: string;
@@ -61,7 +114,7 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(shell.command, shell.args(input.command), {
-        cwd: input.cwd && isAbsolute(input.cwd) ? input.cwd : context.cwd,
+        cwd: input.cwd ? resolvePath(context.cwd, input.cwd) : context.cwd,
         env: { PATH: commandPath(), HOME: process.env.HOME, LANG: process.env.LANG, ...input.env },
         stdio: ["pipe", "pipe", "pipe"],
         box: { botId: context.botId },
@@ -77,14 +130,14 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     const take = (into: Buffer[]) => (chunk: Buffer) => {
       size += chunk.length;
       if (size > input.maxBytes) {
-        if (!over) { over = true; child.kill("SIGKILL"); }
+        if (!over) { over = true; void killCliTree(child, 0); }
         return;
       }
       into.push(chunk);
     };
     child.stdout.on("data", take(out));
     child.stderr.on("data", take(err));
-    const stop = () => child.kill("SIGKILL");
+    const stop = () => { void killCliTree(child, 0); };
     input.signal.addEventListener("abort", stop, { once: true });
     child.on("error", (error) => done({ ok: false, error: error.message }));
     child.on("close", (code) => {
@@ -108,6 +161,7 @@ async function runOnVm(context: ExecutorContext, input: Parameters<StepExecutors
     if (Buffer.byteLength(stdout) > input.maxBytes) return tooLarge(input.maxBytes);
     return Number(vm.body.exitCode ?? 0) === 0 && !vm.body.timedOut ? { ok: true, output: stdout } : { ok: false, error: String(vm.body.stderr || vm.body.stdout || "the command failed").slice(-2_000) };
   }
+  if (vm.status !== 409 || vm.body.code !== "no_vm_for_turn") return { ok: false, error: String(vm.body.error ?? "the command failed") };
   const computer = await context.internal("computer", "/api/internal/computer/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "exec", arguments: { command } } }, input.signal);
   if (!computer.ok) return { ok: false, error: String(vm.body.error ?? computer.body.error ?? "there is no cloud computer to run this on") };
   const result = callText(computer.body);
@@ -145,10 +199,10 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
         botIds: input.botIds, message: input.message, ...(input.doneWhen ? { done_when: input.doneWhen } : {}), ...(input.rework ? { rework: true } : {}), ...(input.consult ? { consult: true } : {}),
       }, input.signal);
       const receipts = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).flatMap((receipt) => (
-        receipt && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
-      if (!answer.ok || !receipts.length) {
-        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail);
-        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused") };
+        receipt && receipt.outcome !== "failed" && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
+      if (!answer.ok || !receipts.length || input.botIds.some((botId) => !receipts.some((receipt) => receipt.botId === botId))) {
+        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail && !receipts.some((one) => one.botId === receipt.botId));
+        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused"), receipts };
       }
       return { ok: true, receipts };
     },
@@ -166,23 +220,24 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
       try {
         return { ok: true, output: toolData(slug, answer.body) };
       } catch (error) {
-        const plain = callText(answer.body);
-        return plain.ok ? plain : { ok: false, error: error instanceof Error ? error.message : String(error) };
+        const content = record(answer.body.result)?.content;
+        const text = Array.isArray(content) ? content.map(record).find((part) => typeof part?.text === "string")?.text : undefined;
+        if (typeof text === "string") {
+          try { JSON.parse(text); } catch {
+            const plain = callText(answer.body);
+            if (plain.ok) return plain;
+          }
+        }
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     async browser(input) {
-      const answer = await context.internal("browser", "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "agent_browser_open", arguments: { url: input.url } } }, input.signal);
-      return answer.ok ? callText(answer.body) : { ok: false, error: String(answer.body.error ?? "the browser isn't available") };
+      const cloud = input.where === "vm";
+      const answer = await context.internal(cloud ? "computer" : "browser", cloud ? "/api/internal/computer/mcp" : "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: cloud ? "open_url" : "agent_browser_open", arguments: { url: input.url } } }, input.signal);
+      return answer.ok ? callText(answer.body) : { ok: false, error: String(answer.body.error ?? (cloud ? "the cloud computer isn't available" : "the browser isn't available")) };
     },
     async file(input) {
-      const root = realpathSync(context.cwd);
-      const target = resolvePath(root, input.path);
-      const inside = relative(root, target);
-      if (!inside || inside.startsWith("..") || isAbsolute(inside)) return { ok: false, error: "a saved step writes files only inside this conversation's folder" };
-      mkdirSync(dirname(target), { recursive: true });
-      if (relative(root, realpathSync(dirname(target))).startsWith("..")) return { ok: false, error: "a saved step writes files only inside this conversation's folder" };
-      writeFileSync(target, input.content);
-      return { ok: true, output: inside };
+      return writeInside(context.cwd, input.path, input.content);
     },
   };
 }
