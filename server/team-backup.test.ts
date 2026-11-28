@@ -410,12 +410,16 @@ describe("additive portable team backups", () => {
     const restoredBot = result.bots.find((bot) => bot.name === "Mira 2")!;
     const restored = restoredBot.tasks!.find((task) => task.title === "Audit the payroll export")!;
     expect(restored.titleFromFirstMessage).toBe(true);
+    expect(restored.titleMode).toBe("automatic");
     store.renameTask(restoredBot.id, restored.threadId, UNTITLED_TASK);
+    expect(restored.titleMode).toBe("manual");
     expect(store.titleTaskFromFirstMessage(restoredBot.id, "A later message", restored.threadId)).toBeNull();
     const restoredGroup = result.groups[0];
     const restoredChannel = restoredGroup.tasks!.find((task) => task.title === "Plan the launch review")!;
     expect(restoredChannel.titleFromFirstMessage).toBe(true);
+    expect(restoredChannel.titleMode).toBe("automatic");
     store.patchGroupTask(restoredGroup.id, restoredChannel.threadId, { title: UNTITLED_TASK });
+    expect(restoredChannel.titleMode).toBe("manual");
     expect(store.titleGroupTaskFromFirstMessage(restoredGroup.id, "A later message", restoredChannel.threadId)).toBeNull();
     expect(restoredBot.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("titleFromFirstMessage");
   });

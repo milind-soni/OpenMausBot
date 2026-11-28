@@ -26,9 +26,9 @@ export interface ChatMergeResult { conversations: number; messages: number; into
 export interface ChatMergePlan extends ChatMergeResult { threads: ThreadMerge[] }
 export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup" | "createGroup">;
 
-const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
+const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "titleMode", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
   "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil", "outside"] as const;
-const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
+const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "titleMode", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
 export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 
 const ownerKey = (owner: Owner) => `${owner.kind}:${owner.id}`;

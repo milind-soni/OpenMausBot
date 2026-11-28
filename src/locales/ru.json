@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Модель для заголовков обсуждений",
+  "settings.features.titleModelAutomatic": "Автоматически",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (недоступна)",
+  "settings.features.titleModelConnect": "Подключите совместимый ИИ, чтобы выбрать модель для заголовков.",
+  "settings.features.titleFollowUp": "Обновлять заголовки обсуждений",
+  "settings.features.titleFollowUpLine": "Автоматические заголовки обновляются при смене темы. Заданные вами заголовки сохраняются.",
   "voice.gemini.keyPlaceholder": "Вставьте свой API-ключ Google AI Studio",
   "voice.gemini.model": "Модель синтеза речи Gemini",
   "keys.label.geminiTts": "API-ключ синтеза речи Gemini",

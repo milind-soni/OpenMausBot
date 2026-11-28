@@ -1,4 +1,12 @@
 {
+  "settings.features.titleModel": "Modèle pour les titres de discussion",
+  "settings.features.titleModelAutomatic": "Automatique",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (indisponible)",
+  "settings.features.titleModelConnect": "Connectez une IA compatible pour choisir un modèle de titres.",
+  "settings.features.titleFollowUp": "Mettre à jour les titres des discussions",
+  "settings.features.titleFollowUpLine": "Actualise les titres automatiques quand le sujet change. Les titres que vous avez choisis sont conservés.",
+  "settings.threads.saving": "Enregistrement…",
   "voice.gemini.keyPlaceholder": "Collez votre clé API Google AI Studio",
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",

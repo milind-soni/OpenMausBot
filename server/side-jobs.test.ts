@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DATA_DIR, loadConfig, parseConfigPatch, parseStoredConfig } from "./config.ts";
+import { DATA_DIR, loadConfig, parseConfigPatch, parseStoredConfig, saveConfig } from "./config.ts";
 import type { TextGenerationOptions } from "./contracts.ts";
 import { ChatHttpError } from "./drivers/openai-chat-refusals.ts";
 import { createMemoryUpkeep, NO_TEXT_ENGINE, type UpkeepBot } from "./memory-upkeep.ts";
@@ -80,6 +80,7 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
     bots: new Map<string, SideJobBot>(["claude", "openrouter", "grok", "codex", "pi", "muse"].map((id) => [id, bot(id, id)])),
     refused: new Set<string>(),
     overBudget: false,
+    cappedBots: new Set<string>(),
     booked: [] as Booked[],
     logs: [] as string[],
   };
@@ -90,8 +91,9 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
     helper: () => state.helper,
     ...(options.modelAllowed ? { modelAllowed: options.modelAllowed } : {}),
     smallModels: options.smallModels ?? { refused: () => new Set(), remember: () => {} },
-    assertWithinBudget: () => {
+    assertWithinBudget: (botId) => {
       if (state.overBudget) throw new Error("this workspace has reached its monthly spend limit");
+      if (botId && state.cappedBots.has(botId)) throw new Error("this bot has reached its usage cap");
     },
     book: (row, tokensReported, notificationThreadId) => state.booked.push({ row, tokensReported, notificationThreadId }),
     log: (line) => state.logs.push(line),
@@ -100,7 +102,7 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
   return { jobs, state, claude, openrouter, acp, codex };
 }
 
-describe("the helper setting", () => {
+describe("background model settings", () => {
   const file = join(DATA_DIR, "config.json");
   beforeEach(() => {
     mkdirSync(DATA_DIR, { recursive: true });
@@ -154,6 +156,16 @@ describe("the helper setting", () => {
     expect(parseStoredConfig({ helper: "claude", language: "en" })).toEqual({ language: "en" });
     expect(parseStoredConfig({ helper: { instanceId: 7 }, language: "en" })).toEqual({ language: "en" });
   });
+
+  it("merges partial thread-title settings and can explicitly clear the selected model", () => {
+    const model = { instanceId: "openrouter", model: "vendor/title-model" };
+    saveConfig(parseConfigPatch({ threadTitles: { model } }));
+    saveConfig(parseConfigPatch({ threadTitles: { followUp: true } }));
+    expect(loadConfig().threadTitles).toEqual({ model, followUp: true });
+    saveConfig(parseConfigPatch({ threadTitles: { model: null } }));
+    expect(loadConfig().threadTitles).toEqual({ model: null, followUp: true });
+    expect(() => parseConfigPatch({ threadTitles: { model: { ...model, model: "--print" } } })).toThrow();
+  });
 });
 
 describe("the setup card's answers", () => {
@@ -206,6 +218,60 @@ describe("the setup card's answers", () => {
     await jobs.text("setup-suggestions", "pi")!.generateText("p");
     expect(booked.map((entry) => entry.row.threadId)).toEqual([expect.stringMatching(/^setup-suggestions-/), expect.stringMatching(/^setup-suggestions-/)]);
     expect(booked.map((entry) => entry.row.trigger)).toEqual([{ kind: "bot", botId: "api" }, { kind: "helper", botId: "pi", job: "setup-suggestions" }]);
+  });
+});
+
+describe("who writes a thread title", () => {
+  const titleModel = { instanceId: "openrouter", model: "vendor/title-model" };
+
+  it("uses the configured provider and model with usage, without acquiring a second slot", async () => {
+    const slots = createJobSlots(1);
+    const run = vi.spyOn(slots, "run");
+    const { jobs, state, claude, openrouter } = setup({ slots });
+    const writer = jobs.text("thread-title", "claude", { titleModel, threadId: "private-chat" });
+    const signal = new AbortController().signal;
+    expect(await writer!.generateText("title prompt", { signal, maxOutputTokens: 512 })).toBe("openrouter wrote this");
+    expect(openrouter.calls[0]?.options).toMatchObject({ model: titleModel.model, signal, maxOutputTokens: 512, finalTextOnly: true });
+    expect(state.booked[0]?.row).toMatchObject({ instanceId: "openrouter", model: titleModel.model, threadId: "private-chat" });
+    expect(claude.calls).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+    state.cappedBots.add("claude");
+    await expect(writer!.generateText("another title")).rejects.toThrow("this bot has reached its usage cap");
+    state.overBudget = true;
+    await expect(writer!.generateText("another title")).rejects.toThrow("monthly spend limit");
+    expect(openrouter.calls).toHaveLength(1);
+  });
+
+  it("keeps restricted titles on the conversation's model and forbids helper fallback", async () => {
+    const { jobs, claude, openrouter } = setup({ helper: titleModel });
+    const modelSelection = { instanceId: "claude", model: "conversation-sonnet" };
+    await jobs.text("thread-title", "claude", { titleModel, ownOnly: true, modelSelection })!.generateText("own title");
+    expect(claude.calls[0]?.options?.model).toBe(modelSelection.model);
+    expect(jobs.text("thread-title", "codex", { titleModel, ownOnly: true })).toBeNull();
+    expect(openrouter.calls).toEqual([]);
+  });
+
+  it("uses the conversation model or the permitted helper's one-off call", async () => {
+    const { jobs, state, claude, codex, openrouter } = setup({ helper: titleModel });
+    const modelSelection = { instanceId: "claude", model: "conversation-sonnet" };
+    await jobs.text("thread-title", "codex", { modelSelection })!.generateText("own title");
+    expect(claude.calls[0]?.options?.model).toBe(modelSelection.model);
+    expect(jobs.text("thread-title", "codex")?.via).toBe("helper");
+    await jobs.text("thread-title", "codex")!.generateText("helper title");
+    expect(openrouter.calls[0]?.options?.model).toBe(titleModel.model);
+    expect(codex.calls).toEqual([]);
+    state.bots.set("codex", { ...bot("codex", "codex"), helperModel: false });
+    expect(jobs.text("thread-title", "codex")).toBeNull();
+  });
+
+  it("keeps unavailable, policy-refused and unassigned selections from using another model", () => {
+    const modelSelection = { instanceId: "claude", model: "company-haiku" };
+    const { jobs, state } = setup({ modelAllowed: ({ model }) => [modelSelection.model, titleModel.model].includes(model) });
+    expect(jobs.text("thread-title", "claude", { modelSelection, titleModel })).toBeTruthy();
+    expect(jobs.text("thread-title", "claude", { modelSelection, titleModel: { instanceId: "codex", model: titleModel.model } })).toBeNull();
+    expect(jobs.text("thread-title", "claude", { modelSelection, titleModel: { ...titleModel, model: "unassigned" } })).toBeNull();
+    state.refused.add("openrouter");
+    expect(jobs.text("thread-title", "claude", { modelSelection, titleModel })).toBeNull();
   });
 });
 

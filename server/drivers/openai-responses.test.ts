@@ -359,6 +359,34 @@ describe("a model that refuses tools over Chat Completions, at OpenAI's address"
     expect(f.calls[2]!.body).not.toHaveProperty("reasoning_effort");
     expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ input: 3, output: 2 }));
   });
+
+  it.each([[OPENAI, "max_completion_tokens"], ["relay", "max_tokens"]])("caps a title completion and discards reasoning-only output on %s", async (apiUrl, field) => {
+    const f = await fixture((_call, response) => {
+      reject(response, 200, JSON.stringify({ choices: [{ message: { content: null, reasoning_content: "Thinking it over." }, finish_reason: "length" }] }));
+    }, apiUrl);
+    await expect(f.instance.generateText!("Name this", { model: MODEL, finalTextOnly: true, maxOutputTokens: 512 })).resolves.toBe("");
+    await expect(f.instance.generateText!("Other helper job", { model: MODEL })).resolves.toBe("Thinking it over.");
+    expect(f.calls[0]?.body[field]).toBe(512);
+    expect(f.calls[1]?.body).not.toHaveProperty(field);
+  });
+
+  it("caps a title on the learned Responses route and keeps only final assistant text", async () => {
+    const f = await fixture((call, response, nth) => {
+      if (call.path.endsWith("/chat/completions")) return reject(response, 400, refusalOf(MODEL));
+      if (nth === 2) return answer(response);
+      const output = [reasoningItem(), messageItem("I will name this chat.", "msg_intro", "commentary")];
+      if (nth === 3) output.push(messageItem("A short title"));
+      events(response, [completed(output)]);
+    });
+    expect(await f.turn()).toMatchObject({ end: { ok: true } });
+    const onUsage = vi.fn();
+    const options = { model: MODEL, finalTextOnly: true, maxOutputTokens: 512, onUsage };
+    await expect(f.instance.generateText!("Name this", options)).resolves.toBe("A short title");
+    await expect(f.instance.generateText!("Name this", options)).resolves.toBe("");
+    expect(f.paths().slice(2)).toEqual(["/v1/responses", "/v1/responses"]);
+    expect(f.calls[2]?.body).toMatchObject({ max_output_tokens: 512, store: false, tools: [] });
+    expect(onUsage).toHaveBeenCalledWith({ model: MODEL, input: 40, output: 12, cachedInput: 8 });
+  });
 });
 
 describe("tool rounds over Responses", () => {

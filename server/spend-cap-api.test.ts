@@ -239,13 +239,14 @@ describe("spend cap and prices through real turns", () => {
     const logged = () => { try { return readFileSync(log, "utf8"); } catch { return ""; } };
     const titleCalls = (text: string) => logged().split("\n").filter((line) => line.includes("short title") && line.includes(text));
     const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    expect((await put({ budgets: { monthlyUsd: 0.01 } })).status).toBe(200);
+    expect((await put({ budgets: { monthlyUsd: 0.10 } })).status).toBe(200);
     const { bot } = await control(["new-bot", "--name", "Cap title probe"]);
     expect((await send(bot.id, "Plan the spring offsite")).status).toBeLessThan(300);
     await control(["wait", "--bot", bot.id, "--timeout", "30"]);
-    // Under the cap, the first message is named by the engine; the turn's $0.01 then reaches the cap.
     await expect.poll(() => titleCalls("Plan the spring offsite").length, { timeout: 15_000 }).toBe(1);
 
+    expect((await put({ budgets: { monthlyUsd: 0.01 } })).status).toBe(200);
+    expect(await (await api("/api/usage")).json()).toMatchObject({ budget: { exceeded: true } });
     const task = await api(`/api/bots/${bot.id}/tasks`, json({}));
     const { threadId } = (await task.json() as any).task;
     expect((await api(`/api/bots/${bot.id}/messages`, json({ text: "Draft the venue shortlist", threadId }))).status).toBe(409);

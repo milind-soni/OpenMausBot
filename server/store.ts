@@ -112,13 +112,13 @@ export function toWireTask(task: TaskRecord, botModel: ModelSelection): WireTask
 const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] as string[] };
 
 const TASK_PATCH_FIELDS = [
-  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
+  "title", "titleMode", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "heldUnread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "usage", "setupRequest", "botApi", "botApiAsOwner", "outside",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null; closed?: { at: number; by: NonNullable<GroupTaskRecord["closedBy"]> } | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "titleMode" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null; closed?: { at: number; by: NonNullable<GroupTaskRecord["closedBy"]> } | null };
 
 
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
@@ -272,6 +272,7 @@ export class Store {
   /** How a new bot is shared; a Team Cloud sets its own rule. */
   newBotSharing: NewBotSharingRule = sharedUnlessRestricted;
   private listeners = new Set<(change: StoreChange) => void>();
+  readonly taskTitleChanges = new WeakMap<TaskRecord, symbol>();
   private registeringInitialSections = true;
   /** Where bots, rooms and their threads are saved (server/registry-store.ts). */
   private readonly registry: RegistryStore = new JsonRegistry();
@@ -993,7 +994,7 @@ export class Store {
     const task = this.groupTaskByThread(groupId, threadId);
     if (!group || !task) return null;
     this.commitGroupChange(group, "the thread change", () => {
-      if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
+      if (patch.title !== undefined) Object.assign(task, { title: patch.title.trim().slice(0, 80) || UNTITLED_TASK, titleMode: patch.titleMode ?? "manual" });
       if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned; if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
       for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
       if (patch.closed) Object.assign(task, { closedAt: patch.closed.at, closedBy: structuredClone(patch.closed.by) }); else if (patch.closed === null) { delete task.closedAt; delete task.closedBy; }
@@ -1005,10 +1006,10 @@ export class Store {
   titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
     const group = this.group(groupId), title = titleFromMessage(text);
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK || title === UNTITLED_TASK) return null;
+    if (!group || !task || task.titleMode === "manual" || task.titleFromFirstMessage || task.title !== UNTITLED_TASK || title === UNTITLED_TASK) return null;
     this.commitGroupChange(group, "the thread's title", () => {
       task.title = title;
-      task.titleFromFirstMessage = true;
+      Object.assign(task, { titleFromFirstMessage: true, titleMode: "automatic" });
     });
     this.emit({ type: "group", groupId });
     return task;
@@ -1016,8 +1017,8 @@ export class Store {
 
   retitleGroupTask(groupId: string, threadId: string, machineTitle: string, title: string): GroupTaskRecord | null {
     const task = this.groupTaskByThread(groupId, threadId);
-    if (!task || task.title !== machineTitle) return null;
-    return this.patchGroupTask(groupId, threadId, { title: threadTitleFrom(title) });
+    if (!task || task.titleMode === "manual" || task.title !== machineTitle) return null;
+    return this.patchGroupTask(groupId, threadId, { title: threadTitleFrom(title), titleMode: "automatic" });
   }
 
   deleteGroupTask(groupId: string, threadId: string): GroupRecord | null {
@@ -2010,9 +2011,8 @@ export class Store {
     if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
     const revocation = keptRevocation(threadApproval(task, bot), threadApproval({ ...task, ...patch }, bot), patch);
     this.commitBotChange(bot, "the thread change", () => {
-      for (const key of TASK_PATCH_FIELDS) {
-        if (Object.prototype.hasOwnProperty.call(patch, key)) Object.assign(task, { [key]: structuredClone(patch[key]) });
-      }
+      for (const key of TASK_PATCH_FIELDS) if (Object.hasOwn(patch, key)) Object.assign(task, { [key]: structuredClone(patch[key]) });
+      if (patch.title !== undefined) { task.titleMode = patch.titleMode ?? "manual"; this.taskTitleChanges.set(task, Symbol()); }
       if (patch.unread !== undefined && !Object.prototype.hasOwnProperty.call(patch, "heldUnread")) delete task.heldUnread;
       if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
       if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
@@ -2055,11 +2055,11 @@ export class Store {
     const approval = resetApprovalToAsk ? structuredClone(ASK_NOW) : {};
     const own = sameModelSelection(selection, updateBotDefault ? selection : bot.modelSelection) ? undefined : structuredClone(selection);
     const nextTask = persistedPin({ ...task, ...taskPatch, modelSelection: own, ...approval,
-      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) });
+      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD, titleMode: taskPatch.titleMode ?? "manual" } : {}) });
     const others = updateBotDefault ? this.withDefaultModel(bot, selection)! : bot.tasks!;
     const nextTasks = bot.tasks!.map((candidate, index) => candidate === task ? nextTask : others[index]!);
     const botPatch = updateBotDefault ? { modelSelection: structuredClone(selection), ...approval } : {};
-    this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, ...botPatch, tasks: nextTasks } : candidate));
+    this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, ...botPatch, tasks: nextTasks } : candidate)); if (taskPatch.title !== undefined) this.taskTitleChanges.set(task, Symbol());
     bot.tasks!.forEach((candidate, index) => Object.assign(candidate, nextTasks[index]));
     Object.assign(bot, botPatch);
     this.emit({ type: "bot", botId });
@@ -2201,19 +2201,19 @@ export class Store {
   titleTaskFromFirstMessage(botId: string, text: string, threadId?: string): TaskRecord | null {
     const bot = this.own(botId), title = titleFromMessage(text);
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!bot || !task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD) || title === UNTITLED_TASK) return null;
+    if (!bot || !task || task.titleMode === "manual" || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD) || title === UNTITLED_TASK) return null;
     this.commitBotChange(bot, "the thread's title", () => {
       task.title = title;
-      task.titleFromFirstMessage = true;
+      Object.assign(task, { titleFromFirstMessage: true, titleMode: "automatic" });
     }, undefined, true);
     this.emit({ type: "bot", botId });
     return task;
   }
 
-  retitleTask(botId: string, threadId: string, machineTitle: string, title: string): TaskRecord | null {
+  retitleTask(botId: string, threadId: string, machineTitle: string, title: string, explicit = false): TaskRecord | null {
     const task = this.taskByThread(botId, threadId);
-    if (!task || task.title !== machineTitle) return null;
-    return this.renameTask(botId, threadId, threadTitleFrom(title));
+    if (!task || task.title !== machineTitle || (!explicit && task.titleMode === "manual")) return null;
+    return this.patchTask(botId, threadId, { title: threadTitleFrom(title), titleMode: explicit ? "manual" : "automatic" });
   }
 
   deleteTask(botId: string, threadId: string): BotRecord | null {

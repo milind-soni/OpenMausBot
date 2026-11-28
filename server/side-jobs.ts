@@ -8,7 +8,7 @@ import type { MemoryModelFailure, MemoryModelOutcome, MemoryModelRun, MemoryMode
 import { ChatCompletionError, ChatHttpError } from "./drivers/openai-chat-refusals.ts";
 import { openRouterModelUnavailable } from "./drivers/openrouter-free.ts";
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
-import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
+import type { ModelSelection, ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
 import { refusesModel } from "./quick-model-fallback.ts";
 import type { LightModel, LightModelEngine } from "./suggested-reply/light-model.ts";
 import { fastModelFor } from "./turn-route.ts";
@@ -27,7 +27,7 @@ export interface HelperConfig {
 }
 
 /** Goes into a CLI's argv: never a leading dash, no space or control character. */
-const HELPER_MODEL_ID = /^[A-Za-z0-9][\x21-\x7e]*$/;
+export const ONE_OFF_MODEL_ID = /^[A-Za-z0-9][\x21-\x7e]*$/;
 
 /** OMB_HELPER_INSTANCE / OMB_HELPER_MODEL win over the file; an empty OMB_HELPER_INSTANCE switches a saved helper off.
  * An invalid model switches the helper off rather than writing with a model the person did not name. */
@@ -36,12 +36,12 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
   if (!instanceId) return null;
   const model = (env.OMB_HELPER_MODEL ?? cfg.helper?.model)?.trim();
   if (!model) return { instanceId };
-  return HELPER_MODEL_ID.test(model) ? { instanceId, model } : null;
+  return ONE_OFF_MODEL_ID.test(model) ? { instanceId, model } : null;
 }
 
 /** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
 /** "suggested-reply": the composer's next-line suggestion, only ever on the bot's own engine's smallest model. */
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply";
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply" | "thread-title";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable" | "openRouter"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -65,7 +65,7 @@ export interface SideJobText {
 
 /** `waiting`: the call has to wait for a free slot (other bots' background calls); `started`: it starts now, after waiting
  * or at once. A call that is never queued calls neither. */
-export type SideJobTextOptions = Pick<TextGenerationOptions, "signal" | "timeoutMs"> & {
+export type SideJobTextOptions = Pick<TextGenerationOptions, "signal" | "timeoutMs" | "maxOutputTokens" | "finalTextOnly"> & {
   waiting?(): void;
   started?(): void;
   onMemoryModel?(result: MemoryModelRun): void;
@@ -80,7 +80,7 @@ export interface SideJobsDeps {
   smallModels: { refused(instanceId: string): ReadonlySet<string>; remember(instanceId: string, model: string): void };
   /** Hosted workspaces only. */
   modelAllowed?: (selection: { instanceId: string; model: string }) => boolean;
-  assertWithinBudget: () => void;
+  assertWithinBudget: (botId?: string) => void;
   book: (row: Omit<UsageRow, "at" | "costSource">, tokensReported: boolean, notificationThreadId: string) => void;
   log?: (line: string) => void;
   /** How many background jobs run at once, across bots. */
@@ -89,24 +89,32 @@ export interface SideJobsDeps {
   lightModel?: (engine: LightModelEngine, refused: ReadonlySet<string>) => LightModel | null;
 }
 
+interface SideJobContext {
+  threadId?: string;
+  instance?: SideJobInstance | null;
+  modelSelection?: SideJobBot["modelSelection"];
+  titleModel?: Pick<ModelSelection, "instanceId" | "model"> | null;
+  ownOnly?: boolean;
+}
+
 export interface SideJobs {
-  /** Null when nobody can write it and the job keeps its fallback. `at.instance`: the conversation's engine, for the summary. */
-  text(job: SideJob, botId: string, at?: { instance?: SideJobInstance }): SideJobText | null;
+  /** Null when nobody can write it. `at.instance` and `at.modelSelection` identify the conversation's engine and model. */
+  text(job: SideJob, botId: string, at?: SideJobContext): SideJobText | null;
 }
 
 type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<string>;
 
 /** Jobs someone is waiting on, and the representative, which must never get tools, run only on a one-off text call:
  * generateMemoryText starts a whole agent process. */
-const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative", "status-reply", "skill-burger"]);
+const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative", "status-reply", "skill-burger", "thread-title"]);
 
 function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined {
   const call = ONE_OFF_ONLY.has(job) ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
   return call?.bind(instance);
 }
 
-/** A turn or a person is waiting on these, so they start at once. */
-const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply"]);
+/** A turn or a person is waiting on these, or the caller already holds a slot. */
+const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply", "thread-title"]);
 /** A person sees these soon (a new bot's suggestions card): they wait ahead of memory upkeep and skill review. */
 const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger", "suggested-reply"]);
 
@@ -166,14 +174,16 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
   const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
     async (prompt, options) => {
       const { checkModel, ...generation } = fixed();
-      if (!checkModel) deps.assertWithinBudget();
-      const threadId = `${job}-${randomUUID()}`;
+      const budgetBot = job === "thread-title" ? bot.id : undefined;
+      if (!checkModel) deps.assertWithinBudget(budgetBot);
+      const threadId = job === "thread-title" ? bot.threadId : `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
         ...generation,
+        ...(job === "thread-title" ? { finalTextOnly: true } : {}),
         ...(checkModel ? { checkModel: (model: string) => {
           checkModel(model);
-          deps.assertWithinBudget();
+          deps.assertWithinBudget(budgetBot);
         } } : {}),
         onUsage: (usage) => {
           deps.book({
@@ -293,10 +303,26 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     }, { signal: options.signal, interactive: SEEN_SOON.has(job), onWait: waiting }) }
     : found;
 
-  function find(job: SideJob, botId: string, at: { instance?: SideJobInstance }): SideJobText | null {
-    const bot = deps.bot(botId);
-    const own = at.instance ?? (bot ? deps.instance(bot.modelSelection.instanceId) : null);
-    if (!bot || !own || deps.refusal(own)) return null;
+  function find(job: SideJob, botId: string, at: SideJobContext): SideJobText | null {
+    const record = deps.bot(botId);
+    if (!record) return null;
+    const bot = at.threadId ? { ...record, threadId: at.threadId } : record;
+    const selection = (job === "thread-title" ? at.modelSelection : undefined) ?? bot.modelSelection;
+    const own = at.instance ?? deps.instance(selection.instanceId);
+    if (!own || deps.refusal(own)) return null;
+    const ownTitleModel = selection.instanceId === own.instanceId ? selection.model : undefined;
+    if (job === "thread-title") {
+      if (!own.enabled || (deps.modelAllowed && (!ownTitleModel || !deps.modelAllowed({ instanceId: own.instanceId, model: ownTitleModel })))) return null;
+      if (at.titleModel && !at.ownOnly) {
+        const { instanceId, model } = at.titleModel;
+        const target = deps.instance(instanceId);
+        if (!target?.enabled || !target.generateText || deps.refusal(target) || deps.modelAllowed?.(at.titleModel) === false) return null;
+        const option = target.models.options.find(({ id }) => id === model);
+        if (option?.orgBlocked || option?.needsCliUpdate) return null;
+        return { via: "engine", generateText: booked(job, bot, target, target.generateText.bind(target), { kind: "bot", botId: bot.id }, () => ({ model })) };
+      }
+      if (own.driverKind === "claudeAgent" && ownTitleModel && !ONE_OFF_MODEL_ID.test(ownTitleModel)) return null;
+    }
     if (job === "suggested-reply") return lightText(bot, own);
     const selectedMemory = job === "memory" && bot.memoryModel?.instanceId === own.instanceId ? bot.memoryModel : undefined;
     if (selectedMemory && (!own.openRouter || !own.enabled || !own.generateText)) return null;
@@ -318,12 +344,14 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
           generateText: selectedMemory ? writeMemory(bot, own, call, selectedMemory) : booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({})),
         };
       }
-      return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own) })) };
+      return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => job === "thread-title" ? { model: ownTitleModel } : { fallback: ownFallback(bot, own) }) };
     }
-    if (!helperModelAllowed(bot)) return null;
+    if (at.ownOnly || !helperModelAllowed(bot)) return null;
     const helper = usableHelper();
     if (!helper) return null;
-    return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, () => (helper.model ? { model: helper.model } : {})) };
+    const model = helper.model ?? (job === "thread-title" && deps.modelAllowed ? helper.instance.models.default : undefined);
+    if (job === "thread-title" && deps.modelAllowed && (!model || !deps.modelAllowed({ instanceId: helper.instance.instanceId, model }))) return null;
+    return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, () => (model ? { model } : {})) };
   }
   return {
     text: (job, botId, at = {}) => queued(job, find(job, botId, at)),

@@ -615,6 +615,10 @@ export interface TextGenerationOptions {
   checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
+  /** Output token budget, including reasoning where the provider counts it. */
+  maxOutputTokens?: number;
+  /** Return final answer text only. Empty final content is allowed. */
+  finalTextOnly?: boolean;
   /** For a bot's own engine whose driver picks a small model of its own. */
   fallback?: SmallModelFallback;
 }

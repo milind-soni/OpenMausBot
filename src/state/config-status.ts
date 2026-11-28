@@ -80,6 +80,7 @@ export interface ConfigStatus {
   /** The server cannot read its saved routines, so none runs until it can. */
   routinesUnreadable?: true;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threadTitles?: { model: Pick<ModelSelection, "instanceId" | "model"> | null; followUp: boolean; instances: string[] };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };

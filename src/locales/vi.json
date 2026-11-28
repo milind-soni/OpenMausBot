@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Mô hình đặt tiêu đề hội thoại",
+  "settings.features.titleModelAutomatic": "Tự động",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (không khả dụng)",
+  "settings.features.titleModelConnect": "Kết nối AI tương thích để chọn mô hình đặt tiêu đề.",
+  "settings.features.titleFollowUp": "Cập nhật tiêu đề hội thoại",
+  "settings.features.titleFollowUpLine": "Cập nhật tiêu đề tự động khi cuộc trò chuyện đổi chủ đề. Tiêu đề bạn tự đặt sẽ được giữ nguyên.",
   "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
   "voice.gemini.model": "Mô hình giọng nói Gemini",
   "keys.label.geminiTts": "Khóa API giọng nói Gemini",

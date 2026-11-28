@@ -34,10 +34,12 @@ const EXCERPT_MAX_MESSAGES = 12;
 const EXCERPT_LINE_MAX_CHARS = 300;
 const ATTACHMENT_TAG = /<attached-(?:image|file)\b[^>]*\/>/g;
 
-export type ThreadTitleSource = "first-message" | "conversation" | "call";
+export type ThreadTitleSource = "first-message" | "first-reply" | "follow-up" | "conversation" | "call";
 
 const TITLE_PROMPT: Record<ThreadTitleSource, { ask: string; label: string }> = {
   "first-message": { ask: "Name the conversation that begins with the message below.", label: "Message:" },
+  "first-reply": { ask: "Name the conversation using the person's request and the bot's reply below.", label: "Conversation:" },
+  "follow-up": { ask: "Name the conversation below if its topic has changed. Reply KEEP if the current title still fits.", label: "Conversation:" },
   conversation: { ask: "Name the conversation below by what it is about now.", label: "Conversation:" },
   call: { ask: "Name the voice call below by what was asked on it.", label: "Requests:" },
 };
@@ -47,6 +49,7 @@ export function threadTitlePrompt(text: string, source: ThreadTitleSource = "fir
   return [
     ask,
     "Reply with only a short title in the same language as the user's request. Use a concise phrase of at most 48 characters, in plain text, with no quotes or trailing period.",
+    ...(source === "call" ? [] : ["Use project | concrete task if a project or module is clear. Avoid filler such as help, question, chat, 问题, or 会话."]),
     label,
     text.trim().slice(0, TITLE_INPUT_MAX_CHARS),
   ].join("\n");
@@ -72,6 +75,14 @@ function excerptLines(candidates: Iterable<ExcerptCandidate>, maxLines = Infinit
     if (lines.length >= maxLines) break;
   }
   return lines;
+}
+
+export function titleTurnExcerpt(request: string, reply?: string, currentTitle?: string): string {
+  return excerptLines([
+    ...(currentTitle ? [{ label: "Current title", text: currentTitle }] : []),
+    { label: "User", text: request },
+    ...(reply ? [{ label: "Bot", text: reply }] : []),
+  ]).join("\n");
 }
 
 export function titleConversationExcerpt(messages: readonly Message[]): string {

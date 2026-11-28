@@ -557,7 +557,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   };
   if (titleCall && !process.env.FAKE_CLAUDE_TEXT_FILE && !(routes && routed())) {
     process.stderr.write("fake title failed\n");
-    replyText("fake title failed", 1, null);
+    process.exit(1);
   }
   // Background one-shots never overwrite the shared turn dump; FAKE_CLAUDE_TEXT_DUMP records them.
   const upkeepCall = titleCall || /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);

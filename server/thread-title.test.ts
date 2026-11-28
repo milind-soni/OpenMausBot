@@ -8,7 +8,7 @@ import { AUTHORITY, botWho, fromNote, fromNoteWith, routineWho } from "./provena
 import { generateThreadTitle, THREAD_TITLE_TIMEOUT_MS } from "./thread-title-generate.ts";
 
 describe("a generated title and the background slots", () => {
-  it("answers null after 10 s, but keeps its slot until the engine call has really ended", async () => {
+  it("answers null at the deadline and keeps its slot until the engine call ends", async () => {
     vi.useFakeTimers();
     try {
       const slots = createJobSlots(1);
@@ -110,7 +110,7 @@ describe("threadTitlePrompt", () => {
     const prompt = threadTitlePrompt(`User: fix the login\n${"x".repeat(5_000)}`, "conversation");
     expect(prompt).toContain("what it is about now");
     expect(prompt).toContain("Conversation:\nUser: fix the login");
-    expect(prompt.length).toBeLessThan(TITLE_INPUT_MAX_CHARS + 300);
+    expect(prompt.length).toBeLessThan(TITLE_INPUT_MAX_CHARS + 400);
   });
 
   it.each<[ThreadTitleSource, string]>([

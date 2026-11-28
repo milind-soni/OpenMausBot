@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "대화 제목 생성 모델",
+  "settings.features.titleModelAutomatic": "자동",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (사용할 수 없음)",
+  "settings.features.titleModelConnect": "제목 생성 모델을 선택하려면 호환되는 AI를 연결하세요.",
+  "settings.features.titleFollowUp": "대화 제목 업데이트",
+  "settings.features.titleFollowUpLine": "대화 주제가 바뀌면 자동 제목을 업데이트합니다. 직접 지정한 제목은 유지됩니다.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API 키를 붙여넣으세요",
   "voice.gemini.model": "Gemini 음성 합성 모델",
   "keys.label.geminiTts": "Gemini 음성 합성 API 키",

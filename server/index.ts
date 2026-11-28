@@ -333,7 +333,7 @@ import { buildRecoveryText, buildTurnContext, replaysNatively } from "./turn-con
 import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
-import { generateThreadTitle } from "./thread-title-generate.ts"; import { createHandedThreadTitle } from "./host/handed-thread-title.ts"; import { handedMainThread, postHandedLine, writeHandedLine, type HandedLineDeps } from "./host/handed-line.ts";
+import { generateThreadTitle } from "./thread-title-generate.ts"; import { createAutomaticThreadTitles, type ThreadTitleGate } from "./host/thread-titles.ts"; import { createHandedThreadTitle } from "./host/handed-thread-title.ts"; import { handedMainThread, postHandedLine, writeHandedLine, type HandedLineDeps } from "./host/handed-line.ts";
 import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts"; import { createDispatchClaims } from "./host/dispatch-claims.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { createPhoneHold } from "./phone-screen/hold.ts"; import { createPhoneGate } from "./routes/phone-gate.ts";
@@ -573,7 +573,7 @@ import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { holdBodyDeadline } from "./body-deadline.ts";
-import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { createLinkLimits, LINK_ACTION_DENIED, LINK_APP_WRITE_REFUSAL, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, LINK_ROUTE_REFUSAL, linkAppWriteRefused, linkHandOnRefusal, linkRouteRefused } from "./bot-link/far-side.ts"; import { followRoomMentions } from "./host/bot-link-rooms.ts"; import { standInAmong, standInWriteRefusal } from "./host/stand-in-guard.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { arrivalsFile, desktopMainMover, mcpServersHere, staysOnCloud, thisComputerOwner } from "./move-back.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
+import { isLinkedId } from "./bot-link/protocol.ts"; import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { createLinkLimits, LINK_ACTION_DENIED, LINK_APP_WRITE_REFUSAL, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, LINK_ROUTE_REFUSAL, linkAppWriteRefused, linkHandOnRefusal, linkRouteRefused } from "./bot-link/far-side.ts"; import { followRoomMentions } from "./host/bot-link-rooms.ts"; import { standInAmong, standInWriteRefusal } from "./host/stand-in-guard.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { arrivalsFile, desktopMainMover, mcpServersHere, staysOnCloud, thisComputerOwner } from "./move-back.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts"; import { createBotLibraryRoutes } from "./routes/bot-library.ts";
@@ -1341,9 +1341,9 @@ function operatorPrices(): PriceList | null {
   return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
 }
 
-const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(botId)?.section, threadTrigger: (threadId) => turnTriggers.get(threadId), routineWriter: (id) => { const key = cloudRoutineAuthors?.writer(id); return key ? teamOwners.people?.list().find((one) => personKey({ id: "", email: one.email }) === key)?.email : undefined; } }); const usageCapGate = createUsageCapGate({ dataDir: DATA_DIR, caps: () => cfg.usageCaps, botName: (botId) => store.bot(botId)?.name, language: () => appLanguage(), log: (line) => console.log(line), notice: (aboutBotId, title, body) => { const bot = store.bot(aboutBotId ?? "") ?? store.bots[0]; if (bot) broadcast({ kind: "notify", notification: logNotification(buildSpendNotification({ id: bot.id, name: bot.name }, bot.threadId, { title, body })) }, { adminOnly: true }); } }); const threadStanding = (botId: string, threadId: string): ThreadStanding => { const owner = directRequestOwners.get(threadId); return { unattended: isUnattended(botId, threadId), automation: owner?.automation, origin: owner?.origin?.kind }; }; const routineTriggerOf = (threadId: string) => { const run = activeRoutineRunForThread(threadId); return run ? run.triggerSource ?? (run.manual ? "manual" : "schedule") : undefined; }; function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported = true, notificationThreadId = row.threadId): void {
+const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(botId)?.section, threadTrigger: (threadId) => turnTriggers.get(threadId), routineWriter: (id) => { const key = cloudRoutineAuthors?.writer(id); return key ? teamOwners.people?.list().find((one) => personKey({ id: "", email: one.email }) === key)?.email : undefined; } }); const usageCapGate = createUsageCapGate({ dataDir: DATA_DIR, caps: () => cfg.usageCaps, botName: (botId) => store.bot(botId)?.name, language: () => appLanguage(), log: (line) => console.log(line), notice: (aboutBotId, title, body) => { const bot = store.bot(aboutBotId ?? "") ?? store.bots[0]; if (bot) broadcast({ kind: "notify", notification: logNotification(buildSpendNotification({ id: bot.id, name: bot.name }, bot.threadId, { title, body })) }, { adminOnly: true }); } }); const threadStanding = (botId: string, threadId: string): ThreadStanding => { const owner = directRequestOwners.get(threadId); return { unattended: isUnattended(botId, threadId), automation: owner?.automation, origin: owner?.origin?.kind }; }; const routineTriggerOf = (threadId: string) => { const run = activeRoutineRunForThread(threadId); return run ? run.triggerSource ?? (run.manual ? "manual" : "schedule") : undefined; }; function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported = true, notificationThreadId = row.threadId, trace = usageTrace.settle(row.threadId)): void {
   const cost = tokensReported || row.costUsd !== null ? ledgerCost(row, operatorPrices()) : { costUsd: null };
-  const booked = attributeUsage({ ...row, ...cost, ...usageTrace.settle(row.threadId), at: new Date().toISOString() });
+  const booked = attributeUsage({ ...row, ...cost, ...trace, at: new Date().toISOString() });
   // The append is async; noteSpend counts the row from memory until it lands, so the cap check sees it.
   noteSpend(DATA_DIR, booked, appendUsage(DATA_DIR, booked));
   const state = spendState(cfg, DATA_DIR);
@@ -3854,7 +3854,7 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
   }
   return null;
 }; const engineHints = createEngineHints({ registry, access: (id) => providerConfigs()[id]?.access ?? registry.access(id), managed: (id) => managedDesktop.owns(id), policy: policyModelRefusal, ...(hostedModels ? { offered: (selection) => hostedModels!.allows(selection) } : {}) }); const ownThreads = createOwnThreads({ store, registry, node: (id) => coordinator.node(id), current: turnSelection, proposalRefusal: validateModelProposal, givesWay: modelGivesWay, modelName, hint: engineHints.hint, broken: engineHints.broken, localOnce: (engines) => localModelsOnce(engines, directLocalModels(providerConfigs(), (id, saved) => { const engine = registry.get(id), live = threadEngine(id); if (!engine || !live || !readyToRun(live, selectionContext)) return null; return { name: engine.displayName || id, models: [...saved, ...engine.models.options.map((option) => option.id)].filter((model) => !hostedModels || hostedModels.allows({ instanceId: id, model })) }; })), sourceLevel: sourceApprovalMode, mayRaise: (threadId) => !outsideLineage.handsNoLevel(threadId) && (!CLOUD_HOME || cloudOwnerPerson(threadPersonKey(threadId))) && (!HOSTED_WORKSPACE || sharedWorkspaceFullAccessEnabled()) });
-const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store, mainThread: (botId) => handedMainThread(store.bot(botId), (threadId) => store.taskByThread(botId, threadId)?.archivedAt !== undefined, () => botMainThread(botId) ?? store.bot(botId)?.threadId) }; const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: (groupId, threadId, botIds) => Object.assign(beginGroupTurnOperation(groupId, threadId, botIds), { farSide: true }), finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, ...(handedLines ? { handedLine: (input) => { postHandedLine(handedLines, input); } } : {}), refusal: (bot) => botMoveRefusal(bot) ?? botHolds.handoff(bot.id) ?? starterCaps.pausedText(bot.id, undefined), paused: (botId) => starterAwake.isPaused(botId) || botHolds.held(botId), acceptRefusal: (bot) => linkLimits.acceptRefusal(bot), language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const linkedRoster = createLinkedRoster({ link: botLink.link, bots: () => store.bots, active: () => coordinator.active() }); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
+const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store, mainThread: (botId) => handedMainThread(store.bot(botId), (threadId) => store.taskByThread(botId, threadId)?.archivedAt !== undefined, () => botMainThread(botId) ?? store.bot(botId)?.threadId) }; const automaticTitles = createAutomaticThreadTitles(); const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, start: automaticTitles.start }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: (groupId, threadId, botIds) => Object.assign(beginGroupTurnOperation(groupId, threadId, botIds), { farSide: true }), finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, ...(handedLines ? { handedLine: (input) => { postHandedLine(handedLines, input); } } : {}), refusal: (bot) => botMoveRefusal(bot) ?? botHolds.handoff(bot.id) ?? starterCaps.pausedText(bot.id, undefined), paused: (botId) => starterAwake.isPaused(botId) || botHolds.held(botId), acceptRefusal: (bot) => linkLimits.acceptRefusal(bot), language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const linkedRoster = createLinkedRoster({ link: botLink.link, bots: () => store.bots, active: () => coordinator.active() }); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR, restartCut: restartCutStop({ dataDir: DATA_DIR, lines: (threadId) => store.activePath(threadId) }),
   now: Date.now, wrote: () => { handoffTicks.kick(); handoffStatus.changed(); }, handoffLimit: { refusal: (botId, open, origin) => botHolds.handoff(botId) ?? starterCaps.handoffs.refusal(botId, open) ?? usageCapGate.handoff(botId, origin) },
   log: line => console.error("coordinator:", line),
@@ -4109,7 +4109,7 @@ function beginGroupTurnOperation(
 
 function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation) {
   roomMemberLock.releaseThread(operation.threadId);
-  roomTurnEnded(operation);
+  roomTurnEnded(operation); automaticTitles.turnEnded(operation.threadId);
   if (operation.goalRun && !operation.goalRun.finished) {
     finishGroupGoalRun(groupId, operation, "failed", "The team run ended before the lead reported an outcome.");
   }
@@ -4473,7 +4473,7 @@ store.onChange((change) => {
       for (const botId of computerControl.recheck([change.threadId])) announceControl(botId);
       break;
     case "thread.deleted":
-      directRequestOwners.delete(change.threadId);
+      automaticTitles.drop(change.threadId); directRequestOwners.delete(change.threadId);
       for (const botId of computerControl.forgetThread(change.threadId)) announceControl(botId);
       stoppedTurns.delete(change.threadId); threadMaps.forget(change.threadId);
       turnStops.forget(change.threadId);
@@ -5063,8 +5063,8 @@ const sideJobs = createSideJobs({
   refusal: (instance) => policyModelRefusal(instance), smallModels: quickFallback,
   helper: cacheUntilConfigChanges((config) => helperSelection(config)),
   ...(hostedModels ? { modelAllowed: (selection: ModelSelection) => hostedModels.allows(selection) } : {}),
-  assertWithinBudget: () => { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(undefined, true); },
-  book: bookTurnUsage, lightModel: lightModelFor,
+  assertWithinBudget: (botId) => { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(botId, botId === undefined); },
+  book: (row, reported, threadId) => bookTurnUsage(row, reported, threadId, {}), lightModel: lightModelFor,
   log: (line) => console.log(line),
 });
 
@@ -6348,6 +6348,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId, ...(event.type === "item.completed" && event.itemId ? { itemId: event.itemId } : {}) });
     lastReply.set(event.threadId, spoken.text);
+    if (!replayed) automaticTitles.replyReceived(event.threadId, turnId, spoken.text);
   };
   const landParkedFiles = () => {
     const { files, strays } = takeParkedFiles(turnAttachmentsByTurn, event.threadId, event.turnId);
@@ -6367,7 +6368,7 @@ bus.subscribe((event: RuntimeEvent) => {
   const liveTurnId = event.turnId ?? liveTurnByThread.get(event.threadId);
   switch (event.type) {
     case "turn.started":
-      turnStartedAt.set(event.threadId, Date.now());
+      turnStartedAt.set(event.threadId, Date.now()); if (!replayed) automaticTitles.turnStarted(event.threadId, event.turnId, Boolean(group));
       // A stop that never saw its turn.completed must not pass for this turn.
       stoppedTurns.delete(event.threadId); personStops.turnStarted(event.threadId, event.turnId);
       break;
@@ -6645,7 +6646,8 @@ bus.subscribe((event: RuntimeEvent) => {
           .map((message) => message.text ?? "").join("\n"));
       }
       if (bot) void replyVoiceNotes.turnSettled({ bot, threadId: event.threadId, turnId: completedTurnId, stoppedByPerson: personStops.stopped(event.threadId, completedTurnId), internal, ...(event.ok ? {} : { ending: { stop: turnStops.read(event.threadId, completedTurnId), cause: turnStops.failureCause(event), interrupted: event.stopReason === "interrupted" } }) });
-      const reply = lastReply.get(event.threadId) ?? "";
+      const reply = lastReply.get(event.threadId) ?? "", titleReply = event.ok && !stopped && !replayed ? reply.trim() : "";
+      if (!replayed && (bot || titleReply)) automaticTitles.turnEnded(event.threadId, completedTurnId, titleReply);
       if (personStops.stopped(event.threadId, completedTurnId)) pushStoppedTurn(completedTurnId);
       personStops.turnEnded(event.threadId, completedTurnId);
       lastReply.delete(event.threadId);
@@ -7390,18 +7392,17 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
   return frame;
 }
 
-function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string } {
+function threadTitleGate(bot: BotRecord, ownOnly = false): ThreadTitleGate {
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) return { ok: false, refusal: hostedModels.error() };
-  const instance = registry.get(bot.modelSelection.instanceId);
-  if (!instance?.generateText) return { ok: false, refusal: "this bot's model can't generate a title — rename the thread instead" };
-  const refusal = policyModelRefusal(instance);
+  const own = registry.get(bot.modelSelection.instanceId), refusal = own && policyModelRefusal(own);
   if (refusal) return { ok: false, refusal };
-  try {
-    assertWithinBudget(cfg, DATA_DIR);
-  } catch (error) {
-    return { ok: false, refusal: error instanceof Error ? error.message : String(error) };
-  }
-  return { ok: true, instance };
+  try { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(bot.id, false, threadLanguage(bot.threadId)); }
+  catch (error) { return { ok: false, refusal: error instanceof Error ? error.message : String(error) }; }
+  const opener = store.taskByThread(bot.id, bot.threadId)?.openedBy?.botId;
+  const confined = cloudGuestDriven(bot.threadId) || botApiThread(bot.threadId) || linkLimits.held(bot.threadId) || (opener && isLinkedId(opener));
+  const instance = sideJobs.text("thread-title", bot.id, { threadId: bot.threadId, instance: own ?? undefined, modelSelection: bot.modelSelection,
+    ...(ownOnly || confined ? { ownOnly: true } : { titleModel: cfg.threadTitles?.model }) });
+  return instance?.generateText ? { ok: true, instance } : { ok: false, refusal: "No available model can generate a title for this thread." };
 }
 
 const titleRegenerations = new Set<string>();
@@ -7525,22 +7526,22 @@ async function beginTurn(
   else { clearInternalTurn(threadId); doneNotice.personTurnStarted(threadId); }
   if (answer.quiet) quietTurnThreads.add(threadId);
   else quietTurnThreads.delete(threadId);
+  const turnLineIds = new Set(opts?.excludeMessageIds ?? []);
+  const spoken = opts?.via === "call" || opts?.userMessage?.via === "call" ||
+    (turnLineIds.size > 0 && store.messagesFor(threadId).some((message) => turnLineIds.has(message.id) && message.via === "call"));
   if (resolvedImages.text.trim() && !opts?.cardContinuation && !opts?.replyTo?.reactedWith) {
     const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
-    const snippet = titled?.title, titleGate = titled && snippet && !titled.openedBy?.botId ? threadTitleGate(bot) : null;
-    if (snippet && titleGate?.ok) {
-      void generateThreadTitle(titleGate.instance, resolvedImages.text)
-        .then((title) => {
-          if (title) store.retitleTask(bot.id, threadId, snippet, title);
-        })
-        .catch(() => undefined);
+    const task = () => store.taskByThread(bot.id, threadId), current = task();
+    if (current && !current.openedBy?.botId && !titleRegenerations.has(threadId) && (titled || (cfg.threadTitles?.followUp && current.titleMode === "automatic"))) {
+      const title = current.title;
+      automaticTitles.start(threadId, { request: resolvedImages.text, currentTitle: titled ? undefined : title,
+        stillCurrent: () => task()?.title === title && task()?.titleMode === "automatic" && !titleRegenerations.has(threadId),
+        model: () => threadTitleGate(store.projectBotForTask(bot.id, threadId) ?? bot, spoken || guestConfined || linkLimited),
+        apply: (next) => { store.retitleTask(bot.id, threadId, title, next); } });
     }
   }
 
   // Spoken words never reach the log.
-  const turnLineIds = new Set(opts?.excludeMessageIds ?? []);
-  const spoken = opts?.via === "call" || opts?.userMessage?.via === "call" ||
-    (turnLineIds.size > 0 && store.messagesFor(threadId).some((message) => turnLineIds.has(message.id) && message.via === "call"));
   console.log(turnStartLogLine({
     botId, text: resolvedImages.text, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken,
   }));
@@ -8409,6 +8410,7 @@ async function beginTurn(
         turnContext.delete(threadId);
       }
       if (e instanceof DirectTurnSetupCancelled) {
+        if (ownsLatestGeneration) automaticTitles.turnEnded(threadId);
         settleDirectFollowup(dispatchClaimId, { ok: false, text: e.message });
         opts?.onDispatchError?.(e.message);
         if (ownsLatestGeneration && threadBusy(bot.id, threadId)) {
@@ -8481,6 +8483,7 @@ async function beginTurn(
           }
         } else if (refusal) message = `Automatic recovery unavailable: ${refusal} Original error: ${message}`;
       }
+      automaticTitles.turnEnded(threadId);
       settleDirectFollowup(dispatchClaimId, { ok: false, text: message });
       store.appendMessage(threadId, {
         role: "bot",
@@ -10661,8 +10664,7 @@ function startGroupTurn(
         sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
       });
   if (options.trigger) turnTriggers.set(threadId, options.trigger);
-  const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
-  const snippet = titled?.title;
+  const titleText = extractTurnImages(text).text, titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, titleText, threadId);
 
   const archived = members.filter((member) => member.hidden);
   const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0]; for (const line of placesElsewhere.missed(text, store.bots, botLink.reaches)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
@@ -10717,19 +10719,15 @@ function startGroupTurn(
     return message;
   }
 
-  const titleText = extractTurnImages(text).text;
-  const startTitle = (titleBot: (typeof members)[number]) => {
-    // An engine the organisation or the hosted plan disallows, or a workspace at its spend cap, never sends the text, even for a title.
-    const titleGate = titled && snippet && titleText.trim() ? threadTitleGate(titleBot) : null;
-    if (snippet && titleGate?.ok) {
-      void generateThreadTitle(titleGate.instance, titleText)
-        .then((title) => {
-          if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
-        })
-        .catch(() => undefined);
-    }
-  };
-  if (!autoRoute) startTitle(goalCoordinator ?? responders[0]!);
+  let titleBot = goalCoordinator ?? responders[0];
+  const task = () => store.groupTaskByThread(groupId, threadId), current = task();
+  if (titleText.trim() && current && (titled || (cfg.threadTitles?.followUp && current.titleMode === "automatic"))) {
+    const title = current.title;
+    automaticTitles.start(threadId, { request: titleText, currentTitle: titled ? undefined : title,
+      stillCurrent: () => task()?.title === title && task()?.titleMode === "automatic",
+      model: () => titleBot ? threadTitleGate({ ...titleBot, threadId }, message.via === "call") : { ok: false, refusal: "The room has no responder." },
+      apply: (next) => { store.retitleGroupTask(groupId, threadId, title, next); } });
+  }
 
   const operation = beginGroupTurnOperation(
     groupId,
@@ -10778,7 +10776,7 @@ function startGroupTurn(
           routedBy = { provider: route.provider, probability: Math.round(route.probability * 100) / 100 };
         }
         for (const responder of round) operation.botIds.add(responder.id);
-        if (round[0]) startTitle(round[0]);
+        titleBot = round[0];
       }
       let spoken = new Set<string>(); const passes = roomRoundPasses(round, roomTurnsPerMember(store.group(groupId)), (next) => { spoken = next; if (round.length > 1) operation.line = { pending: round.map(responder => responder.id) }; advanceLine(undefined); });
       const skillAuthoringClaim = { claimed: false };
@@ -11593,7 +11591,7 @@ function configStatus() {
     language: appLanguage() ?? "", computerName: cfg.computerName ?? "", everyBotRules: cfg.everyBotRules ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     mcp: { callTimeoutMinutes: mcpCallTimeoutMinutes(cfg) },
-    automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
+    automaticRecovery: cfg.automaticRecovery ?? { enabled: false }, threadTitles: { model: cfg.threadTitles?.model ?? null, followUp: cfg.threadTitles?.followUp ?? false, instances: registry.instances().filter((engine) => engine.enabled && engine.generateText && !policyModelRefusal(engine)).map((engine) => engine.instanceId) },
     cacheKeepWarm: cacheKeepWarmSettings(cfg),
     newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
     threads: {
@@ -12110,7 +12108,7 @@ const taskRoutes = createTaskRoutes({
   skillReview,
   threadStarters,
   phoneSecretSubmissions,
-  titleRegenerations,
+  titleRegenerations, automaticTitles,
   directTurnGenerationByThread,
   actorKey,
   cloudOwnerSession,
@@ -12293,7 +12291,7 @@ function liveSignedIn(auth: RequestAuth): boolean {
 function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
   const bot = store.projectBotForTask(botId, threadId);
   if (!bot) return null;
-  const gate = threadTitleGate(bot);
+  const gate = threadTitleGate(bot, true);
   return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
 }
 const liveWiring = liveSessionWiring({ bot: liveBotFor, history: liveHistoryFor, cloudHome: Boolean(CLOUD_HOME), othersOnLoopback: adminActivityRecording, saveAgent: (agent) => { saveConfig({ live: agent }); Object.assign(cfg, loadConfig()); }, language: appLanguage, fishAgentLanguage: () => cfg.live?.fishAgentLanguage });

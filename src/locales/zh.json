@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "对话标题模型",
+  "settings.features.titleModelAutomatic": "自动",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (不可用)",
+  "settings.features.titleModelConnect": "连接兼容的 AI 后即可选择标题模型。",
+  "settings.features.titleFollowUp": "更新对话标题",
+  "settings.features.titleFollowUpLine": "话题变化时更新自动生成的标题。你手动设置的标题会保留。",
   "connectedWorkspaces.localTitle": "这台电脑上的环境",
   "connectedWorkspaces.missing": "不存在",
   "connectedWorkspaces.current": "当前",

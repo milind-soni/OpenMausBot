@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Model tytułów rozmów",
+  "settings.features.titleModelAutomatic": "Automatycznie",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (niedostępny)",
+  "settings.features.titleModelConnect": "Połącz zgodną usługę AI, aby wybrać model tytułów.",
+  "settings.features.titleFollowUp": "Aktualizuj tytuły rozmów",
+  "settings.features.titleFollowUpLine": "Aktualizuje automatyczne tytuły po zmianie tematu rozmowy. Własne tytuły zostają zachowane.",
   "voice.gemini.keyPlaceholder": "Wklej swój klucz API Google AI Studio",
   "voice.gemini.model": "Model syntezy mowy Gemini",
   "keys.label.geminiTts": "Klucz API syntezy mowy Gemini",

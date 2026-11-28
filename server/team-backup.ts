@@ -60,6 +60,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
     return tasks.filter((task) => shown(task.threadId)).map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
       titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
+      titleMode: "titleMode" in task ? task.titleMode : undefined,
       outside: "outside" in task && task.outside || undefined,
       openedBy: "openedBy" in task && task.openedBy
         ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at,
@@ -204,7 +205,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
           activity: "idle" as const, busy: false, unread: false,
-          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}), ...(task.outside ? { outside: true } : {}),
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}), ...(task.titleMode ? { titleMode: task.titleMode } : {}), ...(task.outside ? { outside: true } : {}),
         };
         const opener = task.openedBy && botIds.get(task.openedBy.botId);
         if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at, ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) };
@@ -247,7 +248,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
           threadId: threads[i], title: task.title, createdAt: task.createdAt,
           updatedAt: task.messages.reduce((max, message) => Math.max(max, message.at), task.createdAt),
           ...(task.pinned === true ? { pinned: true as const } : {}),
-          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}), ...(task.titleMode ? { titleMode: task.titleMode } : {}),
           ...(task.turnTimeoutMinutes != null ? { turnTimeoutMinutes: task.turnTimeoutMinutes } : {}),
         }));
         store.switchGroupTask(group.id, threads[source.tasks.findIndex((task) => task.key === source.activeTask)]);
