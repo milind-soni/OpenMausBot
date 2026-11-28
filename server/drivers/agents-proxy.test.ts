@@ -661,6 +661,8 @@ describe("agents-proxy MCP surface", () => {
       "burst",
       "list_models",
       "vm_exec",
+      "list_chat_attachments",
+      "get_chat_attachment",
       "attach_file",
       "show_widget",
       "show_html",
@@ -784,7 +786,7 @@ describe("agents-proxy MCP surface", () => {
       "tool_result_read",
       "list_shared_computers",
       "assignment_status", "list_bots", "usage_limits", "list_rooms", "list_threads",
-      "list_models", "list_team_setup",
+      "list_models", "list_chat_attachments", "list_team_setup",
       "what_changed", "session_search", "trigger_info", "list_waits", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)

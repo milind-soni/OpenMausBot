@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -33,6 +33,7 @@ interface ImageFixture {
   turnOf: (botId: string) => z.infer<typeof evidenceSchema>;
   messages: (threadId: string) => Promise<z.infer<typeof messagesSchema>["messages"]>;
   savedImages: () => string[];
+  stageAttachment: (name: string, content: string) => string;
   api: (path: string, body?: unknown, method?: string) => Promise<unknown>;
   /** As the app in a browser sends it: a person's own line, not a local program's. */
   typed: (path: string, body: unknown) => Promise<unknown>;
@@ -67,6 +68,13 @@ async function withImageFixture(test: (f: ImageFixture) => Promise<void>) {
         return turn;
       },
       messages: async (threadId) => messagesSchema.parse(await api("/api/threads/" + threadId + "/messages")).messages,
+      stageAttachment: (name, content) => {
+        const dir = join(dataDir, "attachments");
+        mkdirSync(dir, { recursive: true });
+        const path = join(dir, name);
+        writeFileSync(path, content);
+        return path;
+      },
       savedImages: () => {
         const dir = join(dataDir, "attachments");
         return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".png")) : [];
@@ -157,4 +165,39 @@ it("makes no image for a goal's coordinator, whose files never reach the room's 
   expect(f.turnOf(lead.id).evidence.find((entry) => entry.step)?.response?.result.content[0]?.text).toContain("Images are made only for a person's own message");
   expect(f.images.requests).toEqual([]);
   expect((await roomOf(f, room.id)).messages.flatMap((message) => message.attachments ?? []).filter((attachment) => attachment.kind === "image")).toEqual([]);
+}), 90_000);
+
+it("lists a generated attachment during the same turn and keeps another conversation isolated", async () => withImageFixture(async (f) => {
+  await f.configure({ imageGen: { primary: { provider: "custom", model: "fixture-image" }, customUrl: f.images.url } });
+  const bot = await f.newBot("Attachment painter");
+  f.savePlan({ [bot.id]: { steps: [
+    { tool: "generate_image", arguments: { prompt: "a blue circle" } },
+    { tool: "list_chat_attachments", arguments: {} },
+  ], reply: "Done." } });
+  expect(await f.ask(bot, "Generate an image and list its attachment reference.")).toBe("settled");
+  const steps = f.turnOf(bot.id).evidence.filter((entry) => entry.step);
+  const listing = JSON.parse(steps[1]!.response!.result.content[0]!.text);
+  expect(listing.attachments).toHaveLength(1);
+  expect(listing.attachments[0].attachment_ref).toBe(f.savedImages()[0]);
+  expect(listing.attachments[0].mime).toBe("image/png");
+  const other = await f.newBot("Attachment outsider");
+  f.savePlan({ [other.id]: { steps: [
+    { tool: "list_chat_attachments", arguments: {} },
+    { tool: "get_chat_attachment", arguments: { attachment_ref: listing.attachments[0].attachment_ref }, expectError: true },
+  ], reply: "No access." } });
+  expect(await f.ask(other, "List my attachments.")).toBe("settled");
+  const otherSteps = f.turnOf(other.id).evidence.filter((entry) => entry.step);
+  expect(JSON.parse(otherSteps[0]!.response!.result.content[0]!.text).attachments).toEqual([]);
+  expect(otherSteps[1]!.response!.result.isError).toBe(true);
+}), 90_000);
+
+it("lists calendar-style text attachments but excludes paths outside the attachment store", async () => withImageFixture(async (f) => {
+  const pdf = f.stageAttachment("calendar.pdf", "%PDF-1.7 fixture");
+  const outside = f.stageAttachment("../outside.pdf", "%PDF-1.7 outside");
+  const bot = await f.newBot("Calendar attachment reader");
+  f.savePlan({ [bot.id]: { steps: [{ tool: "list_chat_attachments", arguments: {} }], reply: "Listed." } });
+  expect(await f.ask(bot, `List the attached agenda.\n<attached-file path="${pdf}" name="agenda.pdf" />\n<attached-file path="${outside}" name="outside.pdf" />`)).toBe("settled");
+  const steps = f.turnOf(bot.id).evidence.filter((entry) => entry.step);
+  const listing = JSON.parse(steps[0]!.response!.result.content[0]!.text);
+  expect(listing.attachments).toEqual([expect.objectContaining({ attachment_ref: "calendar.pdf", name: "agenda.pdf", mime: "application/pdf" })]);
 }), 90_000);

@@ -2,6 +2,7 @@
  * read access; session recall keeps its own-bot scope. */
 export const READ_ONLY_AGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "list_bots",
+  "list_chat_attachments",
   "list_team_setup",
   "list_models",
   "list_shared_computers",

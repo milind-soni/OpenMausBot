@@ -1,5 +1,6 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { createChatAttachmentRoutes, resolveAttachmentVm } from "./routes/chat-attachments.ts";
 import { startFailureText } from "./start-failure-text.ts";
 import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
@@ -10961,15 +10962,10 @@ function saveTurnFile(capability: InternalCapability, botId: string, vm: LocalVm
 
 async function attachmentVmForTurn(capability: InternalCapability): Promise<LocalVmTarget | undefined> {
   const slot = autoVmClaims.get(capability.threadId);
-  if (!localVmThreadTargets.has(capability.threadId) &&
-      !(slot?.localVm && slot.owner.generation === capability.generation)) return undefined;
-  const gate = await computerCallGate(capability);
-  if (gate.held) throw Object.assign(new Error(controlRefusal(gate)), { status: 409 });
-  const vm = localVmThreadTargets.get(capability.threadId);
-  if (!vm || !internalCapabilityIsActive({ ...capability, localVmTarget: vm })) {
-    throw Object.assign(new Error("This turn no longer owns the Local VM."), { status: 409 });
-  }
-  return vm;
+  return resolveAttachmentVm({ claimed: localVmThreadTargets.has(capability.threadId) || Boolean(slot?.localVm && slot.owner.generation === capability.generation),
+    gate: async () => { const gate = await computerCallGate(capability); return gate.held ? controlRefusal(gate) : null; },
+    current: () => localVmThreadTargets.get(capability.threadId), active: (vm) => internalCapabilityIsActive({ ...capability, localVmTarget: vm }),
+  });
 }
 
 function connectorThread(botId: string, threadId: string) {
@@ -13022,7 +13018,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)), mainThreadTasks,
         shown: (id) => !proactive.fence.confines(id) && !botApiThread(id) && (CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId)(id) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread(id) : true),
         threadBusy, queuedThreadPosition, queuedReason: queuedStatus, readBody: readInternalBody,
-      }), createToolTimingRoute(usageTrace, internalCapability.threadId)], { req, res, url, path, method, auth, json, readBody })) return;
+      }), createToolTimingRoute(usageTrace, internalCapability.threadId), createChatAttachmentRoutes({ attachmentStore: ATTACHMENTS_DIR, guestRoot: VM_WORKSPACE_GUEST, botId: internalSender.id, threadId: internalCapability.threadId,
+        sourceExists: () => Boolean(connectorThread(internalSender.id, internalCapability.threadId)), messages: () => store.messagesFor(internalCapability.threadId),
+        parked: () => turnAttachmentsByTurn.get(turnAttachmentKey(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId))) ?? [],
+        vmForTurn: () => attachmentVmForTurn(internalCapability), active: (vm) => internalCapabilityIsActive({ ...internalCapability, localVmTarget: vm }), readBody: readInternalBody,
+      })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/attach-file") {
         const from = internalSender;
         const threadId = internalCapability.threadId;
