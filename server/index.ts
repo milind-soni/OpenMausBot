@@ -648,8 +648,8 @@ import { createConnectorCards } from "./host/connector-cards.ts";
 import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { startEngineSessionSweep } from "./host/engine-session-sweep.ts"; import { createLateToolResults } from "./host/late-tool-results.ts"; import { internalBodyRefusal } from "./host/internal-body-ids.ts";
 import { onThreadMade, onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { bearerForGrants, createEnginePrestart, prestartClosed } from "./engine-prestart.ts"; import { prestartAllowed } from "./drivers/session-idle.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
-let PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-let WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+let PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799), WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65_535 || !Number.isInteger(WEBHOOK_PORT) || WEBHOOK_PORT < 1 || WEBHOOK_PORT > 65_535) { console.error(`OMB_PORT and OMB_WEBHOOK_PORT must be whole ports between 1 and 65535`); process.exit(1); }
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
@@ -15069,7 +15069,7 @@ const bound = await bootServer({
   onBoundState: (state) => void ({ sessionCookie: SESSION_COOKIE, workspaceAccess, workspaceAccessTimer, webhookIngressStatus: liveIngressStatus } = state),
   onListening: async () => {
   // On a Cloud home every bot turn runs in the bot box: it starts on the bound port, before any engine this callback brings up.
-  await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT }); botBoxReady = true;
+  await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT }); if (companyShutdown) return; botBoxReady = true;
   companyRuntimeReady(); cloudHealth?.speed.ready(); signInTrace?.recover(); void tailnetShare.start(process.env);
   launchListening();
   personWaits.boot(); handoffRequests.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); startCloudTeamRoster({ cloudHome: CLOUD_HOME, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, ownKey: () => composio.connectionMode(cfg) === "self-hosted", apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });

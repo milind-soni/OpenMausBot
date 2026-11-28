@@ -280,8 +280,11 @@ describe("CLI startup lifecycle", () => {
     const run = runServe(options, vi.fn());
     const exitTimer = setTimeout(() => children[0]?.emit("exit", 0, null), 2_000);
     exitTimer.unref();
-    expect(await run).toBe(1);
-    clearTimeout(exitTimer);
+    try {
+      expect(await run).toBe(1);
+    } finally {
+      clearTimeout(exitTimer);
+    }
     expect(mocks.spawn).toHaveBeenCalledTimes(5);
     for (const child of children) expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     expect(error).toHaveBeenCalledWith(expect.stringContaining("webhook receiver did not come up"));

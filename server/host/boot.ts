@@ -101,9 +101,13 @@ export async function bootServer(options: {
   let webhookIngress: WebhookIngress | null = null;
   let webhookIngressError: string | null = null;
   let webhookPort = options.webhookPort;
+  // True until the receiver walk settles below: a status read between the main
+  // bind and that walk must answer starting, or the launcher relaunches a healthy child.
+  let webhookBindPending = true;
   const webhookIngressStatus = () => ({
     available: Boolean(webhookIngress),
     baseUrl: webhookIngress?.baseUrl ?? `http://${options.host}:${webhookPort}`,
+    ...(webhookBindPending ? { starting: true } : {}),
     ...(webhookIngressError ? { error: webhookIngressError } : {}),
   });
   const port = await bindFirstFreePort({
@@ -164,6 +168,8 @@ export async function bootServer(options: {
   } catch (ingressError) {
     webhookIngressError = ingressError instanceof Error ? ingressError.message : String(ingressError);
     error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+  } finally {
+    webhookBindPending = false;
   }
   return { port, webhookPort, webhookIngress, webhookIngressStatus, sessionCookie, workspaceAccess, workspaceAccessTimer };
 }

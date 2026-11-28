@@ -66,7 +66,7 @@ describe("bootServer", () => {
   it("publishes the bound-port session state inside the listen callback, before the webhook bind", async () => {
     const base = await freePortBlock([0, 1, 2]);
     const states: Pick<ServerBoot, "sessionCookie" | "workspaceAccess" | "workspaceAccessTimer" | "webhookIngressStatus">[] = [];
-    let ingressAvailableAtHook: boolean | undefined;
+    let ingressAvailableAtHook: boolean | undefined, ingressStartingAtHook: boolean | undefined;
     const bound = await bootServer({
       server: mainListener(),
       host: HOST,
@@ -75,7 +75,7 @@ describe("bootServer", () => {
       pinned: false,
       assignPort: () => {},
       onBoundState: (state) => states.push(state),
-      onListening: () => { ingressAvailableAtHook = states[0]?.webhookIngressStatus().available; },
+      onListening: () => { const status = states[0]?.webhookIngressStatus(); ingressAvailableAtHook = status?.available; ingressStartingAtHook = status?.starting; },
       environmentId: ENVIRONMENT_ID,
       sessions: {} as SessionRegistry,
       closeSessionStreams: () => {},
@@ -89,7 +89,35 @@ describe("bootServer", () => {
     // published when the startup hook (and any in-flight request) runs.
     expect(states[0]!.sessionCookie).toBe(sessionCookieName(base, ENVIRONMENT_ID));
     expect(ingressAvailableAtHook).toBe(false);
+    // While the receiver walk is still pending the status must read starting:
+    // the launcher relaunches a child on a bare unavailable answer.
+    expect(ingressStartingAtHook).toBe(true);
     expect(bound.webhookIngressStatus().available).toBe(true);
     bound.webhookIngress?.server.close();
+  });
+
+  it("reports the receiver bind error without starting once the walk fails", async () => {
+    const base = await freePortBlock([0, 1]);
+    await holdPort(base + 1);
+    const bound = await bootServer({
+      server: mainListener(),
+      host: HOST,
+      port: base,
+      webhookPort: base + 1,
+      pinned: true,
+      assignPort: () => {},
+      onListening: () => {},
+      environmentId: ENVIRONMENT_ID,
+      sessions: {} as SessionRegistry,
+      closeSessionStreams: () => {},
+      webhooks: {} as WebhookManager,
+      webhookClaimRequest: () => () => {},
+      log: () => {},
+      error: () => {},
+    });
+    const status = bound.webhookIngressStatus();
+    expect(status.available).toBe(false);
+    expect(status.error).toContain("EADDRINUSE");
+    expect(status.starting).toBeUndefined();
   });
 });
