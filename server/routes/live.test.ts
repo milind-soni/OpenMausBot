@@ -139,6 +139,15 @@ describe("live routes", () => {
     expect(await request(deps(), "GET", "/api/live/call")).toMatchObject({ status: 200, body: { call: { callId: "c1" } } });
     expect(await request(deps({ calls: { ...deps().calls, current: () => null } }), "GET", "/api/live/call")).toEqual({ status: 200, body: { call: null } });
   });
+  it("allows the Codex service only through the eligible desktop call controller", async () => {
+    const refused = deps();
+    expect((await request(refused, "PATCH", "/api/live/settings", { provider: "codex" })).status).toBe(403);
+    expect(refused.saved).toEqual([]);
+    const desktop = deps({ calls: { ...deps().calls, codexRefusal: () => null } });
+    expect(await request(desktop, "PATCH", "/api/live/settings", { provider: "codex" })).toMatchObject({ status: 200, body: { live: { provider: "codex" } } });
+    expect(desktop.saved).toEqual([{ provider: "codex" }]);
+  });
+
   it("saves non-secret settings and refuses the key", async () => {
     const d = deps();
     expect(await request(d, "PATCH", "/api/live/settings", { idleMinutes: 10, readTypedReplies: false })).toMatchObject({ status: 200, body: { live: { idleMinutes: 10, readTypedReplies: false } } });

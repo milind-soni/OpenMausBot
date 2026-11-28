@@ -56,7 +56,7 @@ export interface LiveEndpoint {
 
 export function liveProviderName(provider: LiveProvider): string {
   return provider === "azure" ? "Azure OpenAI" : provider === "fish" ? "Fish Audio" : provider === "gemini" ? "Gemini" : provider === "elevenlabs" ? "ElevenLabs"
-    : provider === "custom" ? "The custom endpoint" : "OpenAI";
+    : provider === "codex" ? "Codex" : provider === "custom" ? "The custom endpoint" : "OpenAI";
 }
 
 /** Only a loopback http URL is accepted, read at call time. */

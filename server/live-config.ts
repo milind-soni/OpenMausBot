@@ -1,5 +1,6 @@
 // Live calls' settings in config.json: schema, type and environment overrides, kept out of server/config.ts.
 import { z } from "zod";
+import type { LiveProvider } from "../shared/wire.ts";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 export const LIVE_KEY_NEEDS_CUSTOM_ENDPOINT = "Save the custom endpoint first: a Live key works only with the endpoint it was saved for.";
@@ -10,6 +11,7 @@ export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
   provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]).optional(),
+  useCodex: z.boolean().optional(),
   azureEndpoint: z.string().trim().max(300).optional(),
   azureDeployment: z.string().trim().max(64).optional(),
   customEndpoint: z.string().trim().max(300).optional(),
@@ -28,7 +30,9 @@ export const liveConfigSchema = z.object({
 export interface LiveConfig {
   key?: string;
   keyFor?: string;
-  provider?: "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom";
+  provider?: Exclude<LiveProvider, "codex">;
+  /** Use the local CLI for Live calls. Older releases still read the saved service and its key. */
+  useCodex?: boolean;
   azureEndpoint?: string;
   azureDeployment?: string;
   customEndpoint?: string;
@@ -42,6 +46,10 @@ export interface LiveConfig {
   geminiVoice?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
+}
+
+export function liveProvider(live: LiveConfig | undefined): LiveProvider | undefined {
+  return live?.useCodex ? "codex" : live?.provider;
 }
 
 /** Where a key saved now may go: "openai", "azure:<host>" or "custom:<host>"; null while Azure or a custom endpoint is chosen
@@ -85,7 +93,11 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
     next.key = envKey;
   }
   const provider = env.OMB_LIVE_PROVIDER?.trim().toLowerCase();
-  if (provider === "openai" || provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs" || provider === "custom") next.provider = provider;
+  if (provider === "codex") next.useCodex = true;
+  if (provider === "openai" || provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs" || provider === "custom") {
+    next.provider = provider;
+    if (next.useCodex) next.useCodex = false;
+  }
   if (env.OMB_AZURE_OPENAI_LIVE_ENDPOINT !== undefined) next.azureEndpoint = env.OMB_AZURE_OPENAI_LIVE_ENDPOINT.trim();
   if (env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT !== undefined) next.azureDeployment = env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT.trim();
   if (env.OMB_CUSTOM_LIVE_ENDPOINT !== undefined) next.customEndpoint = env.OMB_CUSTOM_LIVE_ENDPOINT.trim();
@@ -105,7 +117,7 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
 /** The non-secret Live settings a settings patch mirrors into the environment. */
 export function liveSettingEnv(live: LiveConfig | undefined): Array<[value: string | undefined, name: string]> {
   return [
-    [live?.provider, "OMB_LIVE_PROVIDER"],
+    [liveProvider(live), "OMB_LIVE_PROVIDER"],
     [live?.azureEndpoint, "OMB_AZURE_OPENAI_LIVE_ENDPOINT"],
     [live?.azureDeployment, "OMB_AZURE_OPENAI_LIVE_DEPLOYMENT"],
     [live?.customEndpoint, "OMB_CUSTOM_LIVE_ENDPOINT"],

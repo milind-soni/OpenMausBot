@@ -51,6 +51,7 @@ export function liveKeyFormKey(live: Partial<Pick<LiveSettings, "provider" | "az
 }
 
 export function callModeHint(mode: CallMode, where: { cloudHome?: boolean; config?: ConfigStatus | null } = {}): string {
+  if (mode === "live" && where.config?.live?.provider === "codex") return t("call.live.disclosureCodex");
   if (mode === "live") return `${t("call.mode.liveHint")} ${liveDisclosure(where)}`;
   const capabilities = desktopCapabilitiesNow();
   if (capabilities.dictation.available && scribeChosen(where.config)) return t("call.mode.turnsHintEleven");

@@ -13,6 +13,7 @@ export function LiveKeyNeeded() {
   const { state, dispatch } = useStore();
   const titleId = useId();
   const live = state.config?.live;
+  const codex = live?.provider === "codex";
   const azure = live?.provider === "azure";
   const custom = live?.provider === "custom";
   const fish = live?.provider === "fish";
@@ -28,9 +29,9 @@ export function LiveKeyNeeded() {
       <h2 id={titleId} className="text-[14px] font-medium leading-[1.4] text-ink">{t(copy.needs)}</h2>
     </div>
     <ProviderAndKey formKey={liveKeyFormKey(live)} keyForm={keyForm} />
-    {(azure || custom || fish || gemini || elevenlabs) && <DismissWhenReady ready={live?.configured === true} />}
-    {!azure && !custom && !fish && !gemini && !elevenlabs && <button type="button" className="ui-button ui-button-primary self-start" onClick={() => { dismissLiveNotice(); dispatch(openKeySettings("openai", "liveCalls")); }}>{t("call.live.openApiKeys")}</button>}
-    <p className="text-[12px] leading-[1.45] text-ink-tertiary">{!keyForm && `${liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, custom, fish, gemini, elevenlabs })} `}{t(copy.cost)}</p>
+    {(codex || azure || custom || fish || gemini || elevenlabs) && <DismissWhenReady ready={live?.configured === true} />}
+    {!codex && !azure && !custom && !fish && !gemini && !elevenlabs && <button type="button" className="ui-button ui-button-primary self-start" onClick={() => { dismissLiveNotice(); dispatch(openKeySettings("openai", "liveCalls")); }}>{t("call.live.openApiKeys")}</button>}
+    {!codex && <p className="text-[12px] leading-[1.45] text-ink-tertiary">{!keyForm && `${liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, custom, fish, gemini, elevenlabs })} `}{t(copy.cost)}</p>}
   </section>;
 }
 

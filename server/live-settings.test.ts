@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
 import { nestedKeyStatus } from "./key-hint.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY } from "./live-call.ts";
-import { fishKeyFromLiveKey, LIVE_KEY_NEEDS_ENDPOINT, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
+import { fishKeyFromLiveKey, LIVE_KEY_NEEDS_ENDPOINT, liveConfigSchema, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
 import { fishKeyPrint } from "./live-fish.ts";
 import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsForClient, liveSetupProblem } from "./live-settings.ts";
 
@@ -16,6 +16,16 @@ describe("live settings", () => {
     const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
     expect(settings).toEqual({ configured: true, keySource: "live", voice: "sol", readTypedReplies: false, idleMinutes: 12 });
     expect(JSON.stringify(settings)).not.toContain("sk-test");
+  });
+
+  it("uses Codex without forwarding the saved key and keeps the prior service readable", () => {
+    const legacy = { provider: "azure" as const, azureEndpoint: "https://example.openai.azure.com", key: "synthetic-azure-key", keyFor: "azure:example.openai.azure.com" };
+    const stored = { ...legacy, useCodex: true };
+    expect(liveConfigSchema.omit({ useCodex: true }).parse(stored)).toEqual(legacy);
+    expect(liveCallKey({ live: stored })).toBeNull();
+    expect(liveSettingsFor({ live: stored })).toMatchObject({ provider: "codex", configured: true });
+    expect(liveSettingsFor({ live: stored })).not.toHaveProperty("keySource");
+    expect(liveCallKey({ live: liveConfigWithEnv(stored, { OMB_LIVE_PROVIDER: "azure" }) })).toEqual({ key: legacy.key, source: "live" });
   });
 
   it("reports a saved Gemini voice beside the GPT-Live one, and nothing when it is cleared", () => {

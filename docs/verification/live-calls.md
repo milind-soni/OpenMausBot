@@ -53,6 +53,25 @@ start answer 409 `needsKey`; after the OpenAI key is saved through
 `PUT /api/config`, a phone's call starts with that key; a separate Live key
 then wins; neither key appears in the config or the log.
 
+## Codex sign-in on macOS
+
+The local macOS desktop app offers **Codex (ChatGPT sign-in)** in its existing
+**Service** picker. The server accepts this service from the authenticated
+desktop only. The saved setting leaves the previous service and its key in the
+existing configuration fields so an earlier release can read them.
+
+```sh
+pnpm exec vitest run server/live-codex.test.ts server/live-call-controller.test.ts server/live-settings.test.ts server/routes/live.test.ts
+```
+
+The Codex CLI fixture negotiates WebRTC SDP through a fake app-server. It
+checks that API-key sign-in and active tools are refused, the ephemeral thread
+has no tool environment or startup chat context, only the call's user
+transcript is relayed, and the process stops on hang-up. The controller checks
+that the transcript reaches the requested bot and thread and a spoken
+approval leaves the approval card for the person to handle in chat. These
+checks use a disposable home and synthetic SDP and do not use a microphone.
+
 ## Azure OpenAI as the Live provider
 
 With `live.provider: "azure"` (`OMB_LIVE_PROVIDER=azure`) a call creates its

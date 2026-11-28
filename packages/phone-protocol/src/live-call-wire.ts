@@ -59,7 +59,7 @@ export interface LiveCallRecord {
  * the Gemini Live API on the person's Gemini key, which the client reaches with a single-use token the harness creates, or an
  * ElevenLabs agent the harness sets up on the person's ElevenLabs account, which the client reaches with a signed URL, or
  * "custom": an OpenAI-compatible server the person names (a gateway that serves the GPT-Live API), reached like OpenAI. */
-export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom";
+export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom" | "codex";
 
 /** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key;
  * `fishAudio`: the Fish Audio key from Settings → API keys, the only key a Fish Audio call uses;

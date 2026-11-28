@@ -27,6 +27,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const focusOnOpen = useCallback((dialog: HTMLDivElement | null) => {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
   }, []);
+  const codex = live.provider === "codex";
   const azure = live.provider === "azure";
   const custom = live.provider === "custom";
   const fish = live.provider === "fish";
@@ -82,7 +83,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
       {/* Fish Audio and ElevenLabs calls speak in their agent's own voice. */}
-      {!fish && !elevenlabs && <>
+      {!codex && !fish && !elevenlabs && <>
       {bot && (
         <BotLiveVoiceSelect bot={bot} gemini={gemini} onChange={(liveVoice) => dispatch({ type: "updateBot", botId: bot.id, patch: { liveVoice } })} />
       )}
@@ -124,6 +125,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
           ))}
         </Select>
       </label>
+      {!codex && <>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
         <span className="text-ink-secondary">{t(copy.key)}</span>
         <span className="flex gap-2">
@@ -144,6 +146,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
       {/* Keyed by provider and endpoint: a key typed for one is never saved for another. */}
       {changingKey && <LiveKeySetup key={liveKeyFormKey(state.config?.live)} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
       <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, custom, fish, gemini, elevenlabs })} {t(copy.cost)}</div>
+      </>}
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

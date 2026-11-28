@@ -5,11 +5,12 @@ import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveProvider, LiveSettin
 import { GEMINI_LIVE_VOICE_OPTIONS } from "../../shared/live-call.ts";
 import { azureLiveDeployment, azureOpenAiRoot, customLiveApiBase, customLiveModel, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
+import { LIVE_CODEX_REFUSAL } from "../live-access.ts";
 import { RELAY_POLL_MS } from "../live-fish.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LiveRouteDeps {
-  calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked">;
+  calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked"> & Partial<Pick<LiveCallController, "codexRefusal">>;
   /** The companion unpaired this phone: its closed-app alerts end too. */
   deviceRevoked?: (device: string) => void;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
@@ -48,7 +49,7 @@ const relayBody = z.object({
 }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
 const settingsBody = z.object({
-  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]).optional(),
+  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs", "custom", "codex"]).optional(),
   // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
   azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
   azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
@@ -137,6 +138,10 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         if (field === "customEndpoint") return json(res, 400, { error: "The custom endpoint must be an https address, like https://gateway.example.com/v1, or http only on this computer (127.0.0.1 or localhost)." });
         if (field === "customModel") return json(res, 400, { error: "The model may use letters, digits, '-', '_', '.', ':' and '/', up to 64 characters." });
         return json(res, 400, { error: "Those Live settings are not valid." });
+      }
+      if (parsed.data.provider === "codex") {
+        const refusal = deps.calls.codexRefusal ? deps.calls.codexRefusal(auth) : LIVE_CODEX_REFUSAL;
+        if (refusal) return json(res, 403, { error: refusal });
       }
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });
       return json(res, 200, { live: await deps.saveSettings(parsed.data) });
