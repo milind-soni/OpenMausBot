@@ -32,6 +32,8 @@ export const USER_ERROR = {
   "serverError.emailDraft.notAllowed": "{name} may not save Gmail drafts. Change its app permissions to allow it.",
   "serverError.emailDraft.unreachable": "Gmail couldn't be reached through Apps (HTTP {status}). Try again in a few minutes.",
   "serverError.emailDraft.refused": "Gmail refused: {detail}",
+  "serverError.emailDraft.changed": "This draft changed in Gmail since you started editing, so nothing was saved. The card now shows the latest version: edit it again.",
+  "serverError.emailDraft.unreadable": "Gmail didn't say what this draft holds now, so nothing was saved. Try again in a few minutes.",
   "serverError.chat.busyFresh": "the thread is working — stop it before starting fresh",
   "serverError.chat.questionGone": "this question is no longer available",
   "serverError.chat.askerGone": "the bot that asked this question is no longer available",

@@ -1,7 +1,7 @@
 // The draft card: after a bot's Gmail draft call succeeds, the server shows that draft in chat as a card the person can
 // edit and save, or open in Gmail to send. Save runs from here through the bot's connected apps, under the same Rules and
 // app permissions as the bot's own calls; no model sees or runs it.
-//   POST /api/email-draft  {threadId, messageId, action: "save", draft}  →  {ok: true}
+//   POST /api/email-draft  {threadId, messageId, action: "save", base, draft}  →  {ok: true}
 import { z } from "zod";
 
 import { EMAIL_DRAFT_LIMITS, EMAIL_DRAFT_PATH, type EmailDraftCardData, type EmailDraftEdit } from "../shared/email-draft.ts";
@@ -17,6 +17,7 @@ import { userError, userErrorFields, userErrorThrown, type UserError } from "./u
 export const GMAIL_CREATE_DRAFT = "GMAIL_CREATE_EMAIL_DRAFT";
 export const GMAIL_UPDATE_DRAFT = "GMAIL_UPDATE_DRAFT";
 export const GMAIL_SEND_DRAFT = "GMAIL_SEND_DRAFT";
+export const GMAIL_GET_DRAFT = "GMAIL_GET_DRAFT";
 const DRAFT_TOOLS = [GMAIL_CREATE_DRAFT, GMAIL_UPDATE_DRAFT];
 export const isDraftTool = (slug: string): boolean => DRAFT_TOOLS.includes(slug);
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -39,6 +40,9 @@ const httpsUrl = (value: unknown): string | undefined => {
   }
 };
 
+/** A Composio tool answer, unwrapped from `response_data` when it is wrapped. */
+const answerOf = (data: unknown) => record(record(data)?.response_data) ?? record(data);
+
 /** The card for the one draft call in `calls` the answer says succeeded, or null (none, several, or it failed). An update
  *  leaves in Gmail what it omits, so each omitted field keeps its value from `shown` (the card already showing that draft);
  *  with no such card an update that omits a field shows none, rather than a draft Gmail doesn't have. */
@@ -53,7 +57,7 @@ export function draftCardFrom(calls: readonly ConnectorCall[], frame: Row | null
     return null;
   }
   const args = record(call.arguments) ?? {};
-  const body = record(data?.response_data) ?? data;
+  const body = answerOf(data);
   const draftId = text(body?.id) ?? (call.slug === GMAIL_UPDATE_DRAFT ? text(args.draft_id) : undefined);
   if (!draftId) return null;
   const update = call.slug === GMAIL_UPDATE_DRAFT;
@@ -212,8 +216,42 @@ const edit = z.object({
   to: addresses, cc: addresses, bcc: addresses,
   subject: z.string().max(EMAIL_DRAFT_LIMITS.subject), body: z.string().max(EMAIL_DRAFT_LIMITS.body),
 }).strict();
+/** The addresses in To/Cc/Bcc values ("Ana <ana@x.com>, ben@x.com"), split on commas outside quotes. */
+const entriesIn = (values: readonly string[]): string[] =>
+  values.flatMap((value) => value.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)).map((one) => one.trim()).filter(Boolean);
+/** The address in an entry, without its display name ("Ana <ana@x.com>" is "ana@x.com"). */
+const addressOf = (entry: string) => (/<([^<>]*)>\s*$/.exec(entry)?.[1] ?? entry).trim();
+const bare = (entry: string) => addressOf(entry).toLowerCase();
+const sameAddresses = (a: readonly string[], b: readonly string[]) =>
+  JSON.stringify(entriesIn(a).map(bare).sort()) === JSON.stringify(entriesIn(b).map(bare).sort());
+const words = (value: string) => value.replace(/\s+/g, " ").trim();
+
+/** The draft as Gmail holds it now, from GMAIL_GET_DRAFT's answer (addresses without display names; the body only when
+ *  Gmail gives its text), or undefined when the answer doesn't carry the message's headers. */
+export function gmailDraftOf(data: unknown): (Omit<EmailDraftEdit, "body"> & { body?: string }) | undefined {
+  const message = record(answerOf(data)?.message);
+  const headers = record(message?.payload)?.headers;
+  if (!message || !Array.isArray(headers)) return undefined;
+  const values = (name: string) => headers.map(record).filter((one) => typeof one?.name === "string" && one.name.toLowerCase() === name)
+    .map((one) => (typeof one!.value === "string" ? one!.value : ""));
+  const addresses = (name: string) => entriesIn(values(name)).map(addressOf).filter(Boolean);
+  return {
+    to: addresses("to"), cc: addresses("cc"), bcc: addresses("bcc"),
+    subject: values("subject")[0] ?? "",
+    ...(typeof message.messageText === "string" ? { body: message.messageText } : {}),
+  };
+}
+
+/** Whether Gmail still holds `base`, the draft the person started editing from. An HTML body is not compared (the card
+ *  doesn't edit one); a plain one is compared by its words, as Gmail may rewrap lines. */
+export function draftUnchanged(base: EmailDraftEdit, gmail: NonNullable<ReturnType<typeof gmailDraftOf>>, html: boolean): boolean {
+  return sameAddresses(base.to, gmail.to) && sameAddresses(base.cc, gmail.cc) && sameAddresses(base.bcc, gmail.bcc)
+    && words(base.subject) === words(gmail.subject) && (html || words(base.body) === words(gmail.body ?? ""));
+}
+
 const where = { threadId: z.string().min(1).max(200), messageId: z.string().min(1).max(200) };
-const press = z.object({ ...where, action: z.literal("save"), draft: edit }).strict();
+// `base`: the draft as the card showed it when the person started editing, so Save can tell whether Gmail changed since.
+const press = z.object({ ...where, action: z.literal("save"), base: edit, draft: edit }).strict();
 
 /** The Composio call Save makes with the edited `draft`. */
 export function draftCall(card: EmailDraftCardData, draft: EmailDraftEdit): ConnectorCall {
@@ -232,21 +270,28 @@ export function draftCall(card: EmailDraftCardData, draft: EmailDraftEdit): Conn
 
 const unreachable = (status: number) => userErrorThrown("serverError.emailDraft.unreachable", { status });
 
-/** Runs `call`; `dispatch` runs right before the tool call goes out to Gmail, and may refuse it by throwing DraftRefused. */
-async function runCall(connection: Extract<DraftConnection, { ok: true }>, call: ConnectorCall, dispatch: () => void): Promise<unknown> {
-  const signal = AbortSignal.timeout(CALL_TIMEOUT_MS);
+type RunCall = (call: ConnectorCall, dispatch: () => void) => Promise<unknown>;
+
+/** Opens one MCP session for Save's calls, each with its own id and time limit. Each call's `dispatch` runs right before it goes out to
+ *  Gmail, and may refuse it by throwing DraftRefused. */
+async function openSession(connection: Extract<DraftConnection, { ok: true }>): Promise<RunCall> {
+  const opening = AbortSignal.timeout(CALL_TIMEOUT_MS);
   const init = await connection.relay({
     jsonrpc: "2.0", id: `${CALL_ID}-init`, method: "initialize",
     params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "openmausbot-email-draft", version: "1" } },
-  }, undefined, signal);
+  }, undefined, opening);
   if (init.status !== 200) throw unreachable(init.status);
-  await connection.relay({ jsonrpc: "2.0", method: "notifications/initialized" }, init.transportSessionId, signal).catch(() => undefined);
-  const answer = await connection.relay({
-    jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
-    params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: call.slug, arguments: call.arguments, ...(call.account ? { account: call.account } : {}) }] } },
-  }, init.transportSessionId, signal, dispatch);
-  if (answer.status !== 200) throw unreachable(answer.status);
-  return toolData(call.slug, parseMcpResponse(new TextDecoder().decode(answer.bytes), CALL_ID));
+  await connection.relay({ jsonrpc: "2.0", method: "notifications/initialized" }, init.transportSessionId, opening).catch(() => undefined);
+  let calls = 0;
+  return async (call, dispatch) => {
+    const id = `${CALL_ID}-${++calls}`;
+    const answer = await connection.relay({
+      jsonrpc: "2.0", id, method: "tools/call",
+      params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: call.slug, arguments: call.arguments, ...(call.account ? { account: call.account } : {}) }] } },
+    }, init.transportSessionId, AbortSignal.timeout(CALL_TIMEOUT_MS), dispatch);
+    if (answer.status !== 200) throw unreachable(answer.status);
+    return toolData(call.slug, parseMcpResponse(new TextDecoder().decode(answer.bytes), id));
+  };
 }
 
 export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler {
@@ -259,7 +304,7 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
     try { raw = await readBody(req, 256_000); } catch { return json(res, 400, { error: "Send threadId, messageId and action." }); }
     const parsed = press.safeParse(raw);
     if (!parsed.success) return json(res, 400, { error: "Send threadId, messageId and action." });
-    const { threadId, messageId, draft } = parsed.data;
+    const { threadId, messageId, base, draft } = parsed.data;
     const card = () => deps.store.messagesFor(threadId).find((message) => message.id === messageId)?.emailDraft;
     const shown = deps.sees(auth, threadId) && !deps.inRoom(threadId) ? card() : undefined;
     if (!shown || !deps.mayChat(auth, shown.botId)) return json(res, 404, userError("serverError.emailDraft.notHere"));
@@ -273,16 +318,30 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
         if (!now) return json(res, 404, userError("serverError.emailDraft.notHere"));
         if (now.sentAt) return json(res, 409, userError("serverError.emailDraft.alreadySent"));
         const call = draftCall(now, draft);
-        const connection = await deps.connection(auth, now.botId, [call]);
+        const read: ConnectorCall = { slug: GMAIL_GET_DRAFT, arguments: { user_id: "me", draft_id: now.draftId, format: "full" }, ...(now.account ? { account: now.account } : {}) };
+        const connection = await deps.connection(auth, now.botId, [read, call]);
         if (!connection.ok) return json(res, 403, connection.refusal);
+        // The person may have lost the conversation or the bot while the call waited for the draft or was set up.
+        const stillHere = () => {
+          if (!deps.sees(auth, threadId) || deps.inRoom(threadId) || !deps.mayChat(auth, now.botId)) {
+            throw new DraftRefused(userError("serverError.emailDraft.notHere"), 404);
+          }
+        };
+        const show = (next: EmailDraftCardData) =>
+          deps.store.patchMessage(threadId, messageId, { text: draftCardText(next, deps.language?.(threadId)), emailDraft: next });
         let data: unknown;
         try {
-          data = await runCall(connection, call, () => {
-            // The person may have lost the conversation or the bot while the call waited for the draft or was set up.
-            if (!deps.sees(auth, threadId) || deps.inRoom(threadId) || !deps.mayChat(auth, now.botId)) {
-              throw new DraftRefused(userError("serverError.emailDraft.notHere"), 404);
-            }
-          });
+          const run = await openSession(connection);
+          // Gmail first: another card, the bot or Gmail itself may have changed the draft since the person started
+          // editing, and saving every field would undo that change. Then the card shows what Gmail holds, and nothing is saved.
+          const held = gmailDraftOf(await run(read, stillHere));
+          if (!held || (held.body === undefined && !now.html)) return json(res, 502, userError("serverError.emailDraft.unreadable"));
+          if (!draftUnchanged(base, held, now.html === true)) {
+            const latest = card();
+            if (latest) show({ ...latest, to: held.to, cc: held.cc, bcc: held.bcc, subject: held.subject, ...(held.body !== undefined && !latest.html ? { body: held.body } : {}) });
+            return json(res, 409, userError("serverError.emailDraft.changed"));
+          }
+          data = await run(call, stillHere);
         } catch (error) {
           if (error instanceof DraftRefused) return json(res, error.status, error.refusal);
           const known = userErrorFields(error);
@@ -291,8 +350,7 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
         }
         const current = card();
         if (!current) return json(res, 200, { ok: true });
-        const next: EmailDraftCardData = { ...current, ...draft, draftId: text(record(data)?.id) ?? current.draftId };
-        deps.store.patchMessage(threadId, messageId, { text: draftCardText(next, deps.language?.(threadId)), emailDraft: next });
+        show({ ...current, ...draft, draftId: text(record(data)?.id) ?? current.draftId });
         return json(res, 200, { ok: true });
       });
     } finally {

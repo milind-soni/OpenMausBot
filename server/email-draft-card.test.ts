@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
-import type { EmailDraftCardData } from "../shared/email-draft.ts";
+import type { EmailDraftCardData, EmailDraftEdit } from "../shared/email-draft.ts";
 import type { ConnectorCall } from "../shared/outbound.ts";
 import {
   createDraftGuard, createEmailDraftRoutes, draftCardFrom, DraftRefused, showDraftAnswer, showDraftCard,
@@ -147,8 +147,17 @@ function request(body: unknown) {
   return { context, sent };
 }
 
-/** A connection whose tool calls answer `reply`, recording every call it ran. */
-function relayed(reply: (slug: string) => Record<string, unknown>, gate?: Promise<void>) {
+
+/** Composio's GMAIL_GET_DRAFT answer for a draft Gmail holds: its headers, as Gmail writes them, and its text. */
+function heldAnswer(draft: EmailDraftEdit, over: Record<string, unknown> = {}): Record<string, unknown> {
+  const headers = [["To", draft.to], ["Cc", draft.cc], ["Bcc", draft.bcc], ["Subject", [draft.subject]]]
+    .filter(([, values]) => values.length && values.some(Boolean)).map(([name, values]) => ({ name, value: (values as string[]).join(", ") }));
+  return { successful: true, data: { id: "r-123", message: { to: draft.to.join(", "), subject: draft.subject, messageText: draft.body, payload: { headers }, ...over } } };
+}
+
+/** A connection to a Gmail holding `gmail`: reading the draft answers what it holds, other tool calls answer `reply` (an
+ *  update that succeeds changes what it holds). It records every call it ran. */
+function relayed(reply: (slug: string) => Record<string, unknown>, gate?: Promise<void>, gmail: EmailDraftEdit = { ...shownDraft }) {
   const ran: Array<{ slug: string; arguments: unknown; account?: string }> = [];
   let started!: () => void;
   const calling = new Promise<void>((resolve) => { started = resolve; });
@@ -163,10 +172,15 @@ function relayed(reply: (slug: string) => Record<string, unknown>, gate?: Promis
       ran.push({ slug: tool.tool_slug, arguments: tool.arguments, ...(tool.account ? { account: tool.account } : {}) });
       started();
       await gate;
-      return { status: 200, bytes: new TextEncoder().encode(JSON.stringify(answer(tool.tool_slug, reply(tool.tool_slug), frame.id))) };
+      const args = tool.arguments as Record<string, unknown>;
+      const result = tool.tool_slug === "GMAIL_GET_DRAFT" ? heldAnswer(gmail) : reply(tool.tool_slug);
+      if (tool.tool_slug === "GMAIL_UPDATE_DRAFT" && result.successful) {
+        Object.assign(gmail, { to: [args.recipient_email, ...(args.extra_recipients as string[])].filter(Boolean), cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body });
+      }
+      return { status: 200, bytes: new TextEncoder().encode(JSON.stringify(answer(tool.tool_slug, result, frame.id))) };
     },
   };
-  return { connection, ran, calling };
+  return { connection, ran, calling, gmail };
 }
 
 function setup(over: Partial<EmailDraftRouteDeps> = {}, connection: DraftConnection = relayed(() => ({ successful: true, data: { id: "r-123" } })).connection) {
@@ -185,7 +199,8 @@ function setup(over: Partial<EmailDraftRouteDeps> = {}, connection: DraftConnect
 const edit = { to: ["ana@example.com"], cc: [], bcc: ["boss@example.com"], subject: "Launch (final)", body: "Ready to go." };
 /** The draft as the card shows it. */
 const shownDraft = { to: ["ana@example.com", "ben@example.com"], cc: ["cy@example.com"], bcc: [], subject: "Launch", body: "Hi both,\nready." };
-const save = { action: "save", draft: edit };
+const save = { action: "save", base: shownDraft, draft: edit };
+const READ = { slug: "GMAIL_GET_DRAFT", account: "ca_work", arguments: { user_id: "me", draft_id: "r-123", format: "full" } };
 const errorKey = (sent: { body?: unknown }) => (sent.body as { errorKey?: string }).errorKey;
 type Relay = Extract<DraftConnection, { ok: true }>;
 
@@ -196,11 +211,11 @@ describe("POST /api/email-draft", () => {
     const { context, sent } = request({ threadId: "t1", messageId: row.id, ...save });
     await route(context);
     expect(sent.status).toBe(200);
-    expect(ran).toEqual([{ slug: "GMAIL_UPDATE_DRAFT", account: "ca_work", arguments: {
+    expect(ran).toEqual([READ, { slug: "GMAIL_UPDATE_DRAFT", account: "ca_work", arguments: {
       user_id: "me", draft_id: "r-123", recipient_email: "ana@example.com", extra_recipients: [], cc: [], bcc: ["boss@example.com"],
       subject: "Launch (final)", body: "Ready to go.", is_html: false, thread_id: "th-9",
     } }]);
-    expect(checked[0]![0]!.slug).toBe("GMAIL_UPDATE_DRAFT");
+    expect(checked[0]!.map((call) => call.slug)).toEqual(["GMAIL_GET_DRAFT", "GMAIL_UPDATE_DRAFT"]);
     expect(store.rows[0]!.emailDraft).toMatchObject({ ...edit, draftId: "r-123" });
     expect(store.rows[0]!.text).toBe('Draft saved in Gmail: "Launch (final)" to ana@example.com.');
   });
@@ -240,7 +255,7 @@ describe("POST /api/email-draft", () => {
     open();
     await running;
     expect(first.sent.status).toBe(200);
-    expect(ran).toHaveLength(1);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_GET_DRAFT", "GMAIL_UPDATE_DRAFT"]);
   });
 
   it("runs nothing for someone who can't see the conversation or write to the bot, or in a room", async () => {
@@ -275,14 +290,15 @@ describe("POST /api/email-draft", () => {
     expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
   });
 
-  it("waits for the bot's call to the same draft, so the card ends up showing what Gmail holds", async () => {
-    const { connection, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+  it("waits for the bot's call to the same draft, then saves nothing over the bot's change and shows it", async () => {
+    const { connection, ran, gmail } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
     const { store, row, route, guard } = setup({}, connection);
     let finish!: () => void;
     const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-123", subject: "From the bot" } };
     // The bot's own update to the same draft is on its way to Gmail when the person presses Save.
     const botCall = guard.run(["r-123"], async () => {
       await new Promise<void>((resolve) => { finish = resolve; });
+      gmail.subject = "From the bot";
       showDraftAnswer(store, "t1", "bot-1", [update], new TextEncoder().encode(JSON.stringify(answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } }))), 7);
     });
     const { context, sent } = request({ threadId: "t1", messageId: row.id, ...save });
@@ -291,9 +307,12 @@ describe("POST /api/email-draft", () => {
     expect(ran).toHaveLength(0);
     finish();
     await Promise.all([botCall, pressing]);
-    expect(sent.status).toBe(200);
-    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_UPDATE_DRAFT"]);
-    expect(store.rows[0]!.emailDraft).toMatchObject({ ...edit, draftId: "r-123" });
+    // The edit started from the card before the bot's change: saving every field would undo it.
+    expect(sent.status).toBe(409);
+    expect(errorKey(sent)).toBe("serverError.emailDraft.changed");
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_GET_DRAFT"]);
+    expect(gmail.subject).toBe("From the bot");
+    expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, subject: "From the bot", draftId: "r-123" });
   });
 
   it("says why when the Rules or the bot's app permissions refuse, and changes nothing", async () => {
@@ -344,6 +363,81 @@ describe("POST /api/email-draft", () => {
         expect(ran).toHaveLength(0);
         expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
       }
+    }
+  });
+
+  it("saves nothing when Gmail changed since the edit started, and shows what Gmail holds instead", async () => {
+    const changed = { ...shownDraft, to: ["ana@example.com", "Zoe Z <zoe@example.com>"], body: "Changed in Gmail." };
+    const { connection, ran, gmail } = relayed(() => ({ successful: true, data: { id: "r-123" } }), undefined, { ...changed });
+    const { store, row, route } = setup({}, connection);
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, ...save });
+    await route(context);
+    expect(sent.status).toBe(409);
+    expect(errorKey(sent)).toBe("serverError.emailDraft.changed");
+    expect(ran).toEqual([READ]);
+    expect(gmail).toEqual(changed);
+    // The card keeps addresses only, as Save sends them to Gmail as addresses.
+    expect(store.rows[0]!.emailDraft).toMatchObject({ ...changed, to: ["ana@example.com", "zoe@example.com"], draftId: "r-123" });
+    expect(store.rows[0]!.text).toBe('Draft saved in Gmail: "Launch" to ana@example.com, zoe@example.com.');
+  });
+
+  it("keeps a recipient change saved from another conversation's card when an older card saves later", async () => {
+    // Two conversations show the same draft. B saves new recipients; A's card still shows the old ones.
+    const threads = new Map<string, Message[]>([["tA", []], ["tB", []]]);
+    let next = 0;
+    const store: DraftCardStore = {
+      messagesFor: (thread) => threads.get(thread)!,
+      appendMessage: (thread, message) => { const row = { ...message, id: `m${++next}`, at: next } as Message; threads.get(thread)!.push(row); return row; },
+      patchMessage: (thread, id, patch) => { const row = threads.get(thread)!.find((one) => one.id === id); if (!row) return null; Object.assign(row, patch); return row; },
+    };
+    const card = draftCardFrom([createCall], created(), "bot-1")!;
+    const rowA = showDraftCard(store, "tA", card)!;
+    const rowB = showDraftCard(store, "tB", card)!;
+    const { connection, ran, gmail } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+    const route = createEmailDraftRoutes({ store, guard: createDraftGuard(), sees: () => true, inRoom: () => false, mayChat: () => true, connection: async () => connection });
+    const fromB = request({ threadId: "tB", messageId: rowB.id, action: "save", base: shownDraft, draft: { ...shownDraft, to: ["ana@example.com", "dan@example.com"] } });
+    await route(fromB.context);
+    expect(fromB.sent.status).toBe(200);
+    const fromA = request({ threadId: "tA", messageId: rowA.id, action: "save", base: shownDraft, draft: { ...shownDraft, subject: "Launch (typo fixed)" } });
+    await route(fromA.context);
+    expect(fromA.sent.status).toBe(409);
+    expect(errorKey(fromA.sent)).toBe("serverError.emailDraft.changed");
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_GET_DRAFT", "GMAIL_UPDATE_DRAFT", "GMAIL_GET_DRAFT"]);
+    expect(gmail.to).toEqual(["ana@example.com", "dan@example.com"]);
+    expect(gmail.subject).toBe("Launch");
+    expect(threads.get("tA")![0]!.emailDraft?.to).toEqual(["ana@example.com", "dan@example.com"]);
+  });
+
+  it("saves when Gmail holds the same draft written its own way: names on addresses, other order, rewrapped lines", async () => {
+    const { connection, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }), undefined,
+      { ...shownDraft, to: ["Ben <BEN@example.com>", "\"Ana, A.\" <ana@example.com>"], body: "Hi both,\r\nready.\r\n" });
+    const { row, route } = setup({}, connection);
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, ...save });
+    await route(context);
+    expect(sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_GET_DRAFT", "GMAIL_UPDATE_DRAFT"]);
+  });
+
+  it("saves nothing when Gmail's answer doesn't say what the draft holds", async () => {
+    const full = heldAnswer(shownDraft) as { data: { message: Record<string, unknown> } };
+    const { payload: _headers, ...noHeaders } = full.data.message;
+    const { messageText: _text, ...noText } = full.data.message;
+    for (const data of [{ id: "r-123" }, { id: "r-123", message: noHeaders }, { id: "r-123", message: noText }]) {
+      const gmail = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+      const connection: DraftConnection = { ok: true, relay: async (payload, session, signal, beforeSend) => {
+        const frame = payload as { id?: unknown; method: string };
+        if (frame.method !== "tools/call") return (gmail.connection as Relay).relay(payload, session, signal, beforeSend);
+        beforeSend?.();
+        gmail.ran.push({ slug: "GMAIL_GET_DRAFT", arguments: {} });
+        return { status: 200, bytes: new TextEncoder().encode(JSON.stringify(answer("GMAIL_GET_DRAFT", { successful: true, data }, frame.id))) };
+      } };
+      const { store, row, route } = setup({}, connection);
+      const { context, sent } = request({ threadId: "t1", messageId: row.id, ...save });
+      await route(context);
+      expect(sent.status).toBe(502);
+      expect(errorKey(sent)).toBe("serverError.emailDraft.unreadable");
+      expect(gmail.ran.map((one) => one.slug)).toEqual(["GMAIL_GET_DRAFT"]);
+      expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
     }
   });
 });

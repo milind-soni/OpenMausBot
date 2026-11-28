@@ -7,10 +7,10 @@ import type { Message } from "@/state/store";
 
 const posted = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>);
 /** What a press waits for before the server answers. */
-const answered = vi.hoisted(() => ({ when: Promise.resolve() }));
+const answered = vi.hoisted(() => ({ when: Promise.resolve(), fail: undefined as Error | undefined }));
 vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(),
-  api: async (path: string, init?: { body?: string }) => { posted.push({ path, body: JSON.parse(init?.body ?? "null") }); await answered.when; return { ok: true }; },
+  api: async (path: string, init?: { body?: string }) => { posted.push({ path, body: JSON.parse(init?.body ?? "null") }); await answered.when; if (answered.fail) throw answered.fail; return { ok: true }; },
 }));
 
 const draft: Message = {
@@ -24,6 +24,7 @@ beforeEach(() => {
   setLocale("en");
   posted.length = 0;
   answered.when = Promise.resolve();
+  answered.fail = undefined;
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
@@ -57,7 +58,9 @@ describe("the Gmail draft card", () => {
     const [to, , , subject] = [...container.querySelectorAll("input")];
     await act(async () => { type(to!, "ana@example.com, ben@example.com"); type(subject!, "Launch (final)"); });
     await click("Save");
-    expect(posted).toEqual([{ path: "/api/email-draft", body: { threadId: "t1", messageId: "card-1", action: "save", draft: {
+    expect(posted).toEqual([{ path: "/api/email-draft", body: { threadId: "t1", messageId: "card-1", action: "save", base: {
+      to: ["ana@example.com"], cc: ["cy@example.com"], bcc: [], subject: "Launch", body: "Ready to go.",
+    }, draft: {
       to: ["ana@example.com", "ben@example.com"], cc: ["cy@example.com"], bcc: [], subject: "Launch (final)", body: "Ready to go.",
     } } }]);
   });
@@ -105,5 +108,21 @@ describe("the Gmail draft card", () => {
     expect(fields.every((field) => field.disabled)).toBe(true);
     await act(async () => { answer(); });
     expect(container.querySelectorAll("input, textarea")).toHaveLength(0);
+  });
+
+  it("closes the editor when the draft changed in Gmail, so the next edit starts from what Gmail holds", async () => {
+    const { ApiError } = await import("@/state/store");
+    const changed = "This draft changed in Gmail since you started editing, so nothing was saved. The card now shows the latest version: edit it again.";
+    answered.fail = new ApiError(changed, 409, { error: changed, errorKey: "serverError.emailDraft.changed" });
+    await shown();
+    await click("Edit");
+    await click("Save");
+    expect(container.querySelectorAll("input, textarea")).toHaveLength(0);
+    expect(container.querySelector("[role=alert]")?.textContent).toBe(changed);
+    // Any other refusal keeps what was typed.
+    answered.fail = new ApiError("Gmail refused: busy", 502, { error: "Gmail refused: busy" });
+    await click("Edit");
+    await click("Save");
+    expect(container.querySelectorAll("input")).toHaveLength(4);
   });
 });

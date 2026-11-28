@@ -19,6 +19,8 @@
   "serverError.emailDraft.notAllowed": "{name} darf keine Gmail-Entwürfe speichern. Ändere dafür seine App-Berechtigungen.",
   "serverError.emailDraft.unreachable": "Gmail war über Apps nicht erreichbar (HTTP {status}). Versuch es in ein paar Minuten noch einmal.",
   "serverError.emailDraft.refused": "Gmail hat abgelehnt: {detail}",
+  "serverError.emailDraft.changed": "Dieser Entwurf wurde in Gmail geändert, seit du mit dem Bearbeiten angefangen hast, darum wurde nichts gespeichert. Die Karte zeigt jetzt die neueste Fassung: bearbeite sie noch einmal.",
+  "serverError.emailDraft.unreadable": "Gmail hat nicht gesagt, was dieser Entwurf jetzt enthält, darum wurde nichts gespeichert. Versuch es in ein paar Minuten noch einmal.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

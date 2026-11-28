@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
-import { api, type Message } from "@/state/store";
+import { api, ApiError, type Message } from "@/state/store";
 import { EMAIL_DRAFT_PATH, splitAddresses, type EmailDraftCardData, type EmailDraftEdit } from "../../shared/email-draft";
 
 const GMAIL_DRAFTS = "https://mail.google.com/mail/#drafts";
@@ -30,6 +30,9 @@ interface Fields { to: string; cc: string; bcc: string; subject: string; body: s
 
 const fieldsOf = (card: EmailDraftCardData): Fields =>
   ({ to: card.to.join(", "), cc: card.cc.join(", "), bcc: card.bcc.join(", "), subject: card.subject, body: card.body });
+
+/** The draft as the card shows it: what an edit starts from. */
+const baseOf = (card: EmailDraftCardData): EmailDraftEdit => ({ to: card.to, cc: card.cc, bcc: card.bcc, subject: card.subject, body: card.body });
 
 export function editOf(fields: Fields): EmailDraftEdit {
   return { to: splitAddresses(fields.to), cc: splitAddresses(fields.cc), bcc: splitAddresses(fields.bcc), subject: fields.subject, body: fields.body };
@@ -59,6 +62,8 @@ function Field({ label, value, onChange, multiline, disabled }: { label: string;
 export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: string; message: Message; viewOnly?: boolean }) {
   const card = message.emailDraft!;
   const [editing, setEditing] = useState<Fields | null>(null);
+  // The draft as the card showed it when editing started: Save sends it, and the server saves nothing if Gmail changed since.
+  const [base, setBase] = useState<EmailDraftEdit | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const live = !viewOnly && Boolean(threadId) && !card.sentAt;
@@ -73,10 +78,12 @@ export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: str
     setSaving(true);
     setError(null);
     try {
-      await api(EMAIL_DRAFT_PATH, { method: "POST", body: JSON.stringify({ threadId, messageId: message.id, action: "save", draft }) });
+      await api(EMAIL_DRAFT_PATH, { method: "POST", body: JSON.stringify({ threadId, messageId: message.id, action: "save", base, draft }) });
       return true;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+      // Changed in Gmail meanwhile: the card now shows that version, and the edit started from an older one.
+      if (failure instanceof ApiError && failure.body?.errorKey === "serverError.emailDraft.changed") setEditing(null);
       return false;
     } finally {
       setSaving(false);
@@ -111,7 +118,7 @@ export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: str
           <Line label={t("chat.emailDraft.subject")} value={card.subject || t("chat.emailDraft.noSubject")} />
           <p dir="auto" className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words border-t border-hairline/45 pt-2 text-[14px] leading-relaxed text-ink">{draftBodyText(card)}</p>
           <div className="flex flex-wrap gap-2">
-            {live && !card.html && <button type="button" disabled={saving} onClick={() => setEditing(fieldsOf(card))} className={button}>{t("chat.emailDraft.edit")}</button>}
+            {live && !card.html && <button type="button" disabled={saving} onClick={() => { setEditing(fieldsOf(card)); setBase(baseOf(card)); }} className={button}>{t("chat.emailDraft.edit")}</button>}
             {!card.sentAt && <button type="button" onClick={() => void openExternalLink(card.url ?? GMAIL_DRAFTS)} className={button}>{t("chat.emailDraft.openInGmail")}</button>}
           </div>
         </>

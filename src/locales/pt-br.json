@@ -23,6 +23,8 @@
   "serverError.emailDraft.notAllowed": "{name} não pode salvar rascunhos do Gmail. Mude as permissões de apps dele para permitir.",
   "serverError.emailDraft.unreachable": "Não foi possível acessar o Gmail pelos Apps (HTTP {status}). Tente de novo em alguns minutos.",
   "serverError.emailDraft.refused": "O Gmail recusou: {detail}",
+  "serverError.emailDraft.changed": "Este rascunho mudou no Gmail desde que você começou a editar, então nada foi salvo. O cartão agora mostra a versão mais recente: edite de novo.",
+  "serverError.emailDraft.unreadable": "O Gmail não informou o que este rascunho contém agora, então nada foi salvo. Tente de novo em alguns minutos.",
   "voice.gemini.keyPlaceholder": "Cole sua chave de API do Google AI Studio",
   "voice.gemini.model": "Modelo de voz do Gemini",
   "keys.label.geminiTts": "Chave de API de voz do Gemini",
