@@ -114,8 +114,7 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("desktop", "nas.local:443", ["192.168.1.20"], { localNetwork: false })).toBe("local-network");
   });
 
-  it("lets the desktop reach a proxy's fake-IP answers (198.18.0.0/15) like the local network; servers and Cloud keep refusing them", async () => {
-    // Clash, Surge and similar proxies in TUN + fake-IP mode answer every name with an address in 198.18.0.0/15.
+  it("lets the desktop reach Fake-IP answers in 198.18.0.0/15 under local-network rules", async () => {
     expect(await decide("desktop", "example.com:443", ["198.18.0.7"])).toBeNull();
     expect(await decide("desktop", "github.com:443", ["198.19.255.254", "::ffff:198.18.1.2"])).toBeNull();
     expect(await decide("desktop", "example.com:443", ["198.18.0.7"], { localNetwork: false })).toBe("local-network");
@@ -124,9 +123,13 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("desktop", "198.18.0.1:8080", ["198.18.0.1"])).toBeNull();
     // The proxy may route a fake-IP answer to this computer, so OpenMausBot's own ports stay closed through it.
     expect(await decide("desktop", "example.com:8799", ["198.18.0.7"])).toBe("omb");
-    for (const host of ["server", "cloud"] as const) {
-      expect(await decide(host, "example.com:443", ["198.18.0.7"], { allowed: () => true }), host).toBe("reserved");
-    }
+  });
+
+  it.each(["server", "cloud"] as const)("reports the specific refusal for the benchmarking range on %s", async (host) => {
+    const open = { allowed: allowList(["198.18.0.0/15"]), localNetwork: true };
+    expect(await decide(host, "example.com:443", ["198.18.0.7"], open)).toBe("fakeIp");
+    expect(await decide(host, "mixed.example:443", ["203.0.113.7", "::ffff:198.19.255.254"], open)).toBe("fakeIp");
+    expect(await decide(host, "198.18.0.7:443", ["198.18.0.7"], open)).toBe("fakeIp");
   });
 
   it("lets a server reach only the loopback ports a bot's own processes opened, or that an admin allowed", async () => {

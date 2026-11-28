@@ -11,7 +11,7 @@ export { addressClass, ownAddresses, type AddressClass };
 export type EgressHost = "desktop" | "server" | "cloud";
 
 /** `home-network` and `port` come from the person's own computer when My Cloud's browsing goes out through it. */
-export type Refusal = "omb" | "this-computer" | "local-network" | "link-local" | "metadata" | "reserved" | "rebinding" | "reddit" | "home-network" | "port";
+export type Refusal = "omb" | "this-computer" | "local-network" | "link-local" | "metadata" | "reserved" | "rebinding" | "reddit" | "home-network" | "port" | "fakeIp";
 
 /** How a refusal reads in the page-health line. */
 export const REFUSAL_TEXT: Record<Refusal, string> = {
@@ -21,6 +21,7 @@ export const REFUSAL_TEXT: Record<Refusal, string> = {
   "link-local": "a link-local address",
   metadata: "the cloud metadata service",
   reserved: "a reserved address",
+  fakeIp: "a reserved address in 198.18.0.0/15. If Fake-IP DNS supplied it, configure the resolver OpenMausBot uses to return public IP addresses for this site",
   rebinding: "a web address that points at this computer",
   reddit: "Reddit",
   "home-network": "the person's own computer or home network",
@@ -29,7 +30,7 @@ export const REFUSAL_TEXT: Record<Refusal, string> = {
 
 const family = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 
-/** Clash, Surge and other proxies in TUN + fake-IP mode answer every name from 198.18.0.0/15 and route it themselves. */
+// 198.18.0.0/15 is reserved for benchmarking. Fake-IP DNS also uses it for synthetic answers.
 const FAKE_IP = new BlockList();
 FAKE_IP.addSubnet("198.18.0.0", 15, "ipv4");
 
@@ -129,9 +130,9 @@ export async function refusalFor(
   const { host, port } = target;
   for (const { address } of addresses) {
     let kind = addressClass(address, own);
-    // On the desktop these come from the person's own proxy: the local network, unless this computer holds the address.
-    if (kind === "reserved" && rules.host === "desktop" && listed(FAKE_IP, address)) {
-      // The proxy picks the real destination, which may be this computer: never let it reach OpenMausBot's own ports.
+    if (kind === "reserved" && listed(FAKE_IP, address)) {
+      if (rules.host !== "desktop") return "fakeIp";
+      // A desktop proxy can route the address back to this computer, so keep OpenMausBot's own ports closed.
       if (rules.ownPort(port)) return "omb";
       kind = listed(own, address) ? "this-machine" : "private";
     }

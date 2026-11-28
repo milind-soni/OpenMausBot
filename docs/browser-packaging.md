@@ -126,7 +126,15 @@ app's language setting for its Chrome locale and `Accept-Language`; an explicit
 | Other ports on this computer | yes, by `localhost` or an address, not by a public name | only servers a bot's own processes opened (Linux), or allowed below; with "Open sites on this server" on, yes, by `localhost`, an address or a name that points at this server's own addresses, not a public name that points at loopback | only servers a bot's own processes opened |
 | Local network: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 | yes, unless `browserEngine.egress.localNetwork` is `false` | only what `browserEngine.egress.allow` lists, or all of it with "Open sites on this server" on | no |
 | Link-local and cloud metadata (169.254/16, fe80::/10, `fd00:ec2::254`, 100.100.100.200) | no | no | no |
-| 0/8, 198.18/15, multicast | no | no | no |
+| 0/8 | no | no | no |
+| 198.18.0.0/15 (benchmarking range also used by Fake-IP DNS) | treated as local network, or as this computer if it holds the address. OpenMausBot's own ports stay closed | no | no |
+| Multicast | no | no | no |
+
+Self-hosted and Cloud browsers refuse addresses in `198.18.0.0/15` before the gate
+consults the SOCKS5 upstream setting. If Fake-IP DNS is returning these addresses
+for a public site, configure the resolver used by the OpenMausBot process to
+return the site's public IP addresses. For Docker installs, check DNS from
+inside the container.
 
 OpenMausBot's own ports are the server's and its webhook receiver's, the
 desktop client relay, the companion and its control page and gateway, the Vite
