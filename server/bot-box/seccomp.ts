@@ -8,10 +8,12 @@
 // u16 code, u8 jt, u8 jf, u32 k (little-endian, as the kernel reads struct sock_filter on x86-64).
 
 export const SECCOMP_ARCH_X86_64 = 0xc000003e;
+/** The x32 ABI's syscall-number bit: `open(2)` and friends are also reachable as `nr | 0x40000000`. */
+export const X32_SYSCALL_BIT = 0x40000000;
 const SECCOMP_RET_ALLOW = 0x7fff0000, SECCOMP_RET_ERRNO = 0x00050000, SECCOMP_RET_KILL_PROCESS = 0x80000000;
 const EPERM = 1;
 // BPF opcodes
-const BPF_LD_W_ABS = 0x20, BPF_JMP_JEQ_K = 0x15, BPF_RET_K = 0x06;
+const BPF_LD_W_ABS = 0x20, BPF_JMP_JEQ_K = 0x15, BPF_JMP_JGE_K = 0x35, BPF_RET_K = 0x06;
 // struct seccomp_data offsets
 const OFFSET_NR = 0, OFFSET_ARCH = 4;
 
@@ -36,10 +38,17 @@ export function seccompProgram(denied: ReadonlyArray<[string, number]> = DENIED_
     { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_KILL_PROCESS },
     { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: OFFSET_NR },
   ];
+  // Security: a number at or above the x32 bit is the same call through the x32 ABI, so the exact-match
+  // compares below would miss it and fall through to ALLOW. Kill the whole range outright.
+  const guard = program.length;
+  program.push({ code: BPF_JMP_JGE_K, jt: 0, jf: 0, k: X32_SYSCALL_BIT });
   // Each denied number jumps straight to the EPERM return at the end; a miss falls through to the next check.
   denied.forEach(([, nr], index) => program.push({ code: BPF_JMP_JEQ_K, jt: denied.length - index, jf: 0, k: nr }));
   program.push({ code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW });
   program.push({ code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ERRNO | EPERM });
+  const kill = program.length;
+  program.push({ code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_KILL_PROCESS });
+  program[guard]!.jt = kill - (guard + 1);
   return program;
 }
 
@@ -67,6 +76,7 @@ export function simulate(program: BpfInstruction[], arch: number, nr: number): "
     const instruction = program[pc]!;
     if (instruction.code === BPF_LD_W_ABS) { accumulator = instruction.k === OFFSET_ARCH ? arch : nr; pc += 1; }
     else if (instruction.code === BPF_JMP_JEQ_K) pc += 1 + (accumulator === instruction.k ? instruction.jt : instruction.jf);
+    else if (instruction.code === BPF_JMP_JGE_K) pc += 1 + (accumulator >= instruction.k ? instruction.jt : instruction.jf);
     else if (instruction.code === BPF_RET_K) return instruction.k === SECCOMP_RET_ALLOW ? "allow" : instruction.k === SECCOMP_RET_KILL_PROCESS ? "kill" : "eperm";
     else throw new Error(`unknown instruction at ${pc}`);
   }
