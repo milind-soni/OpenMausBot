@@ -246,11 +246,38 @@ describe("registering a phone", () => {
       { platform: "apns", token: APNS, pairing: "no spaces allowed" },
       { platform: "apns", token: APNS, pushToken: APNS },
       { platform: "webpush", token: FCM },
+      { platform: "apns", token: APNS, botChannels: ["bot_1"] },
+      { platform: "fcm", token: FCM, botChannels: ["not a bot id"] },
     ]) expect(registrationSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
   });
 });
 
 describe("offering a notify frame", () => {
+  it("tells the relay a bot's push may use the bot's own Android channel, only for bots the phone made one for", async () => {
+    const { push, relay } = harness();
+    await push.register(OTHER, { platform: "fcm", token: FCM, botChannels: ["bot_1", "bot_1"] });
+    push.offer({ notification: notification({ kind: "done", threadId: "th_a" }), seq: 1 }, everyone);
+    push.offer({ notification: notification({ kind: "done", botId: "bot_2", botName: "Atlas", threadId: "th_b" }), seq: 2 }, everyone);
+    await push.flush();
+    expect(relay.sends().map((call) => [call.body.notification, call.body.botChannel])).toEqual([
+      [expect.objectContaining({ botId: "bot_1" }), true],
+      [expect.objectContaining({ botId: "bot_2" }), undefined],
+    ]);
+    await push.register(OTHER, { platform: "fcm", token: FCM });
+    push.offer({ notification: notification({ kind: "done", threadId: "th_c" }), seq: 3 }, everyone);
+    await push.flush();
+    expect(relay.sends().at(-1)?.body).not.toHaveProperty("botChannel");
+  });
+
+  it("leaves the bot's own channel out through a Cloud home's Admin, which takes the earlier send body", async () => {
+    const { push, relay } = harness({ access: () => ({ admin: "https://admin.openmausbot.test", machineId: "machine-1", secret: "s".repeat(43) }) });
+    await push.register(OTHER, { platform: "fcm", token: FCM, botChannels: ["bot_1"] });
+    push.offer({ notification: notification({ kind: "done" }), seq: 1 }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(1);
+    expect(relay.sends()[0]?.body).not.toHaveProperty("botChannel");
+  });
+
   it("pushes only to a phone with no live stream that would have seen it, content-free, with the stream's identifier", async () => {
     const { push, relay, liveKeys } = harness();
     await push.register(PHONE, { platform: "apns", token: APNS, pairing: "pair-tag-0001" });

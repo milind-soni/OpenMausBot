@@ -68,7 +68,8 @@ person.
    third-party push service sits in between.
 2. **The phone gives the token to its computer or Cloud,** over the link it
    already uses and with the credential it already has:
-   `PUT /api/push/device {platform, token, environment?, pairing, kinds}`. The
+   `PUT /api/push/device {platform, token, environment?, pairing, kinds,
+   botChannels?}`. The
    server knows which phone is asking from what authenticated the request (the
    phone's paired session, or the device the desktop's companion vouched for),
    never from the body. The phone does this after it connects, whenever the
@@ -351,6 +352,14 @@ in order (all done; kept as the record and for a new environment):
   (high importance) for approvals, questions and sign-ins, and `bot_messages`
   for finished replies. A phone that never opened the new app has no channels
   yet and shows the push in the default channel.
+- An Android phone can name the bots it made a channel of their own for
+  (`botChannels`, ids). A push for one of those bots then goes out with
+  `botChannel: true`, and the control plane sends a finished reply on
+  `bot_messages.<botId>`, where the person can give the bot its own sound.
+  The server never names a bot the phone did not list, because Android shows
+  a push for a missing channel under "Miscellaneous". A Cloud home leaves the
+  field out, since its Admin's copy of the send schema does not take it yet,
+  so its phones keep the shared `bot_messages` channel.
 - The categories (Allow and Deny on an approval, Answer on a question) are the
   ones the app registers today.
 
