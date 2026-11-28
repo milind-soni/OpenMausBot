@@ -27,7 +27,7 @@ import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs"; import { d
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
-import { serverChildLaunch } from "./server-child-launch.mjs";
+import { serverChildLaunch } from "./server-child-launch.mjs"; import { postDesktopMutationToken } from "./desktop-mutation-token.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
@@ -1074,15 +1074,7 @@ async function runCompanyBackup(kind, input, scheduled = null) {
 }
 
 function syncDesktopMutationToken(proc) {
-  try {
-    proc.postMessage({
-      type: "openmausbot:desktop-mutation-token",
-      token: desktopMutationToken,
-      companionToken: companionMutationToken,
-    });
-  } catch (error) {
-    slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);
-  }
+  postDesktopMutationToken(proc, desktopMutationToken, companionMutationToken, slog);
 }
 
 const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
@@ -1179,7 +1171,14 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     isListening: listening.heard, listened: listening.announced,
     listeningGraceMs: SERVER_LISTENING_GRACE_MS,
   });
-  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
+  // The spawn-time post races the server child's listener registration (the child attaches its
+  // private-message listener only after its module has finished loading). Re-post the capability
+  // once the server reports ready; applying it is idempotent, and a token is required before the
+  // desktop window can sign in locally.
+  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) {
+    syncDesktopMutationToken(proc);
+    return { proc };
+  }
   slog(bootFailureMessage(port, identity));
   const stopped = await stopUtilityServer(proc);
   if (!stopped) {
