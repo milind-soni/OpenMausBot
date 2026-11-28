@@ -70,6 +70,8 @@ export interface LimitFailover {
 
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
 const UNKNOWN_RESET_WAIT_MS = 60 * 60_000;
+/** How far a failover's reset and the refusal that caused it can differ and still be the same hold. */
+const HOLD_MATCH_MS = 60_000;
 
 export interface LimitFailoverDeps {
   file: string;
@@ -134,6 +136,21 @@ export class LimitFailovers {
     this.forget(threadId);
     this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why), row.why === "signed-out" ? { key: "chat.notice.failoverSignedInAgain", params: { engine: this.deps.engineName(row.from.instanceId) } } : undefined);
     return true;
+  }
+
+  /** Fresh usage showed `engine`'s limit over before the reset it named: the conversations waiting on that same
+   * reset go back at their next turn instead. Returns how many rows were shortened. */
+  recoverHold(engine: string, heldUntil: number): number {
+    const now = this.deps.now?.() ?? Date.now();
+    let changed = 0;
+    this.rows = this.rows.map((row) => {
+      if (row.from.instanceId !== engine || row.why === "signed-out" || row.meter || row.resetsAt === null) return row;
+      if (Math.abs(row.resetsAt - heldUntil) > HOLD_MATCH_MS) return row;
+      changed++;
+      return { ...row, resetsAt: now };
+    });
+    if (changed) this.save();
+    return changed;
   }
 
   forget(threadId: string): false {

@@ -123,4 +123,32 @@ describe("LimitFailovers", () => {
     f.failovers.record({ botId: "scout", threadId: "t", from: to, to: { instanceId: "grok", model: "grok-5" }, resetsAt: NOW + 2 * HOUR, at: NOW });
     expect(f.failovers.list()).toEqual([expect.objectContaining({ from, to: { instanceId: "grok", model: "grok-5" } })]);
   });
+
+  it("goes back at the next turn when fresh usage released the reset it was waiting on", () => {
+    const limited = { instanceId: "codex", model: "gpt-fake-default" };
+    const f = fixture();
+    f.failovers.record({ botId: "scout", threadId: "t", from: limited, to, resetsAt: NOW + 23 * HOUR, at: NOW });
+    expect(f.failovers.restore("scout", "t")).toBe(false);
+    f.at(NOW + HOUR);
+    expect(f.failovers.recoverHold("codex", NOW + 23 * HOUR + 30_000)).toBe(1);
+    expect(f.failovers.restore("scout", "t")).toBe(true);
+    expect(f.notes).toEqual(["codex's limit has reset, so this conversation is back on codex."]);
+    expect(new LimitFailovers(f.deps).list()).toEqual([]);
+  });
+
+  it("leaves another engine's, another reset's, a signed-out and a meter-only failover alone", () => {
+    const limited = { instanceId: "codex", model: "gpt-fake-default" };
+    const f = fixture();
+    f.failovers.record({ botId: "a", threadId: "a", from: limited, to, resetsAt: NOW + 23 * HOUR, at: NOW });
+    f.failovers.record({ botId: "b", threadId: "b", from: limited, to, resetsAt: NOW + 2 * HOUR, at: NOW });
+    f.failovers.record({ botId: "c", threadId: "c", from: limited, to, resetsAt: null, at: NOW, why: "signed-out" });
+    f.failovers.record({ botId: "d", threadId: "d", from: limited, to, resetsAt: NOW + 23 * HOUR, at: NOW, meter: true });
+    expect(f.failovers.recoverHold("grok", NOW + 23 * HOUR)).toBe(0);
+    expect(f.failovers.recoverHold("codex", NOW + 9 * HOUR)).toBe(0);
+    f.at(NOW + HOUR);
+    expect(f.failovers.recoverHold("codex", NOW + 23 * HOUR)).toBe(1);
+    expect(f.failovers.list().find((row) => row.threadId === "b")?.resetsAt).toBe(NOW + 2 * HOUR);
+    expect(f.failovers.list().find((row) => row.threadId === "c")?.resetsAt).toBeNull();
+    expect(f.failovers.list().find((row) => row.threadId === "d")?.resetsAt).toBe(NOW + 23 * HOUR);
+  });
 });
