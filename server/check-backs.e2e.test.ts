@@ -13,7 +13,7 @@ import { removeTempDir } from "./testing/cleanup.ts";
 it("wakes the same bot in the same conversation at its time with no human action, and Cancel stops another", async () => {
   const folder = mkdtempSync(join(tmpdir(), "omb-check-backs-"));
   const gate = join(folder, "finish");
-  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
+  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_VERSION: "2.0.76" });
   const evidence: unknown[] = [];
   const api = async (method: string, path: string, body?: unknown, expected = 200, token?: string) => {
     const response = await fetch(fixture.info.url + path, {
@@ -59,10 +59,18 @@ it("wakes the same bot in the same conversation at its time with no human action
 
     writeFileSync(gate, "finish");
     await expect.poll(busy, { timeout: 15_000 }).toBe(false);
+    await api("POST", `/api/bots/${bot.id}/compact`, { threadId: bot.threadId }, 202);
+    await expect.poll(busy, { timeout: 15_000 }).toBe(false);
+    expect((await transcript()).at(-1)).toMatchObject({ kind: "compaction", compaction: { by: "person" } });
     unlinkSync(gate);
 
     await expect.poll(turnPrompt, { timeout: 90_000, interval: 500 }).toContain("What to check: see if CI passed");
-    expect(turnPrompt()).toContain("[Check back:");
+    const prompt = turnPrompt();
+    expect(prompt).toContain("[Earlier conversation summary");
+    expect(prompt).toContain("Merge it, then check CI in a minute");
+    expect(prompt).toContain("[Check back:");
+    expect(prompt).not.toContain("Now reply to the user's latest message");
+    expect(prompt).toContain("[Continue the pending work in this conversation");
     const woken = await turnToken();
     expect(await lines()).toMatchObject([{ status: "started" }, { status: "cancelled" }]);
     const rows = await transcript();

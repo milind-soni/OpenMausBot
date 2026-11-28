@@ -26,7 +26,7 @@ let pairedToken: string;
 let fixtureEnv: NodeJS.ProcessEnv;
 let policyBotId: string | undefined;
 const policyEvidence: unknown[] = [];
-const state = (role: string | null = "admin", outage = false, license: { features?: string[]; expiresAt?: string; invalid?: boolean } = {}) => writeFileSync(stateFile, JSON.stringify({ role, outage, license }));
+const state = (role: string | null = "admin", outage = false, license: { features?: string[]; expiresInMs?: number; invalid?: boolean } = {}) => writeFileSync(stateFile, JSON.stringify({ role, outage, license }));
 
 function call(path: string, options: { method?: string; cookie?: string; token?: string; local?: boolean; body?: unknown } = {}) {
   return new Promise<{ status: number; body: any; cookies: string[]; location?: string; contractVersion?: string | string[] }>((resolve, reject) => {
@@ -109,7 +109,7 @@ beforeAll(async () => {
     export function register() {
       const { license } = JSON.parse(readFileSync(${JSON.stringify(stateFile)}, 'utf8'));
       if (license.invalid) throw new Error('invalid fixture license');
-      return { customer: 'Fixture', features: license.features ?? ['admin'], expiresAt: license.expiresAt ?? null };
+      return { customer: 'Fixture', features: license.features ?? ['admin'], expiresAt: license.expiresInMs === undefined ? null : new Date(Date.now() + license.expiresInMs).toISOString() };
     }
     export function createWorkspaceAccess(options) {
       return create({ ...options, fetchImpl: async (url, init) => {
@@ -329,7 +329,7 @@ describe("hosted bridge in the full server", () => {
   }, 25_000);
   it("withdraws hosted readiness the moment the running server's license grace period ends", async () => {
     // Expired 14 days ago less eight seconds: inside the 14-day grace, which ends mid-test.
-    state("admin", false, { expiresAt: new Date(Date.now() + 8_000 - 14 * 24 * 60 * 60_000).toISOString() });
+    state("admin", false, { expiresInMs: 8_000 - 14 * 24 * 60 * 60_000 });
     await restart({ OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" });
     expect((await call("/api/health/hosted")).status).toBe(200);
     await policyHealth(true);

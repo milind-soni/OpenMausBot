@@ -7735,11 +7735,11 @@ async function beginTurn(
       const decideContext = (config: string) => {
         const handedStale = resuming.stale(config);
         const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
-        const { turnText: contextTurnText, resume } = buildTurnContext({
+        const { turnText: contextTurnText, resume, replayed } = buildTurnContext({
           text: userTurnText,
           transcript: replay.transcript,
-          rewound,
-          fresh: fresh || contextReset,
+          rewound, fresh: fresh || contextReset,
+          continuingAfterFold: contextReset && (opts?.cardContinuation === true || !text.trim()),
           externallyUpdated: Boolean(externalContextMarker) || handedStale,
           replaysNatively: replaysNatively(instance.driverKind),
         });
@@ -7754,12 +7754,12 @@ async function beginTurn(
         const windowIds = selection.representedIds;
         return {
           turnText: withUnseenMessages(unseenBlock, contextTurnText),
-          images: contextTurnText !== userTurnText ? [...replay.images, ...turnImages] : turnImages, videos: turnVideos,
+          images: replayed ? [...replay.images, ...turnImages] : turnImages, videos: turnVideos,
           resumeCursor, sessionReset: !resume, recoveryText,
           handoff: strictResume ? {
             botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
             ...(instance.driverKind === "codex" ? { effort: effort ?? null } : {}),
-            started: sessionStart(contextOrder, contextTurnText !== userTurnText ? windowIds : [], carried),
+            started: sessionStart(contextOrder, replayed ? windowIds : [], carried),
             recovery: sessionStart(contextOrder, recoveryText !== undefined ? windowIds : [], carried),
             resumed: sessionStart(contextOrder, [], [...placed, ...carried]),
             placed, carried, own: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],

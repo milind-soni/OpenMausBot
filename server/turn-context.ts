@@ -13,6 +13,7 @@ export interface TurnContextInput {
   fresh: boolean;
   externallyUpdated: boolean;
   replaysNatively: boolean;
+  continuingAfterFold?: boolean;
 }
 
 export function engineIsFresh(input: {
@@ -34,6 +35,11 @@ const FRESH_PREAMBLE =
   "[You are joining this conversation mid-thread (the user switched this bot over to you). The conversation so far:]";
 const EXTERNAL_UPDATE_PREAMBLE =
   "[This conversation received an update outside your provider session. The complete current history follows so you can use that update in your next response:]";
+
+const FOLD_PREAMBLE =
+  "[This conversation was compacted and is continuing in a fresh engine session. The conversation so far:]";
+const FOLD_CONTINUATION =
+  "[Continue the pending work in this conversation using the earlier context and any new results. Follow the user's standing instructions and respond in their language.]";
 
 const RECOVERED_PREAMBLE =
   "[Your previous session for this conversation could not be resumed, so this is a new session. The conversation so far:]";
@@ -61,21 +67,25 @@ export const canResume = (input: Pick<TurnContextInput, "rewound" | "fresh" | "e
 export function buildTurnContext(input: TurnContextInput): {
   turnText: string;
   resume: boolean;
+  replayed: boolean;
 } {
   const { text, transcript, rewound, externallyUpdated, replaysNatively } = input;
   const resume = canResume(input);
-  const replay = !resume && !replaysNatively && transcript.length > 0;
-  if (!replay) return { turnText: text, resume };
+  const continuing = !resume && input.continuingAfterFold;
+  const current = continuing ? (text ? `${text}\n\n${FOLD_CONTINUATION}` : FOLD_CONTINUATION) : text;
+  const replayed = !resume && !replaysNatively && transcript.length > 0;
+  if (!replayed) return { turnText: current, resume, replayed };
   return {
     turnText: [
-      rewound ? REWOUND_PREAMBLE : externallyUpdated ? EXTERNAL_UPDATE_PREAMBLE : FRESH_PREAMBLE,
+      continuing ? FOLD_PREAMBLE : rewound ? REWOUND_PREAMBLE : externallyUpdated ? EXTERNAL_UPDATE_PREAMBLE : FRESH_PREAMBLE,
       "",
       ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
       "",
-      "[Now reply to the user's latest message:]",
+      continuing ? "[Current continuation:]" : "[Now reply to the user's latest message:]",
       "",
-      text,
+      current,
     ].join("\n"),
     resume,
+    replayed,
   };
 }
