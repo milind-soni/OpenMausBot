@@ -148,7 +148,7 @@ The app checks for updates in the background and downloads them by itself. Nothi
   refused and nothing is installed. Closing the prompt leaves the update ready to try again. If the session cannot
   show a prompt (SSH, no desktop, no `pkexec`), the app falls back to copying the `sudo apt-get install` command
   and opening a terminal, and says why. Set `OMB_UPDATE_INSTALL=terminal` to always use the terminal.
-- **AppImage.** The update replaces the AppImage when you restart; no password is needed.
+- **AppImage.** The update replaces the AppImage when you restart without a password. Releases that include a versioned `.AppImage.zsync` asset also support AppImageUpdate. Download an AppImage from one of those releases to start using the external updater.
 - **rpm and pacman packages** still use the terminal hand-off.
 
 ### Bundled bot browser on Ubuntu 24.04

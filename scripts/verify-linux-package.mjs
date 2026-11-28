@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
+  createReadStream,
   closeSync,
   constants,
   lstatSync,
@@ -547,6 +548,20 @@ try {
     timeout: 10_000,
   }).trim();
   if (!/^\d+$/.test(offset)) fail(`AppImage returned an invalid SquashFS offset: ${offset}`);
+  if (process.env.OMB_APPIMAGE_UPDATE === "1") {
+    const updateInfo = execFileSync(appImage, ["--appimage-updateinformation"], { encoding: "utf8", timeout: 10_000 }).trim();
+    if (updateInfo !== "gh-releases-zsync|milind-soni|OpenMausBot|latest|OpenMausBot-*-x86_64.AppImage.zsync") fail(`Unexpected AppImage update information: ${updateInfo}`);
+    const name = path.basename(appImage);
+    const version = name.replace(/^OpenMausBot-|-x86_64\.AppImage$/g, "");
+    const zsync = readFileSync(`${appImage}.zsync`);
+    const header = zsync.subarray(0, zsync.indexOf("\n\n")).toString().split("\n");
+    const sha1 = createHash("sha1");
+    for await (const chunk of createReadStream(appImage)) sha1.update(chunk);
+    if (!header.includes(`URL: https://github.com/milind-soni/OpenMausBot/releases/download/v${version}/${name}`) ||
+        !header.includes(`Length: ${statSync(appImage).size}`) || !header.includes(`SHA-1: ${sha1.digest("hex")}`)) {
+      fail("The zsync sidecar does not describe the final AppImage");
+    }
+  }
   const squashRoot = path.join(appImageExtracted, "squashfs-root");
   execFileSync(
     "unsquashfs",
