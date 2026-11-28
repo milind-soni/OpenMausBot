@@ -12,8 +12,8 @@ export type CustomApi = "systemone" | "decisions" | "chat";
 export type DeciderJob = "roomRouting" | "inboxTriage";
 export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting", "inboxTriage"];
 
-/** botDecide: a bot's own `decide` tool call. */
-export type DeciderSeam = DeciderJob | "keyCheck" | "botDecide";
+/** botDecide: a bot's own `decide` tool call. turnEffort has no job switch: it runs whenever Helpers is on with an own key. */
+export type DeciderSeam = DeciderJob | "keyCheck" | "botDecide" | "turnEffort";
 
 /** Every failure means "use today's rule". */
 export type DeciderFailure =

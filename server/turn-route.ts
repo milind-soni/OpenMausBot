@@ -1,6 +1,7 @@
 import type { ModelCatalog, ModelSelection } from "./contracts.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 import { offeredEffortLevels, type EffortLevel } from "../shared/wire.ts";
+import { assertModelVariantSupported } from "./member-turn.ts";
 
 export type TurnTier = "simple" | "complex";
 
@@ -106,7 +107,7 @@ export function routeDirectTurn(
   task: { modelSelection?: ModelSelection; usage?: { context?: { tokens: number } } },
   path: readonly { role: string; kind?: string }[],
   message: { text: string; images: readonly unknown[]; videos?: readonly unknown[] },
-  instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
+  instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[]; modelVariants?: boolean } } },
   automated: boolean,
   refused?: ReadonlySet<string>,
 ): RouteResult {
@@ -130,4 +131,15 @@ export function routeDirectTurn(
       : instance.adapter.capabilities.effortLevels,
     contextTokens: task.usage?.context?.tokens,
   });
+}
+
+/** The route, refused before any work starts when this engine cannot honor the effort or variant it names. */
+export function checkedDirectRoute(...args: Parameters<typeof routeDirectTurn>): RouteResult {
+  const route = routeDirectTurn(...args);
+  const instance = args[4];
+  assertModelVariantSupported({ variant: route.variant, effort: route.effort }, instance.adapter.capabilities);
+  if (route.effort && !offeredEffortLevels(instance, route.model).includes(route.effort)) {
+    throw Object.assign(new Error(`effort "${route.effort}" is not offered by this bot's engine — choose another level in settings`), { status: 409 });
+  }
+  return route;
 }
