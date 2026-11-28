@@ -218,22 +218,25 @@ export function SkillsSection() {
     setImporting(true);
     setError("");
     setImportMessage("");
-    const failed: string[] = [];
+    const failed: Array<{ name: string; reason: string }> = [];
     let imported = 0;
     try {
       for (const file of files) {
         try {
-          await importOne(await file.text());
+          await importOne((await file.text()).trim());
           imported++;
-        } catch {
-          failed.push(file.name);
+        } catch (cause) {
+          failed.push({ name: file.name, reason: cause instanceof Error ? cause.message : t("skills.error.import") });
         }
       }
       if (imported) {
         setImportMessage(t("skills.library.importFilesDone", { count: imported }));
         await refresh();
       }
-      if (failed.length) setError(t("skills.library.importFilesFailed", { count: failed.length, names: failed.slice(0, 3).join(", ") + (failed.length > 3 ? "…" : "") }));
+      if (failed.length) {
+        const named = failed.slice(0, 3).map((file) => `${file.name} (${file.reason})`).join(", ") + (failed.length > 3 ? "…" : "");
+        setError(t("skills.library.importFilesFailed", { count: failed.length, names: named }));
+      }
     } finally {
       setImporting(false);
       if (fileInput.current) fileInput.current.value = "";
