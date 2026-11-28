@@ -40,7 +40,7 @@ describe("the unboxed credential helper", () => {
     const env = { PATH: "/usr/bin", GIT_CONFIG_PARAMETERS: "'user.name=Me'" };
     expect(unboxedGitCredential(env)).toBeNull();
     let enabled = false;
-    createGitCredentialRoutes({ port: 8799, enabled: () => enabled });
+    createGitCredentialRoutes({ port: () => 8799, enabled: () => enabled });
     provideGithubSignIn({ token: async () => TOKEN, reportAuthFailure: () => {}, signedIn: (who) => who === "owner" });
     expect(unboxedGitCredential(env)).toBeNull();
     enabled = true;
@@ -53,9 +53,9 @@ describe("the unboxed credential helper", () => {
   });
 
   it("answers git's credential lines to the loopback with a live secret only, and nothing once the process exited", async () => {
-    createGitCredentialRoutes({ port: 1, enabled: () => true, now: () => clock });
+    createGitCredentialRoutes({ port: () => 1, enabled: () => true, now: () => clock });
     provideGithubSignIn({ token: async () => TOKEN, reportAuthFailure: () => {}, signedIn: () => true });
-    const route = createGitCredentialRoutes({ port: 1, enabled: () => true, now: () => clock });
+    const route = createGitCredentialRoutes({ port: () => 1, enabled: () => true, now: () => clock });
     ({ server } = await serve(route));
     const port = (server.address() as AddressInfo).port;
     const added = unboxedGitCredential({})!;
@@ -81,7 +81,7 @@ describe("the unboxed credential helper", () => {
 
   it("never answers a session or a shared server's bot shells, and nothing for a signed-out server", async () => {
     provideGithubSignIn({ token: async () => null, reportAuthFailure: () => {}, signedIn: () => true });
-    const route = createGitCredentialRoutes({ port: 1, enabled: () => true });
+    const route = createGitCredentialRoutes({ port: () => 1, enabled: () => true });
     const added = unboxedGitCredential({})!;
     const secret = /x-omb-git-credential: ([A-Za-z0-9_-]+)/.exec(added.env.GIT_CONFIG_PARAMETERS!)![1]!;
     for (const auth of [{ kind: "session", scopes: ["admin"] }, { kind: "loopback", scopes: [], trust: "service" }]) {
@@ -103,9 +103,9 @@ describe("the unboxed credential helper", () => {
   it.skipIf(!haveTools)("gives git the token for github.com, after a helper of the person's own that has nothing, and nothing for another host", async () => {
     dir = mkdtempSync(join(tmpdir(), "omb-git-helper-"));
     provideGithubSignIn({ token: async () => TOKEN, reportAuthFailure: () => {}, signedIn: () => true });
-    const route = createGitCredentialRoutes({ port: 1, enabled: () => true });
+    const route = createGitCredentialRoutes({ port: () => 1, enabled: () => true });
     ({ server } = await serve(route));
-    createGitCredentialRoutes({ port: (server.address() as AddressInfo).port, enabled: () => true });
+    createGitCredentialRoutes({ port: () => (server!.address() as AddressInfo).port, enabled: () => true });
     const base = { PATH: process.env.PATH ?? "", HOME: dir, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(dir, "nothing"), GIT_TERMINAL_PROMPT: "0", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
     const added = unboxedGitCredential({ ...base, GIT_CONFIG_PARAMETERS: "'credential.helper=!true'" })!;
     const fill = (host: string, env: Record<string, string | undefined>) => new Promise<{ status: number | null; out: string }>((resolve) => {
@@ -127,9 +127,9 @@ describe("the unboxed credential helper", () => {
     dir = mkdtempSync(join(tmpdir(), "omb-git-helper-"));
     provideGithubSignIn({ token: async () => TOKEN, reportAuthFailure: () => {}, signedIn: () => true });
     let asked = 0;
-    const counted = createGitCredentialRoutes({ port: 1, enabled: () => true });
+    const counted = createGitCredentialRoutes({ port: () => 1, enabled: () => true });
     ({ server } = await serve(async (ctx) => { asked += 1; return counted(ctx); }));
-    createGitCredentialRoutes({ port: (server.address() as AddressInfo).port, enabled: () => true });
+    createGitCredentialRoutes({ port: () => (server!.address() as AddressInfo).port, enabled: () => true });
     const own = "'credential.helper=!f() { echo username=me; echo password=mine; }; f'";
     const added = unboxedGitCredential({ PATH: process.env.PATH ?? "", HOME: dir, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(dir, "nothing"), GIT_CONFIG_PARAMETERS: own, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) })!;
     const out = await new Promise<string>((resolve) => {

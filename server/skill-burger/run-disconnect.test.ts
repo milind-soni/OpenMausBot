@@ -67,7 +67,7 @@ async function exercise(mode: string, disconnect: boolean) {
     const port = (server.address() as AddressInfo).port;
     const base = `http://127.0.0.1:${port}`;
     runs = createSkillBurgerRuns({ dataDir: root, root, host: {
-      port, cwd: () => root, mint: () => "fixture-capability", browser: async () => null, publish: () => {}, mayEditBurgers: () => true,
+      port: () => port, cwd: () => root, mint: () => "fixture-capability", browser: async () => null, publish: () => {}, mayEditBurgers: () => true,
     } });
     let body: Record<string, unknown> = { name: saved.name };
     if (mode === "resume") {

@@ -52,7 +52,7 @@ export interface PhonesDeps {
   nudge(frame: { kind: "device.job"; phone: string; id: string }): void;
   /** Mints the turn's device capability. */
   mint(botId: string, turn: { threadId: string; generation: string }): string;
-  harnessUrl: string;
+  harnessUrl(): string;
   active(turn: Turn): boolean;
 }
 
@@ -137,7 +137,7 @@ export function createPhones(deps: PhonesDeps) {
     },
     /** Only for the owner's own turn and a bot granted an app one of the owner's phones allows. */
     integration(bot: BotRecord, turn: { threadId: string; generation: string }) {
-      return host.integration(bot, turnOwner({ botId: bot.id, ...turn }), () => deps.mint(bot.id, turn), deps.harnessUrl);
+      return host.integration(bot, turnOwner({ botId: bot.id, ...turn }), () => deps.mint(bot.id, turn), deps.harnessUrl());
     },
     /** A turn's phone parts: what it may use and where the person is, or (unmounted) why the owner's phone is not here. */
     promptParts(bot: PhoneBot, input: { mounted: boolean; offered: boolean; turn: Turn; place: PhonePlace }): PromptPart[] {

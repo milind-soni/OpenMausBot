@@ -30,7 +30,7 @@ async function fixture() {
     store: { bot: () => bot, groupByThread: () => undefined, messagesFor: () => [], appendMessage: (_thread, message) => ({ ...message, id: "message-1", at: message.at ?? Date.now() }) },
     sessions, routines: () => null, ownerOrAdmin: () => true, cloudOwnerSession: () => true,
     cloudLendingRefusal: () => null, cloudLendingTurn: () => { throw new Error("unused on Cloud home"); },
-    originIsUser: () => true, request: () => undefined, nudge: () => {}, mint: () => "fixture-token", harnessUrl: "http://127.0.0.1:1", active: () => true,
+    originIsUser: () => true, request: () => undefined, nudge: () => {}, mint: () => "fixture-token", harnessUrl: () => "http://127.0.0.1:1", active: () => true,
   });
   let pollStarted!: () => void;
   const polling = new Promise<void>(resolve => { pollStarted = resolve; });

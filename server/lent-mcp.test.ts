@@ -39,7 +39,7 @@ function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online>
     refusal: () => "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it. Only the person can change this.",
     mint: () => { minted.push("token"); return "turn-bearer"; },
     active: () => true,
-    origin: "http://127.0.0.1:4242",
+    origin: () => "http://127.0.0.1:4242",
     personal: options.personal ?? true,
     place: options.place ?? "My Cloud",
     here: options.here ?? here(),
@@ -133,7 +133,7 @@ describe("a server that runs on the person's computer, in a turn", () => {
   it("a bot with no server on another computer costs its turn nothing: the lending gate isn't asked", () => {
     const asked = vi.fn(() => "cloud-home");
     const lent = createLentMcp({ cfg: () => ({ mcpServers: { web: { type: "http", url: "https://mcp.example.com/mcp", headers: {}, enabled: true } } }), computers: { runsOn: vi.fn(), mcpLenders: vi.fn(), request: vi.fn() } as unknown as LentMcpDeps["computers"],
-      policy: (servers) => servers, bot: () => ({ id: "kiwi" }), principal: asked, notice: vi.fn(), refusal: vi.fn(), mint: vi.fn(), active: () => true, origin: "http://127.0.0.1:1", personal: true, place: "My Cloud" });
+      policy: (servers) => servers, bot: () => ({ id: "kiwi" }), principal: asked, notice: vi.fn(), refusal: vi.fn(), mint: vi.fn(), active: () => true, origin: () => "http://127.0.0.1:1", personal: true, place: "My Cloud" });
     expect(lent.mounts({ id: "kiwi" }, TURN)).toEqual({});
     expect(lent.lines({ id: "kiwi" }, TURN)).toEqual(new Map());
     expect(asked).not.toHaveBeenCalled();

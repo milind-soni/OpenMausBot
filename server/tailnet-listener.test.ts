@@ -76,7 +76,7 @@ describe("the listeners", () => {
   it("waits for the main listener, then hands only requests naming the share to the server's handler", async () => {
     const port = await freePortBlock([0]);
     const attached: Server[] = [];
-    share = createTailnetShare({ port: port, handle: async (_req, res) => { res.end("handled"); }, attach: (server) => attached.push(server) });
+    share = createTailnetShare({ port: () => port, handle: async (_req, res) => { res.end("handled"); }, attach: (server) => attached.push(server) });
     await share.apply({ name: NAME, addresses: ["127.0.0.1"] });
     expect(share.origin()).toBeNull();
     await share.start();
@@ -99,7 +99,7 @@ describe("the listeners", () => {
     const upgrades = createUpgrades();
     upgrades.route(() => true);
     const accepted: Socket[] = [];
-    share = createTailnetShare({ port, attach: (server, handle) => upgrades.attach(server, handle), handle: async (req) => {
+    share = createTailnetShare({ port: () => port, attach: (server, handle) => upgrades.attach(server, handle), handle: async (req) => {
       const upgrade = upgrades.pending(req)!;
       upgrade.release();
       upgrade.socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
@@ -129,7 +129,7 @@ describe("the listeners", () => {
 
   it("says why nothing listens, and links to the served HTTPS origin without binding", async () => {
     const port = await freePortBlock([0]);
-    share = createTailnetShare({ port: port, handle: async () => {}, attach: () => {}, interfaces: () => ({ en0: [{ address: "192.168.1.20", family: "IPv4", internal: false, netmask: "", mac: "", cidr: null }] }) });
+    share = createTailnetShare({ port: () => port, handle: async () => {}, attach: () => {}, interfaces: () => ({ en0: [{ address: "192.168.1.20", family: "IPv4", internal: false, netmask: "", mac: "", cidr: null }] }) });
     await share.start();
     await share.apply({ name: NAME, addresses: "interface" });
     expect(share.state()).toEqual({ origin: null, listening: [], error: "Tailscale's interface has no address on this computer" });
@@ -139,7 +139,7 @@ describe("the listeners", () => {
 
   it("answers the desktop app's message with the state it applied, and ignores other messages", async () => {
     const port = await freePortBlock([0]);
-    share = createTailnetShare({ port: port, handle: async () => {}, attach: () => {} });
+    share = createTailnetShare({ port: () => port, handle: async () => {}, attach: () => {} });
     await share.start();
     const answers: object[] = [];
     expect(share.receive({ type: "openmausbot:other" }, (answer) => answers.push(answer))).toBe(false);

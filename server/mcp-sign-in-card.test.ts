@@ -81,7 +81,7 @@ async function setup(options: { team?: boolean; origins?: string[]; lifetimeMs?:
   const mcpOAuth = new McpOAuthManager({ file: join(dataDir, "mcp-oauth.json"), isOwnerLive, onSettled, ...(options.lifetimeMs ? { lifetimeMs: options.lifetimeMs } : {}) });
   const team = createTeamConnectionsHost({
     team: options.team ? { id: "team-acme-1", name: "Acme" } : null,
-    dataDir, cfg: () => cfg, adminOrigin: null, harnessUrl: "http://127.0.0.1:1",
+    dataDir, cfg: () => cfg, adminOrigin: null, harnessUrl: () => "http://127.0.0.1:1",
     audienceOf: (threadId) => (AUDIENCES[threadId] ?? "team") as never,
     requester: (threadId) => REQUESTER[threadId] ?? null,
     roster: () => ROSTER,
