@@ -308,7 +308,9 @@ files directly in it. Limits: `--max-files 200`, `--max-screens 100`,
 `--max-bytes 500MB` (counted on what is written, so a file that runs past it
 is skipped). A folder with files in it is refused unless `--force`, which
 replaces what an earlier export wrote there: the files its `manifest.json`
-lists are removed first, and nothing else in the folder is touched.
+lists are removed first, and nothing else in the folder is touched. Each
+transcript's `.json` keeps every message as stored, including the
+server-assigned `origin` described under [events](#events).
 
 ## events
 
@@ -328,6 +330,14 @@ expired token, a missing scope) ends it with exit 5 instead. The output is
 always JSON lines; `--jsonl` is accepted and changes nothing. A tool step's
 output longer than 1,000 characters arrives as its first 1,000 with
 `"clipped": true` on the tool, as conversation pages carry it.
+
+A user message carries `origin`, which the server assigned when it accepted
+the line: `client` (a submission from a user-facing client — it names that
+entry point, not the person at the keyboard, and UI automation can share it),
+`bot` (another bot handed or coordinated it), `routine`, `integration` (a
+webhook, app event, app message or external interface), or `api` (the Bot
+API). A stored line without one reads `unknown`; records from older releases
+have none. Bot lines carry no origin.
 
 ## engine
 

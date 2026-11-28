@@ -106,7 +106,7 @@ import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, offeredEffortLevels, type AuthPairResponse, type CardAnswerer, type LoopbackSessionResponse, type SignedInSessionResponse, type PairResponse, type ResolvedSender, type ServerFrame, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, offeredEffortLevels, type AuthPairResponse, type CardAnswerer, type LoopbackSessionResponse, type MessageOrigin, type SignedInSessionResponse, type PairResponse, type ResolvedSender, type ServerFrame, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { newRoomName, newRoomResponder } from "../shared/new-room.ts";
 import { isPersistentQuestionCard } from "../shared/ask-question.ts";
 import { parseToolScope } from "../shared/tool-scope.ts";
@@ -298,7 +298,7 @@ import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./h
 import { markGroupThreadUnreadAfterTurn } from "./group-task-state.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
-import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
+import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts"; import { inputOrigin } from "./message-origin.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { SUGGESTION_MAX_AGE_MS, suggestedSelection } from "./host/suggested-selection.ts"; import { otherProviderSelection } from "./checker-model.ts"; import { checkWorkFile, createCheckWork } from "./host/check-work.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
@@ -7573,7 +7573,7 @@ async function beginTurn(
           text,
           replyToId: opts?.replyTo?.id,
           reaction: opts?.replyTo?.reactedWith,
-          sendId: opts?.sendId,
+          sendId: opts?.sendId, origin: inputOrigin({ via: opts?.via, relayed: opts?.relayed, peerAsk: opts?.peerAsk, fromApp: opts?.app?.fromApp, automationSource: opts?.automationSource, commsDepth, coordination: Boolean(opts?.coordination), automated }),
           ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}), ...(opts?.app?.pointed ? { pointed: opts.app.pointed } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
@@ -10574,7 +10574,7 @@ type StartGroupTurnOptions = {
   goalRunId?: string; mentions?: string[];
   via?: "api";
   sender?: ResolvedSender;
-  trigger?: UsageTrigger;
+  trigger?: UsageTrigger; origin?: MessageOrigin;
   queuedGroup?: ChannelQueueItem[]; /** What the person pointed at in a member's page: the page's bot reads it on its turn, and the line shows the chips. */ pointed?: RoomPick;
 };
 
@@ -10617,7 +10617,7 @@ function startGroupTurn(
         return before.filter((m) => m.kind === "text" && m.text && !narration.has(m.id)).slice(-GROUP_CONTEXT_MESSAGES);
       })()
     : [];
-  const queuedGroup = options.queuedGroup;
+  const queuedGroup = options.queuedGroup, lineOrigin = options.origin ?? (options.goalRunId ? "routine" : undefined);
   const message = queuedGroup && queuedGroup.length > 0
     ? (() => {
         for (const item of queuedGroup.slice(0, -1)) {
@@ -10630,7 +10630,7 @@ function startGroupTurn(
             sendId: item.sendId,
             channelMode: item.mode,
             queueId: item.id,
-            via: item.via,
+            via: item.via, ...(lineOrigin ? { origin: lineOrigin } : {}),
             sender: item.sender, ...(item.pointed ? { pointed: item.pointed.refs } : {}),
           });
         }
@@ -10644,7 +10644,7 @@ function startGroupTurn(
           sendId: last.sendId,
           channelMode: last.mode,
           queueId: last.id,
-          via: last.via,
+          via: last.via, ...(lineOrigin ? { origin: lineOrigin } : {}),
           sender: last.sender, ...(last.pointed ? { pointed: last.pointed.refs } : {}),
         });
       })()
@@ -10657,7 +10657,7 @@ function startGroupTurn(
         sendId,
         channelMode,
         queueId,
-        via: options.via,
+        via: options.via, ...(lineOrigin ? { origin: lineOrigin } : {}),
         sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
       });
   if (options.trigger) turnTriggers.set(threadId, options.trigger);
@@ -11373,7 +11373,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
 }
 
 const secretCards = createSecretCards({ store, cfg, botLogins, vaultStore: logins, vaultReader: vaultReaders.turn, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), account: (address) => emailService.status().accounts.find((one) => one.address.toLowerCase() === address.toLowerCase()), checkOutgoing: (address, fields) => emailService.checkOutgoing(address, fields), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
-const teamBoard = createTeamBoard({ dataDir: DATA_DIR, team: Boolean(CLOUD_TEAM), store, visible: (auth) => visibleTo(viewerFor(auth)), person: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), name: messageSender(auth)?.name ?? "" } : null, sender: messageSender, opened: (auth, threadId) => { if (auth.kind === "session") threadStarters.set(threadId, actorKey(auth)); }, roomRefusal: (groupId) => phoneSecretSubmissions.hasGroup(groupId) ? "This room is securely saving a credential. Try again when it finishes." : null, broadcast, botFree: (botId, groupId, threadId) => { const bot = store.bot(botId), group = store.group(groupId); return Boolean(bot && group && !bot.hidden && !bot.busy && !bot.approvalGrant && !botHolds.held(botId) && !starterCaps.pausedText(botId, undefined, threadId) && !roomHeld(group, botId) && !providerInstancesChanging.has(bot.modelSelection.instanceId) && !roomMemberLock.heldElsewhere(botId, threadId) && !activeGroupTurnForBot(botId)); }, threadWorking: groupThreadIsWorking, capped: (botId) => { try { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(botId, false); return null; } catch (error) { const refused = error as { code?: unknown; resetsAt?: unknown }; return refused?.code === USAGE_CAP_CODE ? { resetsAt: typeof refused.resetsAt === "number" ? refused.resetsAt : Date.now() + 3_600_000 } : null; } }, modelReady: (botId) => { const instance = registry.get(store.bot(botId)?.modelSelection.instanceId ?? ""); return Boolean(instance && !policyModelRefusal(instance) && registry.lastSnapshot(instance.instanceId)?.authenticated !== false); }, startTurn: (groupId, threadId, botId, text, sender) => { startGroupTurn(groupId, text, undefined, undefined, "chat", undefined, { threadId, mentions: [botId], trigger: { kind: "bot", botId }, sender }); }, askPerson: teamMessages.ask, cardWaiting: (threadId) => Boolean(personWaits.open(threadId)), timeScale: Number(process.env.OMB_BOARD_TIME_SCALE) || undefined }); ROUTES.push(teamBoard.routes); pokeBoard = teamBoard.poke; ROUTES.push(createCheckBackRoutes({ checkBacks, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), refusal: (auth, threadId, messageId) => cardAnswerRefusal(auth, threadId, messageId, "deny") })); ROUTES.push(createBurstRoutes({ owner: (id) => burst.owner(id), sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), refusal: (auth, threadId, id) => cardAnswerRefusal(auth, threadId, id, "allow"), view: (id) => burst.view(id), run: (id) => burst.run(id), cancel: (id) => burst.cancel(id), retry: (id) => burst.retryFailed(id), edit: (id, plan) => burst.edit(id, plan) })); ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
+const teamBoard = createTeamBoard({ dataDir: DATA_DIR, team: Boolean(CLOUD_TEAM), store, visible: (auth) => visibleTo(viewerFor(auth)), person: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), name: messageSender(auth)?.name ?? "" } : null, sender: messageSender, opened: (auth, threadId) => { if (auth.kind === "session") threadStarters.set(threadId, actorKey(auth)); }, roomRefusal: (groupId) => phoneSecretSubmissions.hasGroup(groupId) ? "This room is securely saving a credential. Try again when it finishes." : null, broadcast, botFree: (botId, groupId, threadId) => { const bot = store.bot(botId), group = store.group(groupId); return Boolean(bot && group && !bot.hidden && !bot.busy && !bot.approvalGrant && !botHolds.held(botId) && !starterCaps.pausedText(botId, undefined, threadId) && !roomHeld(group, botId) && !providerInstancesChanging.has(bot.modelSelection.instanceId) && !roomMemberLock.heldElsewhere(botId, threadId) && !activeGroupTurnForBot(botId)); }, threadWorking: groupThreadIsWorking, capped: (botId) => { try { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(botId, false); return null; } catch (error) { const refused = error as { code?: unknown; resetsAt?: unknown }; return refused?.code === USAGE_CAP_CODE ? { resetsAt: typeof refused.resetsAt === "number" ? refused.resetsAt : Date.now() + 3_600_000 } : null; } }, modelReady: (botId) => { const instance = registry.get(store.bot(botId)?.modelSelection.instanceId ?? ""); return Boolean(instance && !policyModelRefusal(instance) && registry.lastSnapshot(instance.instanceId)?.authenticated !== false); }, startTurn: (groupId, threadId, botId, text, sender) => { startGroupTurn(groupId, text, undefined, undefined, "chat", undefined, { threadId, mentions: [botId], trigger: { kind: "bot", botId }, sender, origin: "unknown" }); }, askPerson: teamMessages.ask, cardWaiting: (threadId) => Boolean(personWaits.open(threadId)), timeScale: Number(process.env.OMB_BOARD_TIME_SCALE) || undefined }); ROUTES.push(teamBoard.routes); pokeBoard = teamBoard.poke; ROUTES.push(createCheckBackRoutes({ checkBacks, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), refusal: (auth, threadId, messageId) => cardAnswerRefusal(auth, threadId, messageId, "deny") })); ROUTES.push(createBurstRoutes({ owner: (id) => burst.owner(id), sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), refusal: (auth, threadId, id) => cardAnswerRefusal(auth, threadId, id, "allow"), view: (id) => burst.view(id), run: (id) => burst.run(id), cancel: (id) => burst.cancel(id), retry: (id) => burst.retryFailed(id), edit: (id, plan) => burst.edit(id, plan) })); ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
 
@@ -15047,7 +15047,7 @@ for (const row of chatFollowups()) {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
     sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
-    ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
+    ...(row.kind === "bot" ? { ...spokenLineFields(row.payload.via, row.payload.callId), ...(row.payload.peerAsk ? { peerAsk: row.payload.peerAsk } : {}) } : {}),
   });
   const recoveredTask = row.kind !== "channel" ? store.taskByThread(row.ownerId, row.threadId) : undefined;
   const order = sinceFreshStart(store.activePath(row.threadId)).filter(isContextMessage).map((m) => m.id);
