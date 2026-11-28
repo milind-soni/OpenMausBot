@@ -192,6 +192,8 @@ export class VaultStore {
   private readonly secretChanged: (id: string) => void;
   private cache: StoreFile | null = null;
   private unreadableWarned = false;
+  /** The file that exists but could not be opened, so a save refuses rather than writing over it. */
+  private unreadable: string | null = null;
   version = 0;
 
   /** `secretChanged`: a saved secret's value or who may use it changed, or it is gone. */
@@ -227,7 +229,8 @@ export class VaultStore {
         data = { ...disk, logins: disk.logins.map(fromDisk) };
       } catch {
         // Never log an unreadable file's contents.
-        if (!this.unreadableWarned) console.warn("saved logins: the saved logins file could not be opened; it will be replaced on the next save");
+        this.unreadable ??= LOGINS_FILE;
+        if (!this.unreadableWarned) console.warn("saved logins: the saved logins file could not be opened; nothing is written over it until it is repaired");
         this.unreadableWarned = true;
         data = EMPTY;
       }
@@ -246,13 +249,19 @@ export class VaultStore {
       if (!key) throw new Error("missing key");
       return memberSecretsSchema.parse(JSON.parse(decryptBrowserState(readFileSync(this.memberFile), key))).secrets;
     } catch {
-      if (!this.unreadableWarned) console.warn("saved logins: the members' secrets file could not be opened; it will be replaced on the next save");
+      this.unreadable ??= MEMBER_SECRETS_FILE;
+      if (!this.unreadableWarned) console.warn("saved logins: the members' secrets file could not be opened; nothing is written over it until it is repaired");
       this.unreadableWarned = true;
       return [];
     }
   }
 
   private write(data: StoreFile): void {
+    // Security: read() answers EMPTY for a file it could not open, so saving over it would replace every login,
+    // secret and 2FA key with whatever this one save holds. Refusing keeps the file for a person to repair.
+    if (this.unreadable) {
+      throw new Error(`The saved logins file (${this.unreadable}) exists but could not be opened, so nothing was written over it. Restore it, or move it aside, then try again.`);
+    }
     const members = (data.secrets ?? []).filter((secret) => secret.person);
     const team = data.secrets?.filter((secret) => !secret.person);
     const parsed = fileSchema.parse({ ...data, logins: data.logins.map(toDisk), ...(team ? { secrets: team } : {}) });
