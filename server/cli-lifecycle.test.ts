@@ -278,12 +278,40 @@ describe("CLI startup lifecycle", () => {
     }));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const run = runServe(options, vi.fn());
-    setTimeout(() => children[0]?.emit("exit", 0, null), 2_000).unref();
+    const exitTimer = setTimeout(() => children[0]?.emit("exit", 0, null), 2_000);
+    exitTimer.unref();
     expect(await run).toBe(1);
+    clearTimeout(exitTimer);
     expect(mocks.spawn).toHaveBeenCalledTimes(5);
     for (const child of children) expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     expect(error).toHaveBeenCalledWith(expect.stringContaining("webhook receiver did not come up"));
     error.mockRestore();
+  });
+
+  it("waits out a webhook receiver that is still binding instead of relaunching", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base };
+    let healthCalls = 0, ingressCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        // The first health probe is the already-running check on the requested port.
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        // The receiver binds right after the main socket accepts, so the first
+        // probes can land mid-walk: "starting" is pending, not down.
+        return ++ingressCalls < 3
+          ? Response.json({ ingress: { available: false, baseUrl: "", error: "the server is still starting", starting: true } })
+          : Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 1}` } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn((line: string) => { if (line.includes("Keep this terminal open")) interrupt(); });
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(ingressCalls).toBe(3);
+    expect(log).toHaveBeenCalledWith(`Listening on 127.0.0.1:${base}, reachable from this machine only.`);
   });
 
   it("does not report ready when shutdown begins while the ingress probe is pending", async () => {

@@ -275,11 +275,12 @@ async function serverUp(port: number, pid?: number): Promise<boolean> {
   } catch { return false; }
 }
 
-/** ingress.available from the child's /api/webhooks; undefined when the answer cannot be read (e.g. service trust). */
-async function webhookIngressAvailable(port: number): Promise<boolean | undefined> {
+/** ingress from the child's /api/webhooks: "starting" while its receiver is still binding; undefined when the answer cannot be read (e.g. service trust). */
+async function webhookIngressAvailable(port: number): Promise<boolean | "starting" | undefined> {
   try {
     const { status, body } = await api(port, "/api/webhooks");
-    return status === 200 && typeof body?.ingress?.available === "boolean" ? body.ingress.available : undefined;
+    if (status !== 200 || typeof body?.ingress?.available !== "boolean") return undefined;
+    return body.ingress.available ? true : body.ingress.starting === true ? "starting" : false;
   } catch { return undefined; }
 }
 
@@ -681,6 +682,12 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     console.error(`something already answers on http://127.0.0.1:${options.port}; use ${cliCommand("pair")} against it, or --port for a second server`);
     return 1;
   }
+  // Validate before the share probes and tunnel plan below create resources an early return would leak.
+  const requestedWebhookPort = Number(process.env.OMB_WEBHOOK_PORT || String(options.port + 1));
+  if (!Number.isInteger(requestedWebhookPort) || requestedWebhookPort < 1 || requestedWebhookPort > 65_535) {
+    console.error(`OMB_WEBHOOK_PORT must be a whole port between 1 and 65535, got "${process.env.OMB_WEBHOOK_PORT}"`);
+    return 1;
+  }
   let publicUrl = options.publicUrl ?? (options.local ? undefined : envPublicUrl(process.env, log));
   let tailscale: TailscaleStatus | null = null;
   if (await clearLeftoverTailscaleServe(options.dataDir) && !options.tailscale) log(`Turned off a Tailscale share an earlier run left on. Add --tailscale to share again.`);
@@ -722,11 +729,6 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     OMB_PORT: String(options.port),
     OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1), ...(options.relay ? { OMB_PHONE_RELAY: "1" } : {}),
   };
-  const requestedWebhookPort = Number(env.OMB_WEBHOOK_PORT);
-  if (!Number.isInteger(requestedWebhookPort) || requestedWebhookPort < 1 || requestedWebhookPort > 65_535) {
-    console.error(`OMB_WEBHOOK_PORT must be a whole port between 1 and 65535, got "${env.OMB_WEBHOOK_PORT}"`);
-    return 1;
-  }
   if (options.local) delete env.OMB_PUBLIC_URL;
   // The per-launch secret goes over stdin, not the environment that every engine the server starts inherits.
   const serviceTrust = resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: hostedWorkspaceConfigured(env) }).trust === "service";

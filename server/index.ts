@@ -2196,7 +2196,8 @@ function hasDirectDispatch(botId: string): boolean {
 
 /** Must match what startTurn admits for a direct thread. */
 function canAdmitDirectTurn(botId: string, threadId: string): boolean {
-  return admit("peer", {}, {
+  // The bot box decision lands inside bootServer; a turn admitted before it resolves would spawn unboxed.
+  return botBoxReady && admit("peer", {}, {
     threadBusy: threadBusy(botId, threadId),
     atCapacity: botAtThreadCapacity(botId, undefined, true),
     groupTurn: Boolean(activeGroupTurnForBot(botId)),
@@ -9361,7 +9362,7 @@ ROUTES.push(createPerfDiagnosticsRoutes({ text: perf.text, bots: perf.bots, stor
 
 let webhookIngress: WebhookIngress | null = null;
 // "starting" until onBoundState publishes the live status the moment the listener binds.
-let liveIngressStatus = startingIngressStatus; const webhookIngressStatus = () => liveIngressStatus();
+let liveIngressStatus = startingIngressStatus, phoneRelay: ReturnType<typeof startPhoneRelay> = null; const webhookIngressStatus = () => liveIngressStatus();
 ROUTES.push(createTeamFilesRoutes({ files: teamFilesHost.files, actor: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), admin: auth.scopes.includes("admin") } : null, personName: (person) => teamHost.personName(person), botName: (botId) => store.bot(botId)?.name })); ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes, createRemoteTeammateRoutes({ teammates: remoteTeammates }));
 
 const RUNTIME_KEEP_MS = 30 * 24 * 60 * 60_000;
@@ -15110,7 +15111,7 @@ if (TUNNEL_SOCKET) {
   });
 }
 // `serve --relay`: phones through MausBot Relay, each encrypted stream answered here as a remote request.
-const phoneRelay = startPhoneRelay({ env: process.env, dataDir: DATA_DIR, sessions, handle: handleRequest, upgrades, version: serverVersion(), publicOrigin: publicUrl,
+phoneRelay = startPhoneRelay({ env: process.env, dataDir: DATA_DIR, sessions, handle: handleRequest, upgrades, version: serverVersion(), publicOrigin: publicUrl,
   serverName: () => cfg.computerName || environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED }).label,
   refusal: CLOUD_HOME ? "a MausBot Cloud home" : HOSTED_WORKSPACE ? "a hosted workspace" : DESKTOP_MANAGED ? "the desktop app, whose companion carries phones" : null });
 

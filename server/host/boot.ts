@@ -50,7 +50,7 @@ export interface ServerBoot {
   webhookPort: number;
   webhookIngress: WebhookIngress | null;
   /** /api/webhooks reads this per request: availability, the receiver's base URL, and its bind error when it is down. */
-  webhookIngressStatus: () => { available: boolean; baseUrl: string; error?: string };
+  webhookIngressStatus: () => { available: boolean; baseUrl: string; error?: string; starting?: boolean };
   /** Keyed on the bound port; consumers read it per request, so it is computed
    * only after the bind, never from the configured start port. Cookies are
    * not port-scoped — the name is the only thing separating two instances in
@@ -61,7 +61,7 @@ export interface ServerBoot {
 }
 
 /** /api/webhooks reads this until the listener publishes the real status on bind. */
-export const startingIngressStatus: ServerBoot["webhookIngressStatus"] = () => ({ available: false, baseUrl: "", error: "the server is still starting" });
+export const startingIngressStatus: ServerBoot["webhookIngressStatus"] = () => ({ available: false, baseUrl: "", error: "the server is still starting", starting: true });
 
 export async function bootServer(options: {
   server: Server;

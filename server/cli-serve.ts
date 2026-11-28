@@ -31,6 +31,9 @@ function loopbackPortFree(port: number): Promise<boolean> {
 // so relaunches are bounded tighter than the port walk.
 const SERVE_PORT_SCAN = 100;
 const SERVE_LAUNCH_ATTEMPTS = 5;
+// A child's webhook receiver binds right after its main socket accepts; bound
+// the "starting" polls so a stuck bind still takes the relaunch path.
+const INGRESS_PROBE_MS = 15_000;
 
 /** First loopback port at or above `start` that nothing else holds. `exclude`
  * keeps the webhook scan off the port the main listener just negotiated. */
@@ -99,8 +102,8 @@ export interface ServeLaunchDeps {
   /** The per-launch secret went to the child over stdin; remember it for API calls. */
   onOwnerToken(token: string): void;
   serverUp(port: number, pid?: number): Promise<boolean>;
-  /** ingress.available from /api/webhooks; undefined when it cannot be read. */
-  webhookIngressAvailable(port: number): Promise<boolean | undefined>;
+  /** ingress from /api/webhooks; "starting" while the receiver is still binding, undefined when it cannot be read. */
+  webhookIngressAvailable(port: number): Promise<boolean | "starting" | undefined>;
 }
 
 export type ServeLaunchOutcome =
@@ -259,12 +262,18 @@ export async function launchServeChild(deps: ServeLaunchDeps): Promise<ServeLaun
       // pinned child that loses it still serves — leaving Caddy and Tailscale
       // pointed at a socket with no receiver. Relaunch on a fresh pair whenever
       // the child reports the receiver down: the port probe only says whether
-      // the port can be reused, not why the bind failed.
-      let ingressAvailable: boolean | undefined;
-      try {
-        ingressAvailable = await deps.webhookIngressAvailable(port);
-      } catch { /* ingress verification is best-effort; the receiver logged its own failure */ }
-      if (ingressAvailable === false) {
+      // the port can be reused, not why the bind failed. A "starting" answer
+      // is a bind still pending — it lands right after the health check —
+      // so wait it out instead of relaunching a healthy child.
+      let ingressAvailable: boolean | "starting" | undefined;
+      for (const deadline = Date.now() + INGRESS_PROBE_MS; ; await new Promise((r) => setTimeout(r, 200))) {
+        try {
+          ingressAvailable = await deps.webhookIngressAvailable(port);
+        } catch { /* ingress verification is best-effort; the receiver logged its own failure */ }
+        if (ingressAvailable !== "starting" || Date.now() >= deadline) break;
+        if (deps.stopping() || exited !== null) return { status: "stopping", exit };
+      }
+      if (ingressAvailable === false || ingressAvailable === "starting") {
         const held = !(await loopbackPortFree(webhookPort));
         if (attempt + 1 >= SERVE_LAUNCH_ATTEMPTS) {
           // Never declare ready without the receiver: Caddy and Tailscale would
