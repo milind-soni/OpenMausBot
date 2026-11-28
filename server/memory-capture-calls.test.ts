@@ -258,6 +258,36 @@ describe("capture calls", () => {
     expect(aboutMe).toEqual(["The person is vegetarian"]);
   });
 
+  it.each([
+    "Did I say I prefer short replies? I prefer short replies.",
+    "Imagine I prefer short replies. In fact, I prefer short replies.",
+  ])("keeps a real statement after an earlier non-statement of the same evidence: %s", async (person) => {
+    answer = () => JSON.stringify([{ text: "The person prefers short replies", kind: "preference", evidence: "I prefer short replies", aboutUser: true }]);
+    const upkeep = loop();
+    upkeep.noteTurn(LEAD.id, "confirmed", { person, bot: ACK });
+    upkeep.flushThread("confirmed");
+    await upkeep.idle();
+    expect(memory(LEAD.id)).toContain('from chat "confirmed" (noticed) · The person prefers short replies');
+    expect(aboutMe).toEqual(["The person prefers short replies"]);
+    await flushMemoryJournal(LEAD.id);
+    expect(readMemoryJournal(LEAD.id, 10).filter((row) => row.via === "capture").map((row) => row.threadId)).toEqual(["confirmed"]);
+  });
+
+  it.each([
+    "Did I say I prefer short replies? Have I said I prefer short replies?",
+    "Imagine I prefer short replies. Suppose I prefer short replies.",
+  ])("keeps repeated questions and hypotheticals out of persisted memory: %s", async (person) => {
+    answer = () => JSON.stringify([{ text: "The person prefers short replies", kind: "preference", evidence: "I prefer short replies", aboutUser: true }]);
+    const upkeep = loop();
+    upkeep.noteTurn(LEAD.id, "unconfirmed", { person, bot: ACK });
+    upkeep.flushThread("unconfirmed");
+    await upkeep.idle();
+    expect(memory(LEAD.id)).not.toContain("The person prefers short replies");
+    expect(aboutMe).toEqual([]);
+    await flushMemoryJournal(LEAD.id);
+    expect(readMemoryJournal(LEAD.id, 10).filter((row) => row.via === "capture")).toEqual([]);
+  });
+
   it("adds to About me only from the owner's own conversations, also when one call reads both", async () => {
     answer = () => JSON.stringify([
       { from: 1, text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true },

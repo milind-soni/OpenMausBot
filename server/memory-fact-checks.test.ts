@@ -35,6 +35,16 @@ describe("the checks before a dream saves a fact", () => {
     expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [person("Suppose Anna likes tea?")])).toBe(false);
   });
 
+  it("accepts a later statement in a cited conversation while still rejecting repeated non-statements", () => {
+    const quote = "Anna likes tea";
+    const verify = (line: string) => checkDreamFacts(quote, [1], [quote], [person(line)]);
+    expect(verify("Did I say Anna likes tea? Anna likes tea.")).toBe(true);
+    expect(verify("Suppose Anna likes tea. Anna likes tea.")).toBe(true);
+    expect(verify("Anna likes tea? Did I say Anna likes tea?")).toBe(false);
+    expect(verify("Suppose Anna likes tea. Imagine Anna likes tea.")).toBe(false);
+    expect(checkDreamFacts(quote, [1], [quote], [{ threadId: "bot", lines: [{ by: "bot", text: "Anna likes tea? Anna likes tea." }] }])).toBe(false);
+  });
+
   it("refuses secrets even when the person really said them", () => {
     const secret = "password: synthetic-secret-123";
     expect(checkDreamFacts(secret, [1], [secret], [person(secret)])).toBe(false);
