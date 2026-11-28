@@ -272,9 +272,10 @@ export class BotApiManager {
 
 export const BOT_API_MESSAGE_DATA = "[UNTRUSTED BOT API MESSAGE]";
 
-/** Security: the tag names a stored file for the turn to load, so a caller's copy of it never reaches the turn. */
-export function withoutAttachedImages(message: string): string {
-  return defuse(message).replace(/<(\s*attached-image)/gi, "($1");
+/** Security: a tag names a stored file for the turn to load (an image, a video's frames, a zip's or text file's
+ * contents), and a caller can upload none, so a caller's copy of one never reaches the turn. */
+export function withoutAttachmentTags(message: string): string {
+  return defuse(message).replace(/<(\s*attached-(?:image|file))/gi, "($1");
 }
 
 /** The caller's words go to the model as data from outside, never as the person's request, and can't pass for a note. */
@@ -284,7 +285,7 @@ export function botApiPrompt(message: string, receivedAt: number): string {
     BOT_API_MESSAGE_DATA,
     defuse(`Received: ${new Date(receivedAt).toISOString()}`),
     "",
-    withoutAttachedImages(message),
+    withoutAttachmentTags(message),
     "[/UNTRUSTED BOT API MESSAGE]",
   ].join("\n");
 }
@@ -292,5 +293,5 @@ export function botApiPrompt(message: string, receivedAt: number): string {
 /** A message through a key the owner marked as acting for them: their request, at the bot's own level. Its words are
  * still defused, so they can't pass for a note or name a stored file. */
 export function botApiOwnerPrompt(message: string): string {
-  return [fromNote(API_OWNER_WHO, "message", AUTHORITY.behalf), withoutAttachedImages(message)].join("\n");
+  return [fromNote(API_OWNER_WHO, "message", AUTHORITY.behalf), withoutAttachmentTags(message)].join("\n");
 }
