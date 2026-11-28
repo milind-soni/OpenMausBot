@@ -9,6 +9,10 @@ import type { DoctorCheck } from "../types.ts";
 
 export const SECRET_FILES = [
   "config.json", "sessions.json", "bots.json", "groups.json", "messages.db", "webhooks.json", "tunnel-account.json", "browser-engine-key",
+  // The Vault's own files: its key unseals every saved login, secret and TOTP seed, and the two blobs are those secrets.
+  "logins-key", "logins.json.enc", "member-secrets.json.enc",
+  // Plaintext OAuth tokens for the MCP servers a person signed in to.
+  "mcp-oauth.json",
 ] as const;
 
 type Loose = { name: string; path: string; mode: number };
