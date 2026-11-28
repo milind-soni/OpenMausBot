@@ -59,7 +59,7 @@ interface RoomTextMessageProps {
 }
 
 /** Members are drawn by name and look, and spoken in their voice. */
-const sameMembers = (a: readonly Bot[], b: readonly Bot[]) => a === b || (sameDrawnBots(a, b) && a.every((bot, index) => bot.voice === b[index]!.voice));
+const sameMembers = (a: readonly Bot[], b: readonly Bot[]) => a === b || (sameDrawnBots(a, b) && a.every((bot, index) => bot.voice === b[index]!.voice && bot.voicePlaybackRate === b[index]!.voicePlaybackRate));
 
 function sameRow(previous: RoomTextMessageProps, next: RoomTextMessageProps): boolean {
   const keys = Object.keys(next) as (keyof RoomTextMessageProps)[];

@@ -1,4 +1,8 @@
 {
+  "voice.playbackRate": "Velocidade de reprodução",
+  "voice.playbackRate.help": "Aplica-se à leitura em voz alta, às mensagens de voz e às conversas por turnos.",
+  "voice.playbackRate.botHelp": "Define a velocidade de reprodução do áudio deste bot.",
+  "voice.playbackRate.default": "Usar velocidade padrão",
   "voice.gemini.keyPlaceholder": "Cole sua chave de API do Google AI Studio",
   "voice.gemini.model": "Modelo de voz do Gemini",
   "keys.label.geminiTts": "Chave de API de voz do Gemini",
