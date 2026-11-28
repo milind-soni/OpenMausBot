@@ -91,6 +91,8 @@ export interface LimitClockOptions {
   waiting?: () => boolean;
   /** The known reset times changed. */
   onChange?: () => void;
+  /** Fresh usage showed this engine's refusal is over before the reset it named. */
+  onHoldReleased?: (engine: string, heldUntil: number) => void;
   now?: () => number;
   /** Where the refusals' holds are kept across restarts; none in tests that need no file. */
   file?: string;
@@ -268,9 +270,11 @@ export class LimitResetClock {
       next.set(limit.engine, limit);
       this.readAt.set(limit.engine, this.now());
       if (meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+        const heldUntil = this.refusals.get(limit.engine);
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;
+        if (heldUntil !== undefined) this.options.onHoldReleased?.(limit.engine, heldUntil);
       }
     }
     if (released) this.saveHolds();

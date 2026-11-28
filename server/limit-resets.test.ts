@@ -725,4 +725,19 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("claude")).toBeNull();
     expect(instance.report().engines).toEqual([]);
   });
+
+  it("tells the failovers when fresh usage ends a Codex refusal before its reset", () => {
+    const codexAccounts = [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }];
+    const released: Array<[string, number]> = [];
+    const instance = new LimitResetClock({ accounts: () => codexAccounts, now: () => NOW, onHoldReleased: (engine, heldUntil) => released.push([engine, heldUntil]) });
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    instance.noteUsage(report(codex([99, NOW + 2 * HOUR], [99, NOW + 23 * HOUR + 30_000])));
+    expect(released, "usage still showing the window that refused keeps the hold").toEqual([]);
+    instance.noteUsage({ fetchedAt: iso(NOW - 30_000), providers: [codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])] });
+    expect(released, "a read from before the refusal says nothing").toEqual([]);
+    instance.noteUsage(report(codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+    expect(released).toEqual([["codex", NOW + 23 * HOUR]]);
+    expect(instance.blockedUntil("codex")).toBeNull();
+    instance.stop();
+  });
 });
