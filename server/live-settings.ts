@@ -1,4 +1,4 @@
-import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
+import type { LiveKeySource, LiveSettings, WireBot } from "../shared/wire.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
 import { azureLiveEndpoint, customLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_CUSTOM, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
 import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
@@ -62,8 +62,12 @@ export function saveLiveSettings(cfg: Pick<AppConfig, "live">, patch: LiveConfig
 }
 
 /** What a call start reads, once: its key, endpoint and provider all come from this one reading. */
-export function liveCallSettings(cfg: AppConfig) {
-  return { key: liveCallKey(cfg)?.key ?? "", endpoint: liveCallEndpoint(cfg), setupProblem: liveSetupProblem(cfg), ...liveSettingsFor(cfg) };
+export function liveCallSettings(cfg: AppConfig, override?: WireBot["liveOverride"]) {
+  const effective = override ? { ...cfg, live: { ...cfg.live, provider: override.provider } } : cfg;
+  const agentId = override?.provider === "fish" ? override.fishAgentId : undefined;
+  const endpoint = agentId ? { ...fishLiveEndpoint(agentId), fixedAgent: true as const } : liveCallEndpoint(effective);
+  const setupProblem = agentId && !endpoint?.model ? "The bot's Fish Audio agent ID is invalid." : liveSetupProblem(effective);
+  return { key: liveCallKey(effective)?.key ?? "", endpoint, setupProblem, ...liveSettingsFor(effective) };
 }
 
 /** A caller without the admin scope learns which service calls use, not which Azure resource or custom endpoint. */

@@ -153,7 +153,7 @@ describe("composer call button", () => {
     expect(fixture.startCall).not.toHaveBeenCalled();
   });
 
-  it("is a Live call on a device that can't take turns", () => {
+  it("is a Live call on a device that can't take turns", async () => {
     fixture.dictation = false;
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
     configureLiveMedia({ getUserMedia });
@@ -161,6 +161,7 @@ describe("composer call button", () => {
     expect(button.props["aria-label"]).toBe("Live call with Pepper");
     expect(html).not.toContain("bg-warning");
     button.props.onClick!();
+    await Promise.resolve();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "pepper" });
     expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "live" });

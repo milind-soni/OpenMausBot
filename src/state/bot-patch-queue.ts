@@ -56,6 +56,7 @@ export type BotUpdatePatch = Partial<
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   phoneApps?: Bot["phoneApps"] | null;
+  liveOverride?: Bot["liveOverride"] | null;
   /** null demotes a default bot to a regular one; the server clears the mark. Body only: bot state drops the field. */
   defaultBot?: Bot["defaultBot"] | null;
   /** The server's proof the local-auto warning was shown: wire-only, never folded into bot state. */
@@ -70,13 +71,14 @@ export type BotUpdatePatch = Partial<
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "defaultBot" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "liveOverride" | "defaultBot" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
   mainThreadId?: string;
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
   phoneApps?: Bot["phoneApps"];
+  liveOverride?: Bot["liveOverride"];
   defaultBot?: Bot["defaultBot"];
 };
 
@@ -136,6 +138,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     connectorTools,
     connectorScopes,
     phoneApps,
+    liveOverride,
     defaultBot,
     ...fields
   } = patch;
@@ -150,6 +153,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
   if (phoneApps === null) normalized.phoneApps = undefined;
   else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
+  if (liveOverride !== undefined) normalized.liveOverride = liveOverride ?? undefined;
   // A pending choice shows as the bot's main thread, so a broadcast during the save does not revert it.
   if (typeof mainThreadChoice === "string") normalized.mainThreadId = mainThreadChoice;
   return normalized;

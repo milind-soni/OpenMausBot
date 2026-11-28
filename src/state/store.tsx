@@ -274,7 +274,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded" | "liveOverride"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -1157,7 +1157,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         computer: action.bot.computer,
         toolScope: action.bot.toolScope,
         section: action.bot.section, managedSections: action.bot.managedSections,
-        vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps, onlyPeopleAdded: action.bot.onlyPeopleAdded, liveVoice: action.bot.liveVoice,
+        vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps, onlyPeopleAdded: action.bot.onlyPeopleAdded, liveVoice: action.bot.liveVoice, liveOverride: action.bot.liveOverride,
         tasks: action.bot.tasks ? mergeTaskStamps(b.tasks, action.bot.tasks) : b.tasks,
         // Old approvals must never be sent to the replacement thread while its transcript loads.
         messages: switchedThread ? [] : b.messages,
@@ -1537,12 +1537,12 @@ function reduceApp(state: AppState, action: Action): AppState {
         keepThreadModels: _keepThreadModels, threadId: _threadId, mainThreadChoice,
         computer,
         connectorTools,
-        connectorScopes, phoneApps,
+        connectorScopes, phoneApps, liveOverride,
         defaultBot,
         ...rest
       } = action.patch;
       const next = action.patch.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, { ...target, ...rest, id: action.botId }) } : animated;
-      const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(typeof mainThreadChoice === "string" && { mainThreadId: mainThreadChoice }) };
+      const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(liveOverride !== undefined && { liveOverride: liveOverride ?? undefined }), ...(typeof mainThreadChoice === "string" && { mainThreadId: mainThreadChoice }) };
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
       if (defaultBot === null) botPatch.defaultBot = undefined;
@@ -1703,7 +1703,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         ...action.bot,
         computer: action.bot.computer,
         toolScope: action.bot.toolScope, managedSections: action.bot.managedSections,
-        vpsAlias: action.bot.vpsAlias, liveVoice: action.bot.liveVoice,
+        vpsAlias: action.bot.vpsAlias, liveVoice: action.bot.liveVoice, liveOverride: action.bot.liveOverride,
         messages: action.bot.messages ?? [],
         hasMore: action.bot.hasMore,
         awaitingThreadSnapshot: false,

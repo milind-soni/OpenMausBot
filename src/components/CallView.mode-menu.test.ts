@@ -85,21 +85,23 @@ afterEach(() => {
 });
 
 describe("the call button", () => {
-  it("starts a Live call through the Live media, not the take-turns overlay", () => {
+  it("starts a Live call through the Live media, not the take-turns overlay", async () => {
     setCallMode("live");
     const onStart = vi.fn();
     pressPhone(onStart);
+    await Promise.resolve();
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "thread-atlas" });
     expect(onStart).toHaveBeenCalledWith("live");
   });
 
-  it("asks for the microphone before the key when Live has none", () => {
+  it("asks for the microphone before the key when Live has none", async () => {
     fixture.liveConfigured = false;
     setCallMode("live");
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
     configureLiveMedia({ getUserMedia });
     const onStart = vi.fn();
     pressPhone(onStart);
+    await Promise.resolve();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "thread-atlas" });
     expect(renderButton()).not.toContain("OpenAI API key");

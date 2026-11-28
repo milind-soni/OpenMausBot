@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +30,8 @@ posixOnly("Live call e2e", () => {
   let base = "";
   let output = "";
   let live: FakeOpenAiLive;
+  let fish: Server;
+  const fishRequests: { path?: string; key?: string; agent?: string }[] = [];
   /** while missing, the `steer` engine holds its turn open after its tool result */
   let steerGate = "";
   /** the fake claude's one-shot replies, by a marker in the prompt */
@@ -76,6 +79,17 @@ posixOnly("Live call e2e", () => {
     chmodSync(FAKE_ACP, 0o755);
     chmodSync(FAKE_CODEX, 0o755);
     live = await startFakeOpenAiLive();
+    fish = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const json = Buffer.concat(chunks).toString();
+      fishRequests.push({ path: req.url, key: req.headers.authorization, agent: json ? JSON.parse(json).agent_id : undefined });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ session_id: "fish-session", transport: "livekit", token: "fixture-token", livekit_url: "wss://fish.invalid" }));
+    });
+    await new Promise<void>((resolve) => fish.listen(0, "127.0.0.1", resolve));
+    const fishAddress = fish.address();
+    if (!fishAddress || typeof fishAddress === "string") throw new Error("Fish fixture did not open a TCP port");
     home = mkdtempSync(join(tmpdir(), "omb-live-call-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     steerGate = join(home, "steer.gate");
@@ -123,6 +137,8 @@ posixOnly("Live call e2e", () => {
         OMB_WEBHOOK_PORT: String(port + 1),
         OMB_OPENAI_LIVE_URL: live.url,
         OMB_OPENAI_LIVE_KEY: LIVE_KEY,
+        OMB_FISH_LIVE_URL: `http://127.0.0.1:${fishAddress.port}`,
+        OMB_FISH_AUDIO_API_KEY: "fixture-fish-key",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -144,8 +160,47 @@ posixOnly("Live call e2e", () => {
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
     await live?.stop();
+    if (fish) await new Promise<void>((resolve) => fish.close(() => resolve()));
     if (home) await removeTempDir(home);
   });
+
+  it("uses the selected Fish agent on web and a different bot's GPT-Live preset on a native call", async () => {
+    const fishBot = await createBot();
+    const openAiBot = await createBot();
+    const patchBot = (botId: string, patch: unknown) => fetch(`${base}/api/bots/${botId}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch),
+    });
+    const patchWorkspace = (provider: string) => fetch(`${base}/api/live/settings`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider }),
+    });
+    try {
+      expect((await patchBot(fishBot.id, { liveOverride: { provider: "fish", fishAgentId: "agent_selected", key: "untrusted" } })).status).toBe(400);
+      const saved = await patchBot(fishBot.id, { liveOverride: { provider: "fish", fishAgentId: "agent_selected" } });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ bot: { liveOverride: { provider: "fish", fishAgentId: "agent_selected" } } });
+      expect((await patchWorkspace("gemini")).status).toBe(200);
+      const denied = await post("/api/live/session", { botId: fishBot.id, client: "android", sdp: SDP });
+      expect(denied.status).toBe(400);
+      const started = await post("/api/live/session", { botId: fishBot.id, client: "web" });
+      expect(started).toMatchObject({ status: 201, body: { transport: { type: "fish" } } });
+      expect(fishRequests).toEqual([{ path: "/v1/agent/sessions", key: "Bearer fixture-fish-key", agent: "agent_selected" }]);
+      const { call: fishCall, transport } = started.body as { call: LiveCallState; transport: { relayToken: string; session: { session_id: string } } };
+      await post("/api/live/relay", { token: transport.relayToken, sessionId: transport.session.session_id, events: [{ type: "connected" }] });
+      expect((await post("/api/live/call/end", { callId: fishCall.callId })).status).toBe(200);
+
+      expect((await patchBot(openAiBot.id, { liveOverride: { provider: "openai" }, liveVoice: "cedar" })).status).toBe(200);
+      const { call, session } = await startCall(openAiBot.id, "android");
+      expect(session.body).toMatchObject({ session: { audio: { output: { voice: "cedar" } } } });
+      await live.waitForAttach(session.id);
+      expect((await post("/api/live/call/end", { callId: call.callId })).status).toBe(200);
+      expect((await patchBot(openAiBot.id, { liveOverride: null })).status).toBe(200);
+      expect((await post("/api/live/session", { botId: openAiBot.id, client: "android", sdp: SDP })).status).toBe(400);
+    } finally {
+      const { call } = await (await fetch(`${base}/api/live/call`)).json() as { call: LiveCallState | null };
+      if (call) await post("/api/live/call/end", { callId: call.callId });
+      await patchWorkspace("openai");
+    }
+  }, 40_000);
 
   it("runs a spoken request through the bot and speaks the answer", async () => {
     const bot = await createBot();

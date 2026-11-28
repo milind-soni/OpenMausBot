@@ -264,11 +264,12 @@ describe("setting up a voice from the call button", () => {
     ]);
   });
 
-  it("starts the Live call, not voice set-up, where the device can't take turns", () => {
+  it("starts the Live call, not voice set-up, where the device can't take turns", async () => {
     fixture.dictation = { available: false, reasonCode: "remote-server" };
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
     configureLiveMedia({ getUserMedia });
     click(find(render(), "data-call-button"));
+    await Promise.resolve();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "pepper", threadId: "t" });
     expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "live" });

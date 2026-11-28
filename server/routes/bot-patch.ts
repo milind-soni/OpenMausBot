@@ -34,7 +34,8 @@ import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
 import { profileSnapshot } from "../profile-revision.ts";
 import { recordProfileChange } from "../profile-versions.ts";
-import { memberBotPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
+import { memberBotPatchViolation, ownerOrAdmin, requestSource, type RequestAuth } from "../request-auth.ts";
+import { FISH_AGENT_ID } from "../live-fish.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
@@ -109,6 +110,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
     revokeInternalCapabilitiesForThread, runningTurnInstance, closeOpenApprovals, assertTeamComputerChangeIdle, forgetTemporaryBrowser,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
+  const liveOverrideSchema = z.discriminatedUnion("provider", [
+    z.strictObject({ provider: z.literal("openai") }),
+    z.strictObject({ provider: z.literal("fish"), fishAgentId: z.string().trim().regex(FISH_AGENT_ID).optional() }),
+  ]).nullable();
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
@@ -326,6 +331,12 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.liveVoice !== undefined) {
         if (body.liveVoice !== null && body.liveVoice !== "" && !isBotLiveVoice(body.liveVoice)) return json(res, 400, { error: "liveVoice must be a GPT-Live or Gemini Live voice, or empty" });
         patch.liveVoice = body.liveVoice || undefined;
+      }
+      if (body.liveOverride !== undefined) {
+        if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only a workspace admin can change a bot's Live provider." });
+        const parsed = liveOverrideSchema.safeParse(body.liveOverride);
+        if (!parsed.success) return json(res, 400, { error: "Select OpenAI or Fish Audio Live 3, with an optional Fish agent ID." });
+        patch.liveOverride = parsed.data ?? undefined;
       }
       // Spends the Cloud plan's monthly X research calls: an admin decision too.
       if (body.xResearch !== undefined) {

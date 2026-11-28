@@ -12328,7 +12328,7 @@ const liveCalls = new LiveCallController({
     return task.activity === "waiting-on-you" ? "waiting" : "working";
   },
   broadcast: (frame) => broadcast(frame, { adminOnly: true }),
-  settings: () => liveCallSettings(cfg), botVoice: (botId) => store.bot(botId)?.liveVoice,
+  settings: (botId) => liveCallSettings(cfg, botId ? store.bot(botId)?.liveOverride : undefined), botVoice: (botId) => store.bot(botId)?.liveVoice,
   azureRefusal: (auth) => azureLiveCallRefusal(auth, { othersOnLoopback: adminActivityRecording() }),
   ...liveWiring.calls,
   speakable: (text) => toUtterances(text),

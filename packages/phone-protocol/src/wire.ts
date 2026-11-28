@@ -33,7 +33,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
-import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
+import type { BotLiveOverride, LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
 import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts"; import type { RoomThreadCloser } from "./room-threads.ts";
 import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
@@ -326,6 +326,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
   /** This bot's own Live call voice, a GPT-Live or Gemini Live voice id; absent, or not the call provider's, uses the app's. */ liveVoice?: string;
+  /** Absent uses the workspace's Live service. */ liveOverride?: BotLiveOverride;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean; /** The harness speaks each reply as a voice note; absent follows the installation's `tts.everyReply`. */ voiceNoteEveryReply?: boolean;
