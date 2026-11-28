@@ -229,11 +229,11 @@ describe("a handoff tool question for the person", () => {
   it("routes copies of the same provider request id back to separate workers", () => {
     const w = world();
     for (const threadId of ["work-a", "work-b"]) {
-      const card = { title: "Question", options: [], requestId: "request-1", handoffQuestion: { from: threadId, copyTo: "root" } };
+      const card = { title: "Question", subtitle: "Continue?", options: [], requestId: "request-1", handoffQuestion: { from: threadId, copyTo: "root" } };
       const source = w.store.appendMessage(threadId, { role: "bot", kind: "options", card });
       const requestId = `handoff-copy:${source.id}`;
       w.store.appendMessage("root", { role: "bot", kind: "options", card: { ...card, requestId },
-        inbox: { kind: "ask", from: { botId: "ledger", name: "Ledger", color: "teal" }, origin: { botId: "ledger", threadId, title: "Work", messageId: source.id } } });
+        inbox: { kind: "ask", from: { botId: "ledger", name: "Ledger" }, origin: { botId: "ledger", threadId, title: "Work", messageId: source.id } } });
       expect(copiedQuestionAnswer(w.store, "root", requestId)).toEqual({ threadId, requestId: "request-1" });
     }
   });

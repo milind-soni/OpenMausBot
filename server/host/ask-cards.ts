@@ -157,7 +157,7 @@ export function createAskCards(deps: AskCardsDeps) {
       const route = card?.handoffQuestion;
       if (!route?.copyTo || route.from !== change.threadId) return;
       const copy = store.messagesFor(route.copyTo).find((row) => row.inbox?.origin?.messageId === change.message.id);
-      if (copy) store.patchMessage(route.copyTo, copy.id, { card: { ...card, requestId: copy.card?.requestId } });
+      if (copy?.card && card) store.patchMessage(route.copyTo, copy.id, { card: { ...card, requestId: copy.card.requestId } });
     }
   });
 
