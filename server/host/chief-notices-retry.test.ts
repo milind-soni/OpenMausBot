@@ -403,6 +403,14 @@ describe("the Chief's own run that failed on an error that may not repeat", () =
     expect(f.told).toHaveLength(1);
   });
 
+  it("reports a late retry setup failure to the person", () => {
+    const f = ownFixture({ continueRequest: async (_bot, _thread, _text, failed) => failed("engine unavailable") });
+    ask(f);
+    fails(f);
+    f.settle();
+    expect(f.told).toHaveLength(1);
+  });
+
   it.each<[string, { kind: "stalled" } | { detail: string }]>([
     ["a stall the turn watchdog stopped", { kind: "stalled" }],
     ["a full disk", { detail: "write failed: ENOSPC: no space left on device" }],

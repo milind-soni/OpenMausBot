@@ -6879,7 +6879,7 @@ const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
-  continueRequest: (botId, threadId, text) => startTurn(botId, text, { threadId, unattended: true, incidentRetry: true, cardContinuation: true, requestMessageId: directRequestOwners.get(threadId)?.messageId }),
+  continueRequest: (botId, threadId, text, onDispatchError) => startTurn(botId, text, { threadId, onDispatchError, unattended: true, incidentRetry: true, cardContinuation: true, requestMessageId: directRequestOwners.get(threadId)?.messageId }),
 });
 
 function turnAnswers(threadId: string, opts?: {
