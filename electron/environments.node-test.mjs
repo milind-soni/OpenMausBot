@@ -113,6 +113,13 @@ test("native workspace choices use saved IDs and connect opens settings without 
   assert.equal(state.activeId, "cloud");
 });
 
+test("with an own server as home, this computer is not offered as a place", () => {
+  const state = { environments: [{ id: "aliyun", name: "Aliyun", origin: "https://aliyun.example" }], activeId: "aliyun" };
+  const items = env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, localPlace: false });
+  assert.equal(items.some((item) => item.id === "workspace-local"), false);
+  assert.equal(items.find((item) => item.id === "workspace-aliyun").checked, true);
+});
+
 test("Add a Cloud… sits just under the saved servers only where main offers it, and My Cloud's line can say Always on", () => {
   const state = { environments: [{ id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev" }, { id: "office", name: "Office", origin: "https://office.example" }], activeId: "local" };
   const calls = [];

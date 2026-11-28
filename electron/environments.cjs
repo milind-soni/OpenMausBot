@@ -76,14 +76,14 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
  * `places`: the one line saying which side has which bots, shown first; `copyToCloud`: the send line under the list. `foldSublabels`: where menus show no sublabels (Windows, Linux), My Cloud's status line
  * joins its name instead of vanishing. `locals`: the workspaces of this computer's own (local-profiles.mjs), each opened by
  * `onLocal(id)` (`shown`: the one on screen); `onNewLocal`: a new one, named on this computer's own page. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null, locals = [], onLocal = null, onNewLocal = null, text = englishText }) {
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null, localPlace = true, locals = [], onLocal = null, onNewLocal = null, text = englishText }) {
   const active = activeEnvironment(state), { t } = text;
   const own = onLocal ? locals.map((local) => ({ id: `workspace-local-${local.id}`, label: local.label, type: "radio", checked: local.shown === true, click: () => onLocal(local.id) })) : [];
   const fresh = onNewLocal ? [{ id: "workspace-new-local", label: t("native.menu.newLocal"), click: onNewLocal }] : [];
   if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, own, fresh, t });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
-    { id: "workspace-local", label: t("place.local"), type: "radio", checked: !active && !own.some((item) => item.checked), ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) },
+    ...(localPlace ? [{ id: "workspace-local", label: t("place.local"), type: "radio", checked: !active && !own.some((item) => item.checked), ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) }] : []),
     ...own,
     ...[...state.environments].sort((a, b) => listedPlace(b) - listedPlace(a)).map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
