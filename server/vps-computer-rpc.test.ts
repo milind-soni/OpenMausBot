@@ -5,7 +5,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { COMPUTER_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
 import { controlRefusal } from "./control-client.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -231,6 +232,25 @@ describe("the boxed VPS computer's host-side proxy", () => {
     await expect(call("tools/call", { name: "screenshot" }, 41)).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #2 on slow" }] } });
   });
 
+  it("retires only the proxy that missed its deadline and starts the next request on a fresh child", async () => {
+    const deadline = new AbortController();
+    const original = AbortSignal.timeout.bind(AbortSignal);
+    const clock = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms =>
+      ms === COMPUTER_PROXY_TIMEOUT_MS - 5_000 ? deadline.signal : original(ms));
+    try {
+      const marker = join(home, "deadline.txt");
+      serve("slow", ["slow", marker]);
+      const first = call("tools/call", { name: "screenshot" }, 45);
+      await until(() => callsReceived(marker), count => count === 1);
+      clock.mockRestore();
+      deadline.abort();
+      expect((await first).result.isError).toBe(true);
+      const next = await call("tools/call", { name: "get_screen_size" }, 46);
+      expect(next.result.content[0].text).toBe("did get_screen_size #1 on slow");
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it("a proxy that cannot start answers the failure instead of letting its start error escape", async () => {
     serve("x", [], join(home, "no-such-proxy"));
     const answer = await call("tools/call", { name: "screenshot" }, 50);

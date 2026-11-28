@@ -112,7 +112,13 @@ export async function vpsComputerTurn(turn: {
     try {
       if (signal.aborted) throw interrupted();
       sent = true;
-      return await child.rpc(method, turn.body.params ?? {});
+      const retire = () => { if (children.get(turn.botId) === child) dropChild(turn.botId); };
+      timeout.addEventListener("abort", retire, { once: true });
+      try {
+        return await child.rpc(method, turn.body.params ?? {});
+      } finally {
+        timeout.removeEventListener("abort", retire);
+      }
     } catch (error) {
       if (method === "tools/list") throw error;
       // A call the desktop never answered may still be running there: the next one starts a new child, never this one.
