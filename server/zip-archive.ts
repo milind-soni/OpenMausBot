@@ -2,7 +2,7 @@
 // is parsed from the end of the file, and each member is inflated straight to disk, never past the size it declares.
 // No ZIP64, no encryption, no links: a pinned vendor archive needs none of them.
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, open, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -25,6 +25,16 @@ const UNIX_TYPE_MASK = 0o170000;
 const UNIX_FILE = 0o100000;
 const UNIX_DIRECTORY = 0o040000;
 
+async function fillBuffer(handle: FileHandle, buffer: Buffer, position: number): Promise<boolean> {
+  let filled = 0;
+  while (filled < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, position + filled);
+    if (bytesRead === 0) return false;
+    filled += bytesRead;
+  }
+  return true;
+}
+
 /** The members a ZIP's central directory lists; more than `maxEntries` is refused. */
 export async function readZipDirectory(path: string, maxEntries: number): Promise<ZipMember[]> {
   const handle = await open(path, "r");
@@ -33,7 +43,7 @@ export async function readZipDirectory(path: string, maxEntries: number): Promis
     const tailBytes = Math.min(info.size, MAX_EOCD_BYTES);
     const tail = Buffer.alloc(tailBytes);
     const tailOffset = info.size - tailBytes;
-    if ((await handle.read(tail, 0, tailBytes, tailOffset)).bytesRead !== tailBytes) {
+    if (!await fillBuffer(handle, tail, tailOffset)) {
       throw new Error("The verified archive was truncated.");
     }
     let eocd = -1;
@@ -61,7 +71,7 @@ export async function readZipDirectory(path: string, maxEntries: number): Promis
     ) throw new Error("The verified archive uses an unsupported ZIP layout.");
 
     const directory = Buffer.alloc(directoryBytes);
-    if ((await handle.read(directory, 0, directoryBytes, directoryOffset)).bytesRead !== directoryBytes) {
+    if (!await fillBuffer(handle, directory, directoryOffset)) {
       throw new Error("The verified archive directory was truncated.");
     }
     const entries: ZipMember[] = [];
@@ -108,7 +118,7 @@ async function memberDataOffset(path: string, entry: ZipMember): Promise<number>
   const handle = await open(path, "r");
   try {
     const header = Buffer.alloc(30);
-    if ((await handle.read(header, 0, header.length, entry.localHeaderOffset)).bytesRead !== header.length) {
+    if (!await fillBuffer(handle, header, entry.localHeaderOffset)) {
       throw new Error("A verified archive member header was truncated.");
     }
     const nameBytes = header.readUInt16LE(26);
@@ -119,7 +129,7 @@ async function memberDataOffset(path: string, entry: ZipMember): Promise<number>
       || (header.readUInt16LE(6) & 1) !== 0
     ) throw new Error("A verified archive member header is invalid.");
     const name = Buffer.alloc(nameBytes);
-    if ((await handle.read(name, 0, nameBytes, entry.localHeaderOffset + 30)).bytesRead !== nameBytes) {
+    if (!await fillBuffer(handle, name, entry.localHeaderOffset + 30)) {
       throw new Error("A verified archive member name was truncated.");
     }
     if (name.toString("utf8") !== entry.name) throw new Error("A verified archive member name did not match its directory.");
