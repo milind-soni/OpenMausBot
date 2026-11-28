@@ -9,6 +9,7 @@ import {
   AttentionFace, attentionOwnerName, attentionRowStatus, crossBotPinnedThreads, isOpenThread, openThreadRow,
   type AttentionThread, type BotFace, type OpenThread,
 } from "../SidebarBotActivity";
+import { localizedTaskTitle } from "@/lib/task-title";
 import { formatUpdatedAt, threadRecency, threadUpdatedLabel } from "../SidebarThreadRow";
 
 /** Pinned conversations from every bot and room, most recently active first, so the label beside a row and the
@@ -42,7 +43,8 @@ export function PinnedThreads({ rows, faces, now, current, onOpen, onUnpin }: {
         const at = threadRecency(row.task);
         const when = threadUpdatedLabel(at, now);
         const meta = active ? `${name} · ${status}` : name;
-        const label = t("sidebar.pinnedThreads.item", { title: row.task.title, name: when ? `${meta} · ${when}` : meta });
+        const title = localizedTaskTitle(row.task.title);
+        const label = t("sidebar.pinnedThreads.item", { title, name: when ? `${meta} · ${when}` : meta });
         const open = isOpenThread(row, current);
         return (
           <div key={`${row.kind}-${row.kind === "bot" ? row.botId : row.groupId}-${row.task.threadId}`} className="group/pinned flex w-full items-center">
@@ -52,7 +54,7 @@ export function PinnedThreads({ rows, faces, now, current, onOpen, onUnpin }: {
               className={cn("flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-menu-hover", open && openThreadRow)}>
               <AttentionFace entry={row} faces={faces} Icon={active ? Icon : Pin} iconClass={active ? colorClass : "text-ink-tertiary"} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate" data-pinned-title>{row.task.title}</span>
+                <span className="block truncate" data-pinned-title>{title}</span>
                 <span className="block truncate text-[11px] text-ink-secondary">
                   {meta}{when && <> · <time data-pinned-when dateTime={new Date(at).toISOString()} title={formatUpdatedAt(at)}>{when}</time></>}
                 </span>
