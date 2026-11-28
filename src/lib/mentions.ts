@@ -69,7 +69,7 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
     const rest = text.slice(at + 1);
     const peer = candidates.find(({ name }) => rest.slice(0, name.length).toLowerCase() === name.toLowerCase()
       && !isMentionNameContinuation(rest.slice(name.length)));
-    const all = everyone ? everyoneTagAt(rest, botNames) : undefined;
+    const all = everyone ? everyoneTagAt(rest, candidates.map(({ name }) => name)) : undefined;
     const you = all === undefined && personNames.length ? personTagAt(rest, personNames, botNames) : undefined;
     if (you !== undefined) {
       ranges.push({ start: at, end: at + you + 1, you: true });
