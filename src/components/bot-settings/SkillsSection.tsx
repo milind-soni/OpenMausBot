@@ -1,5 +1,6 @@
-import { BookOpen, Trash2, Users } from "lucide-react";
+import { BookOpen, FolderOpen, Trash2, Users } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { relayLink } from "@/lib/relay-server";
 import { skillImportLines } from "@/lib/skill-import";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { useEffect, useRef, useState } from "react";
@@ -316,6 +317,57 @@ export function SkillReviewDialog({
   );
 }
 
+export function useSkillImport(botId: string, { refresh, setError }: Pick<ReturnType<typeof useManagedSkills>, "refresh" | "setError">, failure: string) {
+  const { request: api, draft } = useBotEditor();
+  const bridge = globalThis.window?.ogb;
+  const pick = draft || bridge?.remoteClient?.active || relayLink() ? undefined : bridge?.pickSkillFolder;
+  const [source, setSource] = useState("");
+  const [importing, setImporting] = useState<"url" | "folder" | null>(null);
+  const [imported, setImported] = useState<string[] | null>(null);
+
+  const selection = useRef(botId);
+  useEffect(() => {
+    selection.current = botId;
+    setImporting(null);
+    setImported(null);
+    setSource("");
+    return () => { selection.current = ""; };
+  }, [botId]);
+  const submit = async (from: "url" | "folder") => {
+    const trimmed = source.trim();
+    if (importing || (from === "folder" ? !pick : !trimmed)) return;
+    setImporting(from);
+    try {
+      const picked = from === "folder" ? await pick?.() : null;
+      if (selection.current !== botId || (from === "folder" && !picked)) return;
+      setError("");
+      setImported(null);
+      if (picked && "error" in picked) throw new Error(picked.error);
+      if (picked && relayLink()) throw new Error(failure);
+      const result = await api<{ imported?: SkillImportSummary[] }>(`/api/bots/${botId}/skills${picked ? "?from=folder" : ""}`, {
+        method: "POST",
+        ...(picked ? { redirect: "error" } : {}),
+        body: JSON.stringify(picked ? { files: picked.files } : { source: trimmed }),
+      });
+      if (selection.current !== botId) return;
+      const summaries = result.imported ?? [];
+      setImported(skillImportLines(picked ? summaries.map((summary) => ({
+        ...summary,
+        skipped: [...picked.skipped, ...summary.skipped],
+        skippedCount: picked.skippedCount + summary.skippedCount,
+      })) : summaries));
+      if (!picked) setSource("");
+      await refresh(() => selection.current !== botId);
+    } catch (cause) {
+      if (selection.current === botId) setError(cause instanceof Error && cause.message ? cause.message : failure);
+    } finally {
+      if (selection.current === botId) setImporting(null);
+    }
+  };
+
+  return { source, setSource, importing, imported, submit, canPick: Boolean(pick) };
+}
+
 export function SkillsSection({ bot }: { bot: Bot }) {
   const { request: api } = useBotEditor();
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
@@ -326,9 +378,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, addToBot,
   } = useManagedSkills(bot);
   const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
-  const [source, setSource] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importMessage, setImportMessage] = useState("");
+  const { source, setSource, importing, imported, submit, canPick } = useSkillImport(bot.id, { refresh, setError }, t("skills.error.import"));
   const skillDialogRef = useRef<HTMLDivElement>(null);
   const skillDialogOpen = Boolean(viewing);
 
@@ -426,27 +476,6 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     }
   };
 
-  const importSkill = async () => {
-    const trimmed = source.trim();
-    if (!trimmed) return;
-    setImporting(true);
-    setError("");
-    setImportMessage("");
-    try {
-      const result = (await api(`/api/bots/${bot.id}/skills`, {
-        method: "POST",
-        body: JSON.stringify({ source: trimmed }),
-      })) as { imported?: SkillImportSummary[] };
-      setImportMessage([...skillImportLines(result.imported ?? []), t("skills.import.reviewBelow")].join(" "));
-      setSource("");
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("skills.error.import"));
-    } finally {
-      setImporting(false);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl bg-card p-4">
@@ -488,32 +517,35 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
           </div>
         ) : (
-          <>
-            <form
-              className="mt-3 flex items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void importSkill();
-              }}
+          <form
+            className="mt-3 flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit("url");
+            }}
+          >
+            <input
+              className={inputCls}
+              placeholder={t("skills.import.placeholder")}
+              aria-label={t("skills.import.label")}
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={Boolean(importing) || !source.trim()}
+              className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             >
-              <input
-                className={inputCls}
-                placeholder={t("skills.import.placeholder")}
-                aria-label={t("skills.import.label")}
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-              />
-              <button
-                type="submit"
-                disabled={importing || !source.trim()}
-                className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-              >
-                {importing ? t("skills.import.importing") : t("skills.import.button")}
-              </button>
-            </form>
-            {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
-          </>
+              {t(importing === "url" ? "skills.import.importing" : "skills.import.button")}
+            </button>
+          </form>
         )}
+        {canPick && (
+          <button type="button" className="ui-button ui-button-md mt-2" disabled={Boolean(importing)} onClick={() => void submit("folder")}>
+            <FolderOpen size={14} aria-hidden="true" />{t(importing === "folder" ? "skills.import.importing" : "templateImport.chooseFolder")}
+          </button>
+        )}
+        {imported && <div role="status" className="mt-1 text-[12px] text-ink-secondary">{[...imported, t("skills.import.reviewBelow")].join(" ")}</div>}
 
         {loading ? (
           <div className="mt-3 text-[12px] text-ink-secondary">{t("skills.loading")}</div>

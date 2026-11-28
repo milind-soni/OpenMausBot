@@ -43,6 +43,7 @@ import { createScreenControl } from "./screen-control.mjs"; import { createAskPr
 let startupScreen = null;
 let desktopTray = null, linuxTray = null; // Linux: an Open/Quit icon the window never hides into, since not every desktop shows it.
 import { collisionFreeDownloadPath, defaultSaveName, openFolder, openHtmlCopy, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
+import { installFolderPickers } from "./folder-pickers.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalLinkUrl } from "./app-permissions.mjs";
 import { appFrameNavigationAllowed } from "./app-frame-guard.mjs";
@@ -2190,15 +2191,7 @@ ipcMain.handle("engine:open-terminal", localOnly("engine:open-terminal", async (
 
 ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event, text) => writeClipboardText(clipboard, text)));
 
-ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (event, current) => {
-  const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  const result = await dialog.showOpenDialog(win, {
-    title: nativeT("native.picker.workingFolder"),
-    properties: ["openDirectory", "createDirectory"],
-    ...(typeof current === "string" && current ? { defaultPath: current } : {}),
-  });
-  return result.canceled ? null : (result.filePaths[0] ?? null);
-}));
+installFolderPickers({ ipcMain, dialog, windowFor: (sender) => BrowserWindow.fromWebContents(sender), mainWindow: () => mainWindow, remote: () => Boolean(desktopRemoteAccess), t: nativeT });
 
 // Secrets are never read, and the report is redacted again on the way out.
 ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnostics", async (event) => {

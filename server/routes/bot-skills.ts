@@ -6,7 +6,7 @@ import { purgeImportedSkill, readImportedSkills, removeImportedSkillForBot, setI
 import { setNativeSkillEnabled } from "../native-skill-choices.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource, skillImportToken } from "../skill-fetch.ts";
-import { skillImportSummary } from "../skill-folder.ts";
+import { planSkillFolder, SKILL_FOLDER_LIMITS, skillImportSummary } from "../skill-folder.ts";
 import { installLibrarySkill, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillOptOut, setLibrarySkillReviewState, skillsLibraryEnabled, unassignLibrarySkill } from "../skill-library.ts";
 import {
   installSkill, listBotSkillsWithOrigin, listSkills, listStagedSkillWrites, parseSkillMd, removeSkill, scanSkillText, setSkillEnabled,
@@ -16,6 +16,16 @@ import type { BotRecord, Store } from "../store.ts";
 import { githubAudience } from "./github-sign-in.ts";
 import { withAllBotsOffer } from "./skills-for-all-bots.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+
+const base64Length = (bytes: number) => Math.ceil(bytes / 3) * 4;
+const LOCAL_FOLDER_BODY_MAX = base64Length(SKILL_FOLDER_LIMITS.bytes) + 512 * 1024;
+const localFolderUpload = z.strictObject({
+  files: z.array(z.strictObject({
+    path: z.string().min(1).max(SKILL_FOLDER_LIMITS.depth * 256 - 1),
+    base64: z.string().max(base64Length(SKILL_FOLDER_LIMITS.fileBytes)),
+    executable: z.boolean(),
+  })).max(SKILL_FOLDER_LIMITS.files),
+});
 
 export interface BotSkillsRouteDeps {
   store: Store;
@@ -71,6 +81,25 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
     }
     if (m && method === "POST") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      if (url.searchParams.get("from") === "folder") {
+        const body = localFolderUpload.safeParse(await readBody(req, LOCAL_FOLDER_BODY_MAX));
+        if (!body.success) return json(res, 400, { error: "Expected the contents of one skill folder" });
+        let bytes = 0;
+        const entries = [];
+        for (const { path, base64, executable } of body.data.files) {
+          const content = Buffer.from(base64, "base64");
+          if (content.toString("base64") !== base64) return json(res, 400, { error: "Invalid skill file encoding" });
+          bytes += content.length;
+          if (content.length > SKILL_FOLDER_LIMITS.fileBytes || bytes > SKILL_FOLDER_LIMITS.bytes) {
+            return json(res, 413, { error: "The skill folder is too large" });
+          }
+          entries.push({ path, content, executable, kind: "file" as const, size: content.length });
+        }
+        const installed = installSkill(m[1], "Local folder", entries);
+        if ("error" in installed) return json(res, 422, { error: installed.error });
+        const { take, skipped } = planSkillFolder(entries);
+        return json(res, 201, { installed: [installed], imported: [skillImportSummary(installed.name, take, skipped)], errors: [] });
+      }
       const parsed = z.object({ source: z.string().min(1).max(2000) }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "source must be a GitHub or skills.sh URL, or owner/repo" });
       const fetched = await fetchSkillFromSource(parsed.data.source, fetch, undefined, () => skillImportToken(githubAudience(auth, team)));

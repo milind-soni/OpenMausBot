@@ -1425,6 +1425,32 @@ describe("the drill-in pages", () => {
     expect(body("skills").html).toContain("No skills yet.");
   });
 
+  it("passes the desktop picker's skill files to the bot import route and keeps cancellation a no-op", async () => {
+    const action = "choose-skill-folder";
+    expect(has(body("skills"), "data-panel-link", action)).toBe(false);
+    const files = [{ path: "SKILL.md", base64: "YQ==", executable: false }];
+    const pickSkillFolder = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ files, skipped: [{ path: ".git/", reason: "hidden" }], skippedCount: 1 });
+    (window as unknown as { ogb: unknown }).ogb = { pickSkillFolder, remoteClient: { active: true } };
+    expect(has(body("skills"), "data-panel-link", action)).toBe(false);
+    (window as unknown as { ogb: unknown }).ogb = { pickSkillFolder };
+    fixture.api = vi.fn(async () => ({ imported: [{ name: "pdf-forms", files: 1, scripts: 0, skipped: [], skippedCount: 0 }] }));
+
+    click(find(body("skills"), "data-panel-link", action));
+    expect(find(body("skills"), "data-panel-link", action).props.disabled).toBe(true);
+    await Promise.resolve();
+    expect(fixture.api).not.toHaveBeenCalled();
+    click(find(body("skills"), "data-panel-link", action));
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bots/scout/skills?from=folder", {
+      method: "POST", redirect: "error", body: JSON.stringify({ files }),
+    });
+    await Promise.resolve();
+    expect(fixture.skills.refresh).toHaveBeenCalledOnce();
+    expect(body("skills").html).toContain("Left out: .git/ (hidden).");
+  });
+
   it("offers the organization's skills on the skills page, and says on Bot settings where an installed bot came from", async () => {
     const offered = ofType(body("skills"), OrgSkillsCard)!;
     expect(offered.props.bot).toMatchObject({ id: "scout" });

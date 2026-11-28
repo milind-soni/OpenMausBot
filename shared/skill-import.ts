@@ -54,3 +54,9 @@ export interface SkillImportSummary {
   skipped: SkippedSkillFile[];
   skippedCount: number;
 }
+
+export interface SkillFolderUpload {
+  files: Array<{ path: string; base64: string; executable: boolean }>;
+}
+
+export type PickedSkillFolder = (SkillFolderUpload & Pick<SkillImportSummary, "skipped" | "skippedCount">) | { error: string };

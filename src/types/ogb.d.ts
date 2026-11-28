@@ -501,6 +501,8 @@ const __APP_VERSION__: string;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
+      /** Picks one local skill folder and returns bounded file contents, or null on cancel. */
+      pickSkillFolder?(): Promise<import("../../shared/skill-import").PickedSkillFolder | null>;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
