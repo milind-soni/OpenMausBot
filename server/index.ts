@@ -146,6 +146,7 @@ import {
 } from "./container-computer.ts";
 import { containerComputerMcp } from "./local-vm-box.ts";
 import { attachedFileLine, attachForTurn, saveBotAttachment } from "./bot-attachment.ts"; import { attachNotFound } from "./attach-file-hint.ts";
+import { claudeEndpointKeepWarmOptIn } from "./claude-endpoints.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -5172,8 +5173,10 @@ const cacheKeepWarm = createCacheKeepWarm({
     const instance = registry.get(instanceId);
     if (!instance?.adapter.cacheKeepWarm) return "this engine cannot keep its cache warm";
     if (policyModelRefusal(instance)) return "this engine is not allowed here";
-    // A metered API key's cache lives five minutes: pinging it costs more than the re-write it saves.
-    if (registry.lastSnapshot(instanceId)?.billing !== "subscription") return "keep-warm runs only on a Claude subscription sign-in";
+    // A metered API key's cache lives five minutes by default; a custom endpoint the person
+    // vouched for with a verified one-hour cache may still opt in (instance-level, off by default).
+    if (registry.lastSnapshot(instanceId)?.billing !== "subscription" && !claudeEndpointKeepWarmOptIn(instanceConfigs(cfg)[instanceId]))
+      return "keep-warm runs only on a Claude subscription sign-in or an endpoint opted in with a verified one-hour cache";
     return null;
   },
   busy: ({ threadId, botId }) => threadBusy(botId, threadId) || botHasActiveTurn(botId) || Boolean(store.groupByThread(threadId)?.busyBotId),

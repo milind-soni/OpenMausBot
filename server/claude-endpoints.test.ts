@@ -6,6 +6,7 @@ import {
   claudeEndpointSchema,
   claudeEndpointUpdateSchema,
   claudeEndpointInfo,
+  claudeEndpointKeepWarmOptIn,
   isClaudeEndpoint,
   newClaudeEndpoint,
   updateClaudeEndpoint,
@@ -99,6 +100,7 @@ describe("custom Claude endpoint", () => {
     expect(info).toEqual({
       baseUrl: BASE.baseUrl.replace(/\/$/u, ""),
       models: ["deepseek-chat"],
+      cacheKeepWarm: false,
       tokenSaved: true,
       opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "",
     });
@@ -128,6 +130,21 @@ describe("custom Claude endpoint", () => {
       .instances[instanceId].environment).toMatchObject({ ANTHROPIC_AUTH_TOKEN: "sk-replaced", ANTHROPIC_API_KEY: "sk-replaced" });
     // Nothing else in the fleet moves.
     expect(updated.instances.claude).toEqual(instances.claude);
+  });
+
+  it("opts a verified one-hour-cache endpoint into keep-warm, on by explicit choice only", () => {
+    const off = newClaudeEndpoint(cfg(), BASE);
+    expect(claudeEndpointKeepWarmOptIn(off.instances[off.instanceId])).toBe(false);
+    const on = newClaudeEndpoint(cfg(), { ...BASE, cacheKeepWarm: true });
+    expect(claudeEndpointKeepWarmOptIn(on.instances[on.instanceId])).toBe(true);
+    expect(claudeEndpointInfo(on.instances[on.instanceId]).cacheKeepWarm).toBe(true);
+    // An update can turn it on and back off; other account entries never opt in.
+    const edited = updateClaudeEndpoint({ instances: off.instances }, off.instanceId, { cacheKeepWarm: true });
+    expect(claudeEndpointKeepWarmOptIn(edited.instances[off.instanceId])).toBe(true);
+    const reverted = updateClaudeEndpoint({ instances: edited.instances }, off.instanceId, { cacheKeepWarm: false });
+    expect(claudeEndpointKeepWarmOptIn(reverted.instances[off.instanceId])).toBe(false);
+    expect((reverted.instances[off.instanceId].config as Record<string, unknown>)).not.toHaveProperty("cacheKeepWarm");
+    expect(claudeEndpointKeepWarmOptIn(reverted.instances.claude)).toBe(false);
   });
 
   it("keeps a discovered catalog when only a model mapping changes", () => {

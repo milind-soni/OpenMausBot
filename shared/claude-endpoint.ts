@@ -2,6 +2,7 @@
 export interface ClaudeEndpointInfo {
   baseUrl: string;
   models: string[];
+  cacheKeepWarm: boolean;
   tokenSaved: boolean;
   opusModel: string;
   sonnetModel: string;

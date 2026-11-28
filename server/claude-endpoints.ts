@@ -29,6 +29,8 @@ export const claudeEndpointSchema = z.object({
   sonnetModel: optionalModel.optional(),
   haikuModel: optionalModel.optional(),
   smallFastModel: optionalModel.optional(),
+  /** The person vouches this endpoint serves a verified one-hour prompt cache. */
+  cacheKeepWarm: z.boolean().optional(),
 }).strict();
 
 export const claudeEndpointUpdateSchema = z.object({
@@ -41,6 +43,7 @@ export const claudeEndpointUpdateSchema = z.object({
   sonnetModel: optionalModel.optional(),
   haikuModel: optionalModel.optional(),
   smallFastModel: optionalModel.optional(),
+  cacheKeepWarm: z.boolean().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 type EndpointFields = z.infer<typeof claudeEndpointUpdateSchema>;
@@ -62,6 +65,11 @@ export function isClaudeEndpoint(entry: InstanceConfig | undefined): boolean {
   return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels) && rawConfig(entry).bedrock !== true;
 }
 
+/** True when the person opted this custom endpoint into prompt-cache keep-warm by vouching for its one-hour cache. */
+export function claudeEndpointKeepWarmOptIn(entry: InstanceConfig | undefined): boolean {
+  return isClaudeEndpoint(entry) && rawConfig(entry).cacheKeepWarm === true;
+}
+
 export type { ClaudeEndpointInfo };
 
 /** What the settings UI may know about an endpoint: where it points and which models, never the token. */
@@ -71,6 +79,7 @@ export function claudeEndpointInfo(entry: InstanceConfig): ClaudeEndpointInfo {
   return {
     baseUrl: environment.ANTHROPIC_BASE_URL ?? "",
     models: Array.isArray(config.endpointModels) ? [...config.endpointModels] : [],
+    cacheKeepWarm: config.cacheKeepWarm === true,
     tokenSaved: Boolean(environment.ANTHROPIC_AUTH_TOKEN || environment.ANTHROPIC_API_KEY),
     opusModel: environment.ANTHROPIC_DEFAULT_OPUS_MODEL ?? "",
     sonnetModel: environment.ANTHROPIC_DEFAULT_SONNET_MODEL ?? "",
@@ -136,6 +145,7 @@ export function newClaudeEndpoint(cfg: AppConfig, body: z.infer<typeof claudeEnd
       configDir: join(DATA_DIR, "providers", instanceId),
       requireApiKey: true,
       endpointModels: body.model ? endpointModels(body) : officialModels(false),
+      ...(body.cacheKeepWarm === true ? { cacheKeepWarm: true } : {}),
     },
     environment: endpointEnvironment(body.baseUrl, body.token, body),
   };
@@ -164,11 +174,16 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
   }
   const secret = body.token ?? entry.environment?.ANTHROPIC_AUTH_TOKEN ?? entry.environment?.ANTHROPIC_API_KEY;
   if (!secret) throw Object.assign(new Error("Enter the endpoint's token."), { status: 400 });
+  const config: Record<string, unknown> = { ...rawConfig(entry), endpointModels: fields.model && (body.model !== undefined || TIERS.some(([field]) => body[field] !== undefined)) ? endpointModels(fields) : saved.models };
+  if (body.cacheKeepWarm !== undefined) {
+    if (body.cacheKeepWarm) config.cacheKeepWarm = true;
+    else delete config.cacheKeepWarm;
+  }
   instances[instanceId] = {
     ...entry,
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
     environment: endpointEnvironment(address, secret, fields),
-    config: { ...rawConfig(entry), endpointModels: fields.model && (body.model !== undefined || TIERS.some(([field]) => body[field] !== undefined)) ? endpointModels(fields) : saved.models },
+    config,
   };
   return { instances };
 }
