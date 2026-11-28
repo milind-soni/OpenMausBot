@@ -134,7 +134,7 @@ export function SoulField({
       {large && (
         <Layer modal>
           <SoulLargeDialog title={label} byteCount={byteCount} onClose={() => setLarge(false)}>
-            {editor("min-h-0 flex-1 resize-none font-mono text-[14px] leading-relaxed")}
+            {editor(cn("min-h-0 flex-1 resize-none leading-relaxed", simple ? "rounded-xl text-[14px]" : "font-mono"))}
           </SoulLargeDialog>
         </Layer>
       )}
