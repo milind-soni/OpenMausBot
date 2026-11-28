@@ -60,6 +60,22 @@ describe("a thread a teammate opened", () => {
     expect(p.task.title).toBe("@Clive · work");
   });
 
+  it("uses the first visible follow-up reply even after the initial-title wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = place();
+      p.titles.start("thread", { request: "Export", currentTitle: "Reports", model: () => ({ ok: true, instance: {} }), stillCurrent: () => true, apply: vi.fn() });
+      p.titles.turnStarted("thread", "turn");
+      await vi.advanceTimersByTimeAsync(TITLE_REPLY_WAIT_MS);
+      expect(p.generate).not.toHaveBeenCalled();
+      p.titles.replyReceived("thread", "turn", "First reply");
+      p.titles.turnEnded("thread", "turn", "Last reply");
+      expect(p.generate).toHaveBeenCalledExactlyOnceWith({}, expect.stringContaining("First reply"), "follow-up");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the sanitised brief once after the wait runs out and ignores a late reply", async () => {
     vi.useFakeTimers();
     try {

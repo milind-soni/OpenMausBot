@@ -16,7 +16,7 @@ export interface AutomaticTitle {
 export function createAutomaticThreadTitles(generate = generateThreadTitle) {
   const pending = new Map<string, {
     attempt: AutomaticTitle;
-    timer: ReturnType<typeof setTimeout>;
+    timer: ReturnType<typeof setTimeout> | undefined;
     turnId?: string;
     generating?: true;
   }>();
@@ -55,14 +55,17 @@ export function createAutomaticThreadTitles(generate = generateThreadTitle) {
   return {
     start(threadId: string, attempt: AutomaticTitle) {
       if (pending.has(threadId)) return;
-      const timer = setTimeout(() => void finish(threadId), TITLE_REPLY_WAIT_MS);
-      timer.unref();
+      const timer = attempt.currentTitle ? undefined : setTimeout(() => void finish(threadId), TITLE_REPLY_WAIT_MS);
+      timer?.unref();
       pending.set(threadId, { attempt, timer });
     },
     generating: (threadId: string) => pending.get(threadId)?.generating === true,
     turnStarted(threadId: string, turnId?: string, room = false) {
       const current = pending.get(threadId);
       if (current && turnId && (room || current.turnId === undefined)) current.turnId = turnId;
+    },
+    replyReceived(threadId: string, turnId: string | undefined, text: string) {
+      if (text.trim()) void finish(threadId, turnId, text.trim());
     },
     turnEnded: (threadId: string, turnId?: string, reply?: string) => void finish(threadId, turnId, reply?.trim() || undefined),
     drop,

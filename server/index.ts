@@ -6348,6 +6348,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId, ...(event.type === "item.completed" && event.itemId ? { itemId: event.itemId } : {}) });
     lastReply.set(event.threadId, spoken.text);
+    if (!replayed) automaticTitles.replyReceived(event.threadId, turnId, spoken.text);
   };
   const landParkedFiles = () => {
     const { files, strays } = takeParkedFiles(turnAttachmentsByTurn, event.threadId, event.turnId);
