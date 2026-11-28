@@ -1,6 +1,8 @@
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useRef } from "react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
@@ -9,7 +11,7 @@ import { CloudRoomCard } from "./CloudRoomCard";
 import { CloudUsageCard } from "./CloudUsageMeter";
 import { endCloudHowTo, useWorkspacePlace, type WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { SidebarConnectApps } from "./SidebarConnectApps";
-import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
+import { SidebarBottomButtons, SidebarFooterNav, useAutomationsNeedYou } from "./SidebarFooterNav";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import { StorageNotice } from "./StorageNotice";
 import { SidebarProfileMenu, useSimpleAccount, type ArchivedBots } from "./SidebarProfileMenu";
@@ -50,6 +52,27 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
   );
 }
 
+function ToolsFoldButton({ collapsed, alert, onToggle }: { collapsed: boolean; alert: boolean; onToggle?: () => void }) {
+  if (!onToggle) return null;
+  const label = t(collapsed ? "sidebar.section.expand" : "sidebar.section.collapse", { name: t("sidebar.tools") });
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  return (
+    <button
+      type="button"
+      data-sidebar-tools-fold=""
+      data-tour={collapsed ? "tools" : undefined}
+      aria-expanded={!collapsed}
+      aria-label={label}
+      title={label}
+      onClick={onToggle}
+      className="relative mx-auto flex size-[46px] shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised hover:text-ink"
+    >
+      <Chevron size={18} aria-hidden="true" />
+      {alert && <span data-testid="section-alert" aria-hidden="true" className="absolute right-2 top-2 size-2 rounded-full bg-danger" />}
+    </button>
+  );
+}
+
 export function SidebarFooter({ density, simple = false, owner = null, archived, toolsCollapsed, onToggleTools }: {
   density: SidebarDensity;
   simple?: boolean;
@@ -59,15 +82,19 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
   onToggleTools?: () => void;
 }) {
   const { dispatch } = useStore();
+  const automationsNeedYou = useAutomationsNeedYou();
   if (simple) return <SimpleSidebarFooter owner={owner} archived={archived} />;
+  const icons = density === "icons";
+  const toolsOpen = !icons || !toolsCollapsed;
   return (
-    <div className={cn("pb-3 pt-2", density === "icons" ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
-      <SidebarFooterNav density={density} collapsed={toolsCollapsed} onToggleCollapsed={onToggleTools} />
-      {density === "icons" ? (
+    <div className={cn("pb-3 pt-2", icons ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
+      {icons && <ToolsFoldButton collapsed={toolsCollapsed} alert={toolsCollapsed && automationsNeedYou} onToggle={onToggleTools} />}
+      {toolsOpen && <SidebarFooterNav density={density} collapsed={toolsCollapsed} onToggleCollapsed={onToggleTools} />}
+      {icons ? (
         <>
-          <SidebarPhoneButton density={density} onOpen={() => dispatch(phoneSettingsAction())} />
+          {toolsOpen && <SidebarPhoneButton density={density} onOpen={() => dispatch(phoneSettingsAction())} />}
           <div className="flex flex-col items-center justify-center gap-1">
-            <UpdateIndicator />
+            {toolsOpen && <UpdateIndicator />}
             <SidebarProfileMenu iconOnly />
           </div>
         </>
