@@ -284,16 +284,13 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       return env;
     };
 
-    /** Node's spawn runs no shell; Windows runs Muse's .cmd launcher through cmd.exe. */
-    const launch = (args: string[]) => process.platform === "win32"
-      ? { command: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/c", config.cli, ...args] }
-      : { command: config.cli, args };
-
     const startHost = async (args: string[], cwd: string, key: string, requestMcp: boolean, owner: CliOwner): Promise<Host> => {
-      const { command, args: argv } = launch(args);
       const env = childEnv();
+      // Security: no command interpreter. `cmd.exe /c <cli> <args>` puts the engine's own arguments on a shell
+      // command line, where a `&` in any of them starts a second command. Windows runs Muse's .cmd launcher
+      // through the shared launcher instead, which resolves an npm shim to the node entry it names.
       // Security: the model list runs in the bot box too while it is on: Muse reads its settings from a HOME a bot can write.
-      const child = spawnCli(command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), engine: DRIVER_KIND } }, owner);
+      const child = spawnCli(config.cli, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), engine: DRIVER_KIND } }, owner);
       let spawnError: NodeJS.ErrnoException | undefined;
       child.once("error", (error) => { spawnError = error; });
       const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
