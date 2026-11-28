@@ -1,14 +1,20 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
+import { antigravityCliTokenPath } from "./drivers/antigravity-acp.ts";
 import { antigravityRuntimesRoot } from "./engine-roots.ts";
 import { installFakeManagedCli } from "./testing/antigravity-native-fixture.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
+const storedStale = () => JSON.stringify({
+  token: { access_token: "stale-access", token_type: "Bearer", refresh_token: "native-refresh", expiry: "2026-10-19T08:00:00Z", expires_in: 3599 },
+  auth_method: "consumer",
+  id_token_email: "person@example.com",
+});
 
 vi.mock("./drivers/antigravity-usage-limits.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("./drivers/antigravity-usage-limits.ts")>();
@@ -85,7 +91,7 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     const native = await loadPlanUsage({ accounts: accountOf("antigravity"), now: NOW + 1_000 });
     expect(fiveHourUsed(native)).toEqual([["antigravity", 80]]);
     expect(antigravityPlanUsage).toHaveBeenCalledTimes(1);
-    expect(antigravityNativePlanUsage).toHaveBeenCalledWith("antigravity", { HOME: "/Users/person" }, expect.anything());
+    expect(antigravityNativePlanUsage).toHaveBeenCalledWith("antigravity", { HOME: "/Users/person" }, expect.anything(), expect.any(Function));
 
     const back = await loadPlanUsage({ accounts: accountOf("agy_acp_server"), now: NOW + 2_000 });
     expect(fiveHourUsed(back)).toEqual([["antigravity", 50]]);
@@ -109,5 +115,29 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     expect(antigravityNativePlanUsage).toHaveBeenCalledTimes(1);
     expect((await load({ cli: "antigravity", usageMeter: false })).providers).toEqual([]);
     expect(antigravityNativePlanUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a native-CLI account in the report when its token file is still on disk but usage could not be read", async () => {
+    vi.mocked(antigravityNativePlanUsage).mockResolvedValueOnce(null);
+    const path = antigravityCliTokenPath("antigravity");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, storedStale(), { mode: 0o600 });
+    try {
+      const report = await loadPlanUsage({ accounts: accountOf("antigravity"), now: NOW });
+      expect(report.providers).toEqual([expect.objectContaining({
+        id: "antigravity",
+        name: "Antigravity",
+        driver: "antigravity",
+        ok: false,
+        error: "Could not reach Antigravity",
+      })]);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("still omits a native-CLI account whose sign-in file is gone", async () => {
+    vi.mocked(antigravityNativePlanUsage).mockResolvedValueOnce(null);
+    expect((await loadPlanUsage({ accounts: accountOf("antigravity"), now: NOW })).providers).toEqual([]);
   });
 });

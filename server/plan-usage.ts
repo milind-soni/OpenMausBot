@@ -9,7 +9,7 @@ import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts"; import { chatgptAccountHome, chatgptAccountSignsInByDevice } from "./drivers/codex-account-home.ts";
 import { codexHasCredits } from "./codex-credits.ts";
 import { claudeExtraLabel, claudeModelWindow, claudeScopedWeekly } from "./claude-usage-models.ts";
-import { antigravityNativePlanUsage, antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
+import { fetchAntigravityPlanUsage } from "./drivers/antigravity-plan-usage.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
@@ -896,7 +896,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
-  if (account.driver === "antigravity") { const native = await antigravityRunsNativeCli(account.antigravityCli, { ...process.env, ...account.environment }); const windows = await (native ? antigravityNativePlanUsage(account.id, account.environment, deps) : antigravityPlanUsage(account.id, deps)); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
+  if (account.driver === "antigravity") { const result = await fetchAntigravityPlanUsage(account, deps); return !result ? null : "windows" in result ? okRow(account, result.windows) : errorRow(account, couldNotReach(account.driver)); }
   try {
     credential = await deps.credentials.read(account);
   } catch {
