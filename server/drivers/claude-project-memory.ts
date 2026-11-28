@@ -9,7 +9,7 @@
 // fold without them would leave the CLI attaching the same files too. The user's own scope stays out, as it already is
 // for isolated turns, whose claudeMdExcludes hold out the personal memory and rules: project-only settings still find
 // them via the ancestor walk when a bot lives under HOME, so nothing under the home's .claude folder is folded.
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // Claude Code skips a project memory file over 4 MiB entirely, so a larger file is neither folded nor excluded.
@@ -28,12 +28,23 @@ function isFile(path: string): boolean {
 
 /** The file's text, or null when it cannot serve as project memory: unreadable, or over the size the CLI skips. */
 function memoryText(path: string): string | null {
+  let fd: number | undefined;
   try {
-    const stat = statSync(path);
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const stat = fstatSync(fd);
     if (!stat.isFile() || stat.size > FILE_MAX_BYTES) return null;
-    return readFileSync(path, "utf8").trimEnd();
+    const buffer = Buffer.alloc(stat.size + 1);
+    let used = 0;
+    while (used < buffer.length) {
+      const count = readSync(fd, buffer, used, buffer.length - used, null);
+      if (!count) return buffer.toString("utf8", 0, used).trimEnd();
+      used += count;
+    }
+    return null;
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
