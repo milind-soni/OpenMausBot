@@ -149,7 +149,7 @@ function reopenedNote(reopened: NonNullable<Reopened>, temporary: boolean): stri
   const refs = " Refs from before are gone: take a snapshot before acting on refs.";
   if (reopened.kind === "restart") return `The browser was restarted; this call ran in the fresh browser, on one blank tab.${refs} Check whether an interrupted action already happened before repeating it.`;
   if (reopened.kind === "crash") return `Your browser stopped unexpectedly, and this call started it again.${pages}${refs}`;
-  return `Your browser sat unused and was closed to free memory; this call opened it again.${temporary ? " It is a temporary browser, so its sign-ins are gone too." : pages}${refs}`;
+  return `Your browser sat unused and was closed; this call opened it again.${temporary ? " It is a temporary browser, so its sign-ins are gone too." : pages}${refs}`;
 }
 
 export class BrowserService {

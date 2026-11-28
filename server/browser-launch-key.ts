@@ -8,6 +8,14 @@ import type { BrowserSpawnSpec } from "./browser-runtime.ts";
 const FNM_PER_SHELL = /(?:^|[\\/])fnm_multishells[\\/][^\\/]+(?:[\\/]bin)?[\\/]?$/u;
 const FNM_UNRESOLVED = "fnm-multishell";
 
+export function attachesToChrome(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env.AGENT_BROWSER_CDP || env.AGENT_BROWSER_AUTO_CONNECT);
+}
+
+export function ownsBrowserViewport(env: NodeJS.ProcessEnv): boolean {
+  return env.AGENT_BROWSER_HEADLESS === "1" && !attachesToChrome(env);
+}
+
 function fnmTarget(entry: string): string {
   try { return realpathSync.native(entry); }
   catch { return FNM_UNRESOLVED; }

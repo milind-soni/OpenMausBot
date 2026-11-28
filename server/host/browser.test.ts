@@ -695,6 +695,34 @@ describe("a running turn's agent-browser browser", () => {
     }
   });
 
+  it.each([true, false])("keeps watched desktop tabs past the idle cutoff (used by a bot: %s)", async (usedByBot) => {
+    ready();
+    const session = "bot-scout";
+    const { host } = setup(undefined);
+    daemons([session]);
+    const closing = vi.spyOn(BrowserRuntime.prototype, "closeIfIdle");
+    await host.browserRuntime.closeIfIdle(session, HOUR * 1_000, keepsSignIns);
+    const agentBrowser = closing.mock.contexts[0] as BrowserRuntime;
+    closing.mockRestore();
+    if (usedByBot) host.usedBrowserSessions.set(session, keepsSignIns);
+    const unwatch = agentBrowser.watch(session, keepsSignIns);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    anHourLater();
+    try {
+      host.browserSweep.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runningBrowserSessionNames).toHaveBeenCalled();
+      expect(closedSessions()).toEqual([]);
+      unwatch();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(closedSessions()).toEqual([session]);
+    } finally {
+      unwatch();
+      await host.browserSweep.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
   it("is closed for a bot waiting on a full limit only once it sat unused for the idle time and keeps its sign-ins", async () => {
     ready();
     const { host } = setup(undefined, { cloudHome: true, turnResources: holding(["bot-a", "bot-t"]), browsersAtOnce: () => 2 });

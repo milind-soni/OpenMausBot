@@ -383,7 +383,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     engine: () => { const engine = browserEngineStatus(); return engine.kind === "ready" ? engine.binaryPath : null; },
     owns: (session) => belongs(session) || (Boolean(CLOUD_HOME) && BOT_SESSION.test(session)),
     live: (session) => usedBrowserSessions.has(session) && belongs(session),
-    held: (session) => !turnResources.free(`browser:${session}`),
+    held: (session) => !turnResources.free(`browser:${session}`) || (DESKTOP_MANAGED && agentBrowserRuntime.watched(session)),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
   // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and

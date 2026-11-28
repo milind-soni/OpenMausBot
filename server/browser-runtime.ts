@@ -6,7 +6,8 @@ import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
-import { launchSettingsKey } from "./browser-launch-key.ts";
+import { attachesToChrome, launchSettingsKey } from "./browser-launch-key.ts";
+export { attachesToChrome, ownsBrowserViewport } from "./browser-launch-key.ts";
 import { refusedSlot, SharedToolLists, slotRefusal, type BrowserRoom } from "./browser-room.ts";
 
 export interface BrowserSpawnSpec {
@@ -49,7 +50,7 @@ const RELAYED_TOOL_SPECS = [
 type RelayedToolSpec = (typeof RELAYED_TOOL_SPECS)[number];
 const RELAYED_TOOLS: ReadonlyMap<string, RelayedToolSpec> = new Map(RELAYED_TOOL_SPECS.map((spec) => [spec.name, spec]));
 const BROWSER_INTERRUPTED = `The browser engine is stuck. Press Restart in the Browser panel, or call ${BROWSER_RESTART_TOOL}, before using browser tools again.`;
-const idleClosedNote = (saves: boolean) => `Your browser sat unused and was closed to free memory; this call opened it again. Pages you had open are gone (${saves ? "saved sign-ins are kept" : "it is a temporary browser, so its sign-ins are gone too"}), so open the page you need again before using earlier @eN refs.`;
+const idleClosedNote = (saves: boolean) => `Your browser sat unused and was closed; this call opened it again. Pages you had open are gone (${saves ? "saved sign-ins are kept" : "it is a temporary browser, so its sign-ins are gone too"}), so open the page you need again before using earlier @eN refs.`;
 const PERSON_RESTARTED = "The person restarted your browser from the Browser panel; this call ran in the fresh browser. Pages you had open are gone, so open the page you need again before using earlier @eN refs, and check whether an interrupted action already happened before repeating it.";
 const LANE_BUSY = "Your previous browser call is still running; wait for it to finish, then call again.";
 /** One bot call, lane wait included, answers within `callBudgetMs`; the engine's action keeps `followUpReserveMs` of it for the reads after. */
@@ -70,14 +71,6 @@ const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Pat
 export function browserRuntimeEnv(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
   const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   return { ...env, ...overrides };
-}
-
-export function attachesToChrome(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(env.AGENT_BROWSER_CDP || env.AGENT_BROWSER_AUTO_CONNECT);
-}
-
-export function ownsBrowserViewport(env: NodeJS.ProcessEnv): boolean {
-  return env.AGENT_BROWSER_HEADLESS === "1" && !attachesToChrome(env);
 }
 
 export class TransportError extends Error {}
@@ -348,7 +341,7 @@ export class BrowserRuntime {
   readonly pageSizes = new PageSizes({
     apply: (session, size) => { const spec = this.gates.get(session)?.spec; return spec && this.applyViewport ? this.applyViewport(spec, size) : Promise.resolve(); },
     lane: (session, work) => this.lanes.run(session, work, this.options.laneWaitMs),
-    watched: (session) => { const gate = this.gates.get(session); return Boolean(gate && gate.watchers > 0 && !gate.closing); },
+    watched: (session) => this.watched(session),
   });
   private holds = new SecretHolds((session, clear) => this.lanes.run(session, () => this.agentAction(session, clear, false), this.options.laneWaitMs).then((ran) => ran !== null));
   /** Strips held secrets (a filled password, a one-time code) from every tool result before the bot reads it. */
@@ -826,6 +819,7 @@ export class BrowserRuntime {
     };
   }
 
+  watched(session: string): boolean { const gate = this.gates.get(session); return Boolean(gate && gate.watchers > 0 && !gate.closing); }
   async settled(session: string): Promise<void> { await this.gates.get(session)?.idleClose; }
 
   /** A bot call, a person's action or hold, or a close is under way in this session's browser. */

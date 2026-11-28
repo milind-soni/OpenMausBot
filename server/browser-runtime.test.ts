@@ -660,6 +660,7 @@ describe("server-owned browser MCP runtime", () => {
     expect(closeBrowser).toHaveBeenCalledWith("s", expect.objectContaining({ command: process.execPath }));
     const next = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "again" } }) as { content: Array<{ text: string }> };
     expect(next.content[0].text).toMatch(/sat unused and was closed.*saved sign-ins are kept/);
+    expect(next.content[0].text).not.toContain("to free memory");
     expect(next.content[1].text).toContain("again");
     const after = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "third" } }) as { content: Array<{ text: string }> };
     expect(after.content.map((part) => part.text).join("\n")).not.toMatch(/sat unused/);
