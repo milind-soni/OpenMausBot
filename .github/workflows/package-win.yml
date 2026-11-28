@@ -73,6 +73,15 @@ jobs:
           [ -f "$res/server/index.js" ] || { echo "::error::missing $res/server/index.js"; fail=1; }
           # missing → the desktop falls back to index.js with no compile cache
           [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing $res/server/desktop-entry.mjs"; fail=1; }
+          # package.json "main" is electron/boot.mjs, which loads main.mjs: a missing or broken entry
+          # inside app.asar is an app that never opens. The packed exe reads its own asar as Node.
+          exe=release/win-unpacked/OpenMausBot.exe
+          for entry in boot.mjs main-compile-cache.mjs main.mjs; do
+            ELECTRON_RUN_AS_NODE=1 "$exe" --check "$res/app.asar/electron/$entry" || {
+              echo "::error::app.asar/electron/$entry is missing or does not parse"; fail=1; }
+          done
+          main=$(ELECTRON_RUN_AS_NODE=1 "$exe" -p "require(process.argv[1]).main" "$res/app.asar/package.json")
+          [ "$main" = "electron/boot.mjs" ] || { echo "::error::app.asar package.json main is '$main'"; fail=1; }
           # missing → the server has nothing to serve → black window
           [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || {

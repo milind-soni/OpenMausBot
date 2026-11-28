@@ -6,17 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BotLibrary } from "../../../shared/bot-library";
 import type { Bot, Message } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), opened: [] as string[], skills: [] as unknown[], skillBurger: true }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), opened: [] as string[] }));
 vi.mock("@/state/store-select", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store-select")>(),
   useStoreDispatch: () => fixture.dispatch,
 }));
-vi.mock("./use-memory-doc", () => ({ useMemoryDoc: () => ({ docs: null, error: false }) }));
-vi.mock("../bot-settings/SkillsSection", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../bot-settings/SkillsSection")>(),
-  useManagedSkills: () => ({ skills: fixture.skills, loading: false }),
-}));
-vi.mock("@/lib/use-feature", () => ({ useFeature: () => fixture.skillBurger }));
 vi.mock("@/lib/page-open", () => ({ usePageOpener: () => (url: string) => fixture.opened.push(url) }));
 
 const { LibraryTab, LIBRARY_SHOWN } = await import("./LibraryTab");
@@ -47,8 +41,6 @@ let root: Root;
 beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.opened.length = 0;
-  fixture.skills = [];
-  fixture.skillBurger = true;
   requests.length = 0;
   library = {
     pages: [
@@ -81,7 +73,7 @@ afterEach(() => {
 const settle = () => act(async () => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const rows = (kind: string) => [...host.querySelectorAll<HTMLElement>(`[data-panel-row="${kind}"]`)];
 const render = async (bot: Bot) => {
-  await act(async () => root.render(createElement(LibraryTab, { bot, onOpen: () => {} })));
+  await act(async () => root.render(createElement(LibraryTab, { bot })));
   await settle();
 };
 
@@ -96,7 +88,7 @@ it("lists what the bot made in every conversation, newest first, each with the c
   expect(files).toContain("Old notes");
   expect(host.textContent).not.toContain("Gone page");
   expect(host.textContent).not.toContain("From this conversation");
-  expect(host.querySelector('[data-panel-page="memory"]')).not.toBeNull();
+  expect(host.querySelector("[data-panel-page]")).toBeNull();
 });
 
 it("opens a page by its link, and an app from another conversation at its message there", async () => {
@@ -132,17 +124,4 @@ it("shows the newest few of a long group, then Show all opens the rest in place"
   expect(rows("app")).toHaveLength(30);
   expect(host.querySelector('[data-library-more="apps"]')).toBeNull();
   expect(host.querySelector('[data-library-more="pages"]')).toBeNull();
-});
-
-it("counts a saved Skill Burger among the bot's skills only while Skill Burger is on", async () => {
-  fixture.skills = [
-    { name: "weekly-report", source: "skill-burger:scout", enabled: true },
-    { name: "tidy-notes", source: "conversation", enabled: true },
-  ];
-  await render(makeBot());
-  expect(host.querySelector('[data-panel-page="skills"]')!.textContent).toContain("2");
-  fixture.skillBurger = false;
-  await render(makeBot());
-  expect(host.querySelector('[data-panel-page="skills"]')!.textContent).toContain("1");
-  expect(host.querySelector('[data-panel-page="skills"]')!.textContent).not.toContain("2");
 });

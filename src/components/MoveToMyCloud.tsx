@@ -7,8 +7,10 @@ import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
 import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
 import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
+import { useListedOnMyCloud } from "@/lib/place-rows";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useMoveChanges } from "./MoveChanges";
 import { NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 
 type MenuItem = (icon: ReactNode, label: string, onClick?: () => void, opts?: { disabled?: boolean; hint?: string }) => ReactNode;
@@ -30,6 +32,8 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const found = useMemo(() => filterBots(bots ?? [], query), [bots, query]);
+  const chosenIds = useMemo(() => (bots ?? []).filter((bot) => chosen.has(bot.id)).map((bot) => bot.id), [bots, chosen]);
+  const changes = useMoveChanges(chosenIds, chosenIds.length === 1 ? (bots ?? []).find((bot) => bot.id === chosenIds[0])?.name ?? null : null);
   const allFound = found.length > 0 && found.every((bot) => chosen.has(bot.id));
   useEffect(() => {
     root.current?.querySelector<HTMLElement>("input")?.focus();
@@ -56,7 +60,7 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
   const page = bridge();
   return createPortal(<div className="ui-scrim fixed inset-0 z-[80] flex items-center justify-center p-4">
     <div ref={root} role="dialog" aria-modal="true" aria-labelledby="move-chooser-title" data-move-chooser=""
-      className="ui-modal relative flex max-h-[min(640px,calc(100dvh-32px))] w-[min(440px,calc(100vw-32px))] flex-col border-0 p-5 text-ink">
+      className={`ui-modal relative flex max-h-[min(640px,calc(100dvh-32px))] w-[min(440px,calc(100vw-32px))] flex-col border-0 p-5 text-ink${changes.view ? " overflow-y-auto" : ""}`}>
       <h2 id="move-chooser-title" className="pe-8 text-[17px] font-semibold">{t("cloudSend.choose.title")}</h2>
       <p className="mt-1 text-[14px] leading-5 text-ink-secondary">{t("cloudSend.choose.line")} {t("cloudSend.dataStays")}</p>
       <button type="button" disabled={busy} data-move-everything="" className={`${PRIMARY_BUTTON} mt-4 w-full justify-center`}
@@ -68,7 +72,8 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
           {t(allFound ? "cloudSend.choose.clear" : "cloudSend.choose.selectAll")}
         </button>
       </div>
-      <ul className="mt-2 min-h-[120px] flex-1 overflow-y-auto rounded-md border border-hairline" data-move-bots="">
+      {/* With what changes below it, the dialog scrolls as one, so the grants are read before Move. */}
+      <ul className={`mt-2 min-h-[120px] overflow-y-auto rounded-md border border-hairline ${changes.view ? "max-h-[240px] flex-none" : "flex-1"}`} data-move-bots="">
         {found.slice(0, shown).map((bot) => {
           const on = chosen.has(bot.id);
           return <li key={bot.id}>
@@ -84,8 +89,9 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
         </button></li>}
       </ul>
       <p className="mt-2 text-[12px] text-ink-tertiary">{t("cloudSend.choose.rooms")}</p>
+      {changes.view && <div data-move-chooser-changes="" className="mt-2 flex-none text-[13px] leading-5 text-ink-secondary">{changes.view}</div>}
       {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
-      <button type="button" disabled={busy || !chosen.size} data-move-chosen="" className="ui-button mt-3 w-full justify-center py-1.5 text-[14px]" onClick={() => go(page?.moveBots && (() => page.moveBots!([...chosen])))}>
+      <button type="button" disabled={busy || !chosen.size} data-move-chosen="" className="ui-button mt-3 w-full justify-center py-1.5 text-[14px]" onClick={() => go(page?.moveBots && (() => page.moveBots!([...chosen], changes.choice ?? undefined)))}>
         {busy && <Loader2 size={14} aria-hidden="true" className="me-1.5 animate-spin" />}
         {chosen.size === 1 ? t("cloudSend.choose.moveOne") : t("cloudSend.choose.moveSome", { count: chosen.size })}
       </button>
@@ -114,6 +120,7 @@ function useBotMoveState(): BotMoveState | null {
 export function useMoveToMyCloud() {
   const known = useBotMoveState();
   const [asked, setAsked] = useState<Bot | null>(null);
+  const changes = useMoveChanges(asked ? [asked.id] : [], asked?.name ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = () => {
@@ -121,7 +128,7 @@ export function useMoveToMyCloud() {
     if (!asked || !page?.moveBots) return;
     setBusy(true);
     setError(null);
-    void page.moveBots([asked.id]).then(() => setAsked(null), (cause: unknown) => setError(ipcErrorText(cause) ?? t("cloudSend.choose.failed"))).finally(() => setBusy(false));
+    void page.moveBots([asked.id], changes.choice ?? undefined).then(() => setAsked(null), (cause: unknown) => setError(ipcErrorText(cause) ?? t("cloudSend.choose.failed"))).finally(() => setBusy(false));
   };
   const names = { bot: asked?.name ?? "" };
   return {
@@ -131,7 +138,8 @@ export function useMoveToMyCloud() {
     },
     dialog: <ConfirmDialog open={asked !== null} tone="neutral" icon={<Cloud size={18} />} title={t("cloudSend.botMove.confirmTitle", names)}
       body={<span className="flex flex-col gap-2" data-bot-move-confirm="">
-        <span>{t("cloudSend.botMove.confirmBody", names)} {t("cloudSend.botMove.dataStays", names)}</span>
+        <span>{t("cloudSend.botMove.goes", names)} {t("cloudSend.botMove.dataStays", names)}</span>
+        {changes.view}
         {error && <span role="alert" className="text-danger">{error}</span>}
       </span>}
       confirmLabel={t("cloudSend.botMove.confirm")} pending={busy} onCancel={() => setAsked(null)} onConfirm={confirm} />,
@@ -140,7 +148,9 @@ export function useMoveToMyCloud() {
 
 /** The one row the bots that moved to My Cloud leave in the sidebar: however many there are, it opens My Cloud. */
 export function MovedToMyCloudRow({ bots }: { bots: readonly Bot[] }) {
-  const moved = bots.filter((bot) => bot.movedTo?.state === "moved" && bot.movedTo.team.id === MY_CLOUD_TEAM);
+  // With the one list on, a bot that moved and that My Cloud's rows already list (it keeps its id there) is not said twice.
+  const listed = useListedOnMyCloud();
+  const moved = bots.filter((bot) => bot.movedTo?.state === "moved" && bot.movedTo.team.id === MY_CLOUD_TEAM && !listed.has(bot.id));
   if (!moved.length) return null;
   const page = bridge();
   return <div className="flex flex-col px-2 pb-1">
@@ -160,6 +170,7 @@ export function BotMoveLine({ move, onChange }: { move: BotMoveView; onChange(ne
   return <div role="status" data-cloud-send-strip={line.kind} data-bot-move-line={move.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {line.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{line.text}</span>
+    {move.commandsError && <span dir="auto" role="alert" data-bot-move-commands-failed="" className="text-danger">{t("cloudSend.botMove.commandsFailed", { error: move.commandsError })}</span>}
     {line.kind === "done" && page?.openMyCloud && <button type="button" className={link} onClick={() => { void page.openMyCloud!().catch(() => {}); }}>{t("cloudSend.botMove.open")}</button>}
     {line.kind === "failed" && page?.botMoveRetry && <button type="button" className={link} onClick={() => { void page.botMoveRetry!().then(onChange).catch(() => {}); }}>{t("cloudSend.strip.retry")}</button>}
     {line.kind !== "sending" && <button type="button" className="hover:text-ink" onClick={() => { void page?.dismiss("bot-move").then(() => onChange(null)).catch(() => {}); }}>{t("cloudSend.strip.close")}</button>}

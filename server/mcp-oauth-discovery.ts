@@ -10,6 +10,8 @@ export interface McpAuthMetadata {
   registrationEndpoint?: string;
   revocationEndpoint?: string;
   scopes?: string[];
+  /** The server takes a client ID metadata document (an https URL naming the app) instead of registering apps. */
+  clientIdMetadataDocument?: true;
   /** RFC 8414 `token_endpoint_auth_methods_supported`; absent means client_secret_basic. */
   tokenEndpointAuthMethods?: string[];
   /** The MCP URL, sent as the RFC 8707 `resource` so tokens are audience-bound. */
@@ -212,6 +214,7 @@ export async function discoverMcpAuth(
     authorizationEndpoint,
     tokenEndpoint,
     ...(registrationEndpoint ? { registrationEndpoint } : {}),
+    ...(metadata.client_id_metadata_document_supported === true ? { clientIdMetadataDocument: true as const } : {}),
     ...(revocationEndpoint ? { revocationEndpoint } : {}),
     ...(scopes?.length ? { scopes } : {}),
     ...(tokenEndpointAuthMethods?.length ? { tokenEndpointAuthMethods } : {}),

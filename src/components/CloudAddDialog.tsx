@@ -12,6 +12,7 @@ import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-loo
 import { blockedProblem, cloudAddView, offerPlan, sameTerms, startedSleeps, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { welcomeOnScreen } from "@/lib/onboarding";
+import { hasBotsHere } from "@/lib/move-changes";
 import { useStore } from "@/state/store";
 import { AddCloudFlow } from "./cloud-buy/AddCloudFlow";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
@@ -57,6 +58,8 @@ export interface CloudAddActions {
  * `current` is the tier of the plan this account already has, from its verified entitlement. */
 export interface CloudAddUi {
   chosen: string | null; current: string | null; offerShown: CloudOffer | null; now: number; busy: boolean; openFailed: boolean;
+  /** This computer's page, with bots of its own: the offer says a bot lives in one place. */
+  botsHere?: boolean;
   email: string; code: string; profileEmail: string | null;
   look: { typed: string; name: string; color: CloudColor };
   counting: number | null; copied: boolean; payFailed: boolean; interest: "sent" | "failed" | null;
@@ -68,7 +71,7 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
     case "unreachable": return <StatusScreen kind="unreachable" line={t("cloudAdd.unreachable")} onRetry={actions.retry} onClose={actions.close} />;
     case "error": return <StatusScreen kind={`error-${view.reason}`} line={t(view.reason === "rate-limited" ? "cloudAdd.rateLimited" : "cloudAdd.failed")}
       onRetry={actions.retry} onClose={actions.close} />;
-    case "offer": return <ChooseScreen offer={view.offer} current={ui.current} now={ui.now} busy={ui.busy} signedOut={view.signedOut}
+    case "offer": return <ChooseScreen offer={view.offer} current={ui.current} now={ui.now} busy={ui.busy} signedOut={view.signedOut} botsHere={ui.botsHere === true}
       notice={view.notice ? t(view.notice === "code-expired" ? "cloudAdd.codeExpired" : view.notice === "signin-ended" ? "cloudAdd.signInEnded"
         : view.notice === "terms" ? "cloudBuy.termsChanged" : "cloudAdd.preparing") : null}
       onStart={actions.start} onSignIn={actions.signIn} />;
@@ -385,7 +388,8 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     },
     close,
   };
-  const ui: CloudAddUi = { chosen, current: currentTier(account), offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
+  const ui: CloudAddUi = { chosen, current: currentTier(account), offerShown, now: now(), busy, openFailed,
+    botsHere: hasBotsHere({ bots: state.bots, cloudHome: state.config?.cloudHome === true, desktop: Boolean(window.ogb), remote: window.ogb?.remoteClient?.active === true }), email: form.email, code: form.code, profileEmail, look: shownLook,
     counting: typeof auto === "number" ? auto : null, copied: note === "copied", payFailed: note === "pay-failed",
     interest: note === "interest-sent" ? "sent" : note === "interest-failed" ? "failed" : null };
   return <CloudAddSheet kind={view.kind} staging={account?.staging === true} onClose={close}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet>;

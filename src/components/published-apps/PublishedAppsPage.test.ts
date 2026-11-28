@@ -45,9 +45,14 @@ let host: HTMLElement;
 let apps: PublishedApp[];
 let included: { used: number; max: number } | undefined;
 let deleteAnswer: () => Promise<unknown>;
+/** The apps saved on this computer: the page shows one empty state when there are none and nothing is published. */
+let saved: unknown[] = [];
+const SAVED = { id: "la_saved0000000000000", name: "Sales board", botId: "mira", bot: { name: "Mira", color: "blue" }, threadId: "main", messageId: "m1",
+  versions: [{ rev: 0, at: 1 }], rev: 0, createdAt: 1, updatedAt: 1, manifest: { name: "Sales board" }, chat: true };
 const deletes: string[] = [];
 
 beforeEach(() => {
+  saved = [];
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   apps = [SITE, PAGE, TEAM_ONLY, ORPHAN];
   included = undefined;
@@ -59,6 +64,7 @@ beforeEach(() => {
   fixture.api.mockReset();
   fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
     if (path === "/api/published-apps") return { apps, ...(included ? { included } : {}) };
+    if (path === "/api/local-apps") return { apps: saved };
     if (path === "/api/published-apps/delete" && init?.method === "POST") {
       const { id } = JSON.parse(init.body!) as { id: string };
       deletes.push(id);
@@ -81,8 +87,18 @@ const button = (within: ParentNode, name: string) => [...within.querySelectorAll
 const dialog = () => document.body.querySelector<HTMLElement>('[role="alertdialog"]');
 
 describe("the Published apps page", () => {
+  it("says in one empty state how to get the first app when nothing is saved or published", async () => {
+    apps = [];
+    saved = [];
+    await show();
+    expect(host.querySelector("[data-apps-empty]")?.textContent).toContain("No apps yet");
+    expect(host.textContent).not.toContain("Nothing published yet");
+    expect(host.querySelectorAll("[data-apps-empty], [data-local-apps-empty]")).toHaveLength(1);
+  });
+
   it("says what it is for and how to get the first app when nothing is published", async () => {
     apps = [];
+    saved = [SAVED];
     await show();
     expect(host.querySelector("h1")?.textContent).toBe("Published apps");
     expect(host.textContent).toContain("Nothing published yet");
@@ -198,7 +214,12 @@ describe("the Published apps page", () => {
   });
 
   it("says the list could not be loaded and loads it on Try again", async () => {
-    fixture.api.mockRejectedValueOnce(new Error("offline"));
+    const answer = fixture.api.getMockImplementation()!;
+    let failed = false;
+    fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
+      if (path === "/api/published-apps" && !failed) { failed = true; throw new Error("offline"); }
+      return answer(path, init);
+    });
     await show();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("Your published apps couldn't be loaded.");
     await act(async () => button(host, "Try again").click());
@@ -274,6 +295,7 @@ describe("apps on the hosting the Cloud plan includes", () => {
 
   it("keeps the count beside the empty page, so a new plan says what it includes", async () => {
     apps = [];
+    saved = [SAVED];
     included = { used: 0, max: 5 };
     await show();
     expect(host.querySelector("[data-included-apps]")?.textContent).toBe("0 of 5 apps included in your plan");

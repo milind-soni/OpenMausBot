@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PHONE_ACTIVITY_RELAY_PATH, PHONE_PUSH_RELAY_PATHS } from "../shared/phone-push.ts";
+import { cloudHomeConfiguration } from "./cloud-home.ts";
 import { CLOUD_HOME_PUSH_ACTIONS, cloudHomePushAccess, cloudHomePushRequest, cloudHomePushSignature } from "./phone-push-admin.ts";
-import { PhonePush, PhonePushAccessSource, RELAY_UNAVAILABLE_PAUSE_MS, type PhonePushOptions } from "./phone-push.ts";
+import { PhonePush, PhonePushAccessSource, RELAY_UNAVAILABLE_PAUSE_MS, phonePushEnabled, type PhonePushOptions } from "./phone-push.ts";
 
 /** The bodies and the signature vector the Admin's tests read from their own copy of this file (openmaus-cloud
  * tests/fixtures/cloud-home-push.json): both copies must hash to this. */
@@ -167,6 +168,46 @@ describe("a Cloud home's pushes through its Admin", () => {
     }
   });
 
+  it("tells its phones `off` while the Admin refuses (switch off, or no relay), and `on` again once it takes them", async () => {
+    for (const refusal of [{ status: 404, error: "Not found." }, { status: 503, error: "push_unavailable" }]) {
+      const { push, admin } = harness();
+      admin.answers.push(refusal);
+      // Refused at registration: the phone hears `off` (its "hasn't turned on" line) and registers again at its next sync.
+      expect(await push.register(PHONE, { platform: "apns", token: APNS })).toMatchObject({ push: "off", relay: "pending" });
+      expect(push.status()).toBe("off");
+      expect((await push.register(PHONE, { platform: "apns", token: APNS })).push).toBe("off");
+      push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+      await push.flush();
+      expect(admin.calls).toHaveLength(1);
+      await advance(push, RELAY_UNAVAILABLE_PAUSE_MS);
+      expect(push.status()).toBe("on");
+      expect(await push.register(PHONE, { platform: "apns", token: APNS })).toMatchObject({ push: "on", relay: "registered" });
+      rmSync(join(dataDir, "push-devices.json"), { force: true });
+    }
+    // Refused while sending: the same.
+    const { push, admin } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    admin.answers.push({ status: 404, error: "Not found." });
+    push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+    await push.flush();
+    expect(push.status()).toBe("off");
+    // A lost token (404 push_device_unknown) is not a refusal.
+    const other = harness();
+    await other.push.register(PHONE, { platform: "apns", token: APNS });
+    other.admin.answers.push({ status: 404, error: "push_device_unknown" });
+    other.push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+    await other.push.flush();
+    expect(other.push.status()).toBe("on");
+  });
+
+  it("an installation's refusal leaves the answer `on`: its relay's switch is the control plane's, as before", async () => {
+    const credential = { controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL };
+    const { push, admin } = harness({ access: () => credential });
+    admin.answers.push({ status: 503, error: "push_unavailable" });
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    expect(push.status()).toBe("on");
+  });
+
   it("registers again and retries once when the control plane has lost the token", async () => {
     const { push, admin } = harness();
     await push.register(PHONE, { platform: "apns", token: APNS });
@@ -174,6 +215,15 @@ describe("a Cloud home's pushes through its Admin", () => {
     push.offer({ notification: notification(), seq: 1 }, everyone);
     await push.flush();
     expect(admin.calls.slice(1).map((call) => call.url.split("/").at(-1))).toEqual(["send", "register", "send"]);
+  });
+
+  it("on by default with no phone paired: asks the Admin nothing and sets no timer, however many alerts go by", async () => {
+    const { push, admin } = harness({ enabled: () => phonePushEnabled({}, {}) });
+    expect(push.status()).toBe("on");
+    for (const threadId of ["th_1", "th_2", "th_3"]) push.offer({ notification: notification(threadId), seq: 1 }, everyone);
+    await advance(push, 60 * 60_000);
+    expect(admin.calls).toEqual([]);
+    expect(timers).toEqual([]);
   });
 
   it("switched off, keeps nothing and asks the Admin nothing", async () => {
@@ -201,5 +251,16 @@ describe("which transport a server uses", () => {
     expect(source({}, HOME)).toEqual({ controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL });
     writeFileSync(tunnelFile(), JSON.stringify({}));
     expect(source({}, HOME)).toEqual({ admin: ADMIN, machineId: MACHINE, secret: SECRET });
+  });
+
+  it("is the Admin for a Team Cloud as for a My Cloud, with the home's own machine id", () => {
+    const secret = "s".repeat(43);
+    const env = { OMB_CLOUD_MACHINE_ID: MACHINE, OMB_CLOUD_ADMIN_URL: ADMIN, OMB_PUBLIC_URL: "https://omb-t-1.fly.dev", OMB_CLOUD_BOOTSTRAP_SECRET: secret };
+    const mine = cloudHomeConfiguration({ ...env, OMB_CLOUD_ROLE: "home" });
+    const team = cloudHomeConfiguration({ ...env, OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-1", OMB_CLOUD_TEAM_NAME: "Acme" });
+    expect(team?.team).toEqual({ id: "team-1", name: "Acme" });
+    for (const home of [mine, team]) expect(source({}, home)).toEqual({ admin: ADMIN, machineId: MACHINE, secret });
+    // A self-run server with no Admin and no credential has nothing to push as: it answers no-account and calls nobody.
+    expect(source({}, null)).toBeNull();
   });
 });

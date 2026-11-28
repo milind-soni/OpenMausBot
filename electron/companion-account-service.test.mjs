@@ -1468,7 +1468,7 @@ describe("Companion account on demand", () => {
       expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
       expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
 
-      // Nobody opens Phone & devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
+      // Nobody opens Devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
       for (let tick = 2; tick <= 5; tick += 1) {
         f.clock.now += HOUR_MS;
         await f.watchdog();
@@ -1572,6 +1572,68 @@ describe("Companion account on demand", () => {
       });
       f.service.dispose();
     }
+  });
+
+  it("finishes a sign-in that stored no installation credential, so the relay token can be asked for again", async () => {
+    const unfinished = signedCredentials();
+    for (const field of [...ADDRESS_FIELDS, COMPANION_INSTALLATION_ID_FIELD, COMPANION_INSTALLATION_CREDENTIAL_FIELD, COMPANION_INSTALLATION_EXPIRY_FIELD]) {
+      delete unfinished[field];
+    }
+    const installationChanged = vi.fn();
+    const f = onDemandFixture({ initial: unfinished, installationChanged });
+
+    // The relay token's fetch reads this field (electron/companion-e2e-desktop.mjs, server/phone-relay.ts):
+    // until it exists, every fetch answers signed_out.
+    expect(f.store.read()[COMPANION_INSTALLATION_CREDENTIAL_FIELD]).toBeUndefined();
+    await expect(f.service.restore()).resolves.toMatchObject({ status: "ready", email: "ada@example.com" });
+    expect(f.client.ensureInstallation).toHaveBeenCalledOnce();
+    expect(f.client.ensureEndpoint).not.toHaveBeenCalled();
+    expect(f.store.read()[COMPANION_INSTALLATION_ID_FIELD]).toBe(INSTALLATION_ID);
+    expect(f.store.read()[COMPANION_INSTALLATION_CREDENTIAL_FIELD]).toBe(INSTALLATION_CREDENTIAL);
+    // A new credential is what the relay token service waits for: it fetches again without a restart.
+    expect(installationChanged).toHaveBeenCalledOnce();
+
+    // Once stored, nothing re-provisions: the watchdog's ticks leave the healed state alone.
+    for (let tick = 0; tick < 3; tick += 1) {
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+    }
+    expect(f.client.ensureInstallation).toHaveBeenCalledOnce();
+    f.service.dispose();
+  });
+
+  it("keeps finishing an unfinished sign-in on the watchdog until the installation credential is stored", async () => {
+    const unfinished = signedCredentials();
+    for (const field of [...ADDRESS_FIELDS, COMPANION_INSTALLATION_ID_FIELD, COMPANION_INSTALLATION_CREDENTIAL_FIELD]) {
+      delete unfinished[field];
+    }
+    let attempts = 0;
+    const client = readyClient({
+      ensureInstallation: vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new ControlPlaneError("network_unavailable", 503);
+        return {
+          installation: { id: INSTALLATION_ID, clientInstanceId: UUID, name: "Test Mac", platform: "darwin" },
+          credential: INSTALLATION_CREDENTIAL,
+          credentialExpiresAt: LAUNCH_AT + 10_000,
+        };
+      }),
+    });
+    const f = onDemandFixture({ initial: unfinished, client });
+
+    await f.service.restore();
+    expect(attempts).toBe(1);
+    // The transient failure scheduled a retry; the watchdog does not stomp on a pending one.
+    await f.watchdog();
+    expect(attempts).toBe(1);
+    // The scheduled retry gives up (no saved address to keep serving); the next tick finishes the provisioning.
+    await f.retryTimer();
+    expect(attempts).toBe(1);
+    await f.watchdog();
+    expect(attempts).toBe(2);
+    expect(f.store.read()[COMPANION_INSTALLATION_CREDENTIAL_FIELD]).toBe(INSTALLATION_CREDENTIAL);
+    expect(await f.service.state()).toMatchObject({ status: "ready", email: "ada@example.com" });
+    f.service.dispose();
   });
 
   it("gives an address nothing needs back one to four hours later, connector first", async () => {

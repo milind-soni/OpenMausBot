@@ -158,7 +158,7 @@ export async function logoutVerb(ctx: VerbContext): Promise<VerbOutcome> {
   return {
     result: { ok: true, signedOut: name, url: server.url, sessionEnded: ended },
     exitCode: EXIT.done,
-    human: [`Signed out of "${server.label}" (${server.url}).${ended ? "" : " The server could not be reached, so its session ends on its own date; Settings → Phone & devices removes it now."}`],
+    human: [`Signed out of "${server.label}" (${server.url}).${ended ? "" : " The server could not be reached, so its session ends on its own date; Settings → Devices removes it now."}`],
   };
 }
 

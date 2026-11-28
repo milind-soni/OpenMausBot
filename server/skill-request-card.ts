@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { redactSecretsInText } from "./redact.ts";
-import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { fetchSkillFromSource, type SkillImportSignIn } from "./skill-fetch.ts";
 import { isSkillReferencePath, MAX_SKILL_REFERENCES, STAGED_SKILL_REFERENCE_MAX_BYTES } from "./skill-storage.ts";
 import { listSkills, readSkillFile, readSkillReferences, STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -56,11 +56,16 @@ export function parseSkillManageReferences(value: unknown): SkillFile[] | { erro
  * the person's computer) and turn it into a create request, so it gets the same card, scan and name checks as one the
  * bot wrote. Only SKILL.md and its references/<topic>.md files come in; the card says what was left behind.
  */
-export async function importedSkillRequest<T extends Record<string, unknown>>(body: T, fetcher: typeof fetch = fetch, cancel?: AbortSignal): Promise<T | { importError: string }> {
+export async function importedSkillRequest<T extends Record<string, unknown>>(
+  body: T,
+  fetcher: typeof fetch = fetch,
+  cancel?: AbortSignal,
+  authorization?: () => Promise<SkillImportSignIn>,
+): Promise<T | { importError: string }> {
   if (body.action !== "import") return body;
   const source = typeof body.source === "string" ? body.source.trim() : "";
   if (!source) return { importError: "skill_manage import needs source: owner/repo, a GitHub link to a skill folder or its SKILL.md, or a skills.sh link." };
-  const fetched = await fetchSkillFromSource(source, fetcher, cancel);
+  const fetched = await fetchSkillFromSource(source, fetcher, cancel, authorization);
   if ("error" in fetched) return { importError: `Could not import a skill from ${source}: ${fetched.error}` };
   if (fetched.skills.length !== 1) {
     const names = fetched.skills.map((skill) => skill.source.split("/").pop()).join(", ");

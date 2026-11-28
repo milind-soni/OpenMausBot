@@ -74,6 +74,10 @@ describe("the sign-in link and code checks", () => {
     expect(claudeLoginCode("  GOODCODE#abc ")).toBe("GOODCODE#abc");
     expect(claudeLoginCode("short")).toBeNull();
     expect(claudeLoginCode("has spaces in it here")).toBeNull();
+    // The login code Claude emails belongs on Claude's page, not here.
+    expect(claudeLoginCode("085764")).toBeNull();
+    expect(claudeLoginCode("08576412")).toBeNull();
+    expect(claudeLoginCode("085764123")).toBe("085764123");
   });
 });
 
@@ -136,7 +140,8 @@ describe("Claude server-owned sign-in", () => {
   it("reports a rejected code without keeping the process, and refuses malformed codes before sending", async () => {
     const controller = create();
     const start = await controller.start();
-    await expect(controller.complete(start.flowId!, "bad")).rejects.toThrow(/whole code/);
+    await expect(controller.complete(start.flowId!, "bad")).rejects.toThrow(/login code Claude emails you, enter it on Claude's page, click Authorize/);
+    await expect(controller.complete(start.flowId!, "08576412")).rejects.toThrow(/not the code from Claude's page/);
     await expect(controller.complete(start.flowId!, "WRONGCODE#abc")).rejects.toThrow(/did not accept that code/);
     expect(await controller.get(start.flowId!)).toMatchObject({ phase: "failed" });
     const pid = Number(readFileSync(join(home, "pid"), "utf8"));

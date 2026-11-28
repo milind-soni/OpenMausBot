@@ -80,6 +80,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
     return () => { showAllListeners.delete(listener); };
   }, [bot.id]);
   const [showArchived, setShowArchived] = useState(false);
+  const [showEnded, setShowEnded] = useState(false);
   const actions = useMemo(() => {
     const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onSetMain, onArchive, onMemory } = threadRowActions(bot.id, dispatch);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onSetMain, onArchive, onMemory };
@@ -96,18 +97,21 @@ export function BotConversations({ bot }: { bot: Bot }) {
         turnStartedAt: thread.turnStartedAt ?? undefined, queued: Boolean(state.pendingQueued[task.threadId]?.length),
       };
     });
-  const conversations = mainThreadFirst(orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId)), bot.mainThreadId);
-  const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
+  const kept = (task: (typeof threads)[number]) => task.threadId === bot.threadId || task.threadId === bot.mainThreadId;
+  const conversations = mainThreadFirst(orderedThreadList(threads.filter((task) => kept(task) || (!isArchived(task) && !task.closedBy))), bot.mainThreadId);
+  const ended = orderedThreadList(threads.filter((task) => !kept(task) && !isArchived(task) && Boolean(task.closedBy)));
+  const archived = orderedThreadList(threads.filter((task) => isArchived(task) && !kept(task)));
   const needle = query.trim();
   const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId || task.threadId === bot.mainThreadId);
-  const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(showArchived ? archived : [])]);
+  const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(needle || showEnded ? ended : []), ...(showArchived ? archived : [])]);
   const preview = (threadId: string) => {
     const messages = recent(threadId);
     return messages ? lastLine(currentTaskBot(bot, threadId), messages, state.instances, false) : undefined;
   };
-  const byTitle = filterTasks(conversations, needle);
+  const searched = [...conversations, ...ended];
+  const byTitle = filterTasks(searched, needle);
   const matches = needle
-    ? [...byTitle, ...conversations.filter((task) => !byTitle.includes(task) && preview(task.threadId)?.toLowerCase().includes(needle.toLowerCase()))]
+    ? [...byTitle, ...searched.filter((task) => !byTitle.includes(task) && preview(task.threadId)?.toLowerCase().includes(needle.toLowerCase()))]
     : conversations;
   const shown = needle ? matches : expanded ? conversations : collapsed;
   const hidden = conversations.length - collapsed.length;
@@ -132,9 +136,9 @@ export function BotConversations({ bot }: { bot: Bot }) {
     setSearching(false);
   };
 
-  // An open search stays up even if archiving leaves one conversation, so it can still be cleared.
-  // An archived open conversation stays listed too, so it is not hidden while it is open.
-  const listed = conversations.length >= 2 || searching || conversations.some((task) => task.threadId === bot.threadId && isArchived(task));
+  // Ended conversations count, since search finds them. An open search stays up even if archiving leaves one
+  // conversation, so it can still be cleared. An archived open conversation stays listed too, so it is not hidden while it is open.
+  const listed = conversations.length + ended.length >= 2 || searching || conversations.some((task) => task.threadId === bot.threadId && isArchived(task));
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
@@ -206,6 +210,23 @@ export function BotConversations({ bot }: { bot: Bot }) {
           {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
           {expanded ? t("botPanel.conversations.showFewer") : t("botPanel.conversations.showMore", { count: hidden })}
         </button>
+      )}
+      {!needle && ended.length > 0 && (
+        <button
+          type="button"
+          data-conversations-ended
+          aria-expanded={showEnded}
+          onClick={() => setShowEnded((open) => !open)}
+          className="mt-0.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+        >
+          {showEnded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          {t("task.endedList", { count: ended.length })}
+        </button>
+      )}
+      {!needle && showEnded && ended.length > 0 && (
+        <div role="list" aria-label={t("task.endedList", { count: ended.length })} className={cn("flex flex-col gap-px", PANEL_ROW_LOOK)}>
+          {ended.map(row)}
+        </div>
       )}
       {!needle && archived.length > 0 && (
         <button

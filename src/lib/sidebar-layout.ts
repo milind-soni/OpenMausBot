@@ -5,6 +5,7 @@ import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
 import { botShowsUnread } from "./bot-unread";
+import { reorderNamesStable } from "../../shared/bot-order";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const UNREAD_SECTION_ID = "builtin:unread";
@@ -165,6 +166,8 @@ type UnreadListBot = {
   unread?: boolean;
   tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
   messages?: ReadonlyArray<{ at: number }>;
+  /** A row of the other place in the one list (place-rows.ts): when its conversations last moved there. */
+  lastAt?: number;
 };
 
 /** The bot kept in Unread after it was opened from there, with the time it was listed by and the conversation open then. */
@@ -172,7 +175,7 @@ export type UnreadHold = { id: string; since: number; chat?: string };
 
 function unreadSince(bot: UnreadListBot): number {
   const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
-  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? 0;
+  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? bot.lastAt ?? 0;
   return Math.max(...threads.map((task) => task.updatedAt ?? task.createdAt ?? 0));
 }
 
@@ -339,6 +342,17 @@ export function mergeSectionOrder(
     included.add(id);
   }
   return result;
+}
+
+/** The departments in the workspace's order, the same on every device: the places they hold in `ids` are filled in
+ * `departments` order. Built-in sections, and a department the workspace does not list, keep their places. */
+export function withDepartmentOrder(ids: SidebarSectionId[], departments: readonly string[]): SidebarSectionId[] {
+  return reorderNamesStable(ids, departments.map(userSectionId));
+}
+
+/** The departments in `ids`, by name, in that order. */
+export function departmentsIn(ids: readonly SidebarSectionId[]): string[] {
+  return ids.flatMap((id) => userSectionName(id) ?? []);
 }
 
 export function sameSectionOrder(a: SidebarSectionId[], b: SidebarSectionId[]): boolean {

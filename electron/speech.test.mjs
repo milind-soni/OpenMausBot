@@ -232,6 +232,9 @@ describe("Windows speech helper", () => {
     expect(session.args.slice(-2)).toEqual(["-EndpointMs", "0"]);
     expect(session.options).toMatchObject({ windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
     expect(session.scriptText).toContain("System.Speech.Recognition.SpeechRecognitionEngine");
+    const onecore = path.join(path.dirname(session.script), "speech-helper-onecore.ps1");
+    expect(session.scriptText).toContain("'speech-helper-onecore.ps1'");
+    expect(readFileSync(onecore, "utf8")).toContain("Windows.Media.SpeechRecognition.SpeechRecognizer");
     expect(speechBusy()).toBe(true);
     say(session, { partial: true, text: "hello" });
     session.proc.stdout.emit("data", `${JSON.stringify({ partial: true, text: "hello there" }).slice(0, 9)}`);
@@ -245,6 +248,7 @@ describe("Windows speech helper", () => {
       { channel: "speech:end", body: { code: 0, reason: "completed" } },
     ]);
     expect(existsSync(session.script)).toBe(false);
+    expect(existsSync(onecore)).toBe(false);
     expect(speechBusy()).toBe(false);
   });
 

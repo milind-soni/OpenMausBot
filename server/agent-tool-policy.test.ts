@@ -19,6 +19,7 @@ describe("built-in agent tool read policy", () => {
       "list_unread_notifications",
       "usage_limits",
       "what_changed",
+      "board_list",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {
       expect(isReadOnlyAgentTool(name)).toBe(true);
@@ -32,7 +33,7 @@ describe("built-in agent tool read policy", () => {
   });
 
   it.each([
-    "shared_computer", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "close_thread", "rename_thread", "post_to_room",
+    "shared_computer", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "close_thread", "rename_thread", "set_main_thread", "post_to_room",
     // These post into the chat: never read-only.
     "attach_file", "show_widget", "update_widget", "show_html", "update_html",
     "create_bot", "request_credential", "request_sign_in", "memory_update", "trigger", "delete_trigger", "create_trigger",

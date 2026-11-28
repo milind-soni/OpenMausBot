@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeBotsFirst,
+  departmentsIn,
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
@@ -28,6 +29,7 @@ import {
   unreadSinceByBot,
   userSectionId,
   userSectionName,
+  withDepartmentOrder,
   withPrimaryTile,
   withUnreadSection,
 } from "./sidebar-layout";
@@ -459,5 +461,13 @@ describe("the unread section", () => {
     expect(withUnreadSection([], true)).toEqual([UNREAD_SECTION_ID]);
     expect(withUnreadSection([BOTS_SECTION_ID], false)).toEqual([BOTS_SECTION_ID]);
     expect(sidebarSectionLabel(UNREAD_SECTION_ID)).toBe("Unread");
+  });
+});
+
+describe("the workspace's department order", () => {
+  it("fills the places departments hold with the workspace's order and leaves the rest alone", () => {
+    const ids = [userSectionId("Ops"), BOTS_SECTION_ID, userSectionId("Sales"), userSectionId("Local only")];
+    expect(withDepartmentOrder(ids, ["Sales", "Gone", "Ops"])).toEqual([userSectionId("Sales"), BOTS_SECTION_ID, userSectionId("Ops"), userSectionId("Local only")]);
+    expect(departmentsIn(ids)).toEqual(["Ops", "Sales", "Local only"]);
   });
 });

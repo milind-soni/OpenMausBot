@@ -62,6 +62,9 @@ export type RuntimeEvent = RuntimeEventBase &
         type: "turn.completed";
         ok: boolean;
         stopReason?: string | null;
+        /** With stopReason "auth_required": the driver proves the prompt never reached the model, so sending it
+         * again repeats nothing. */
+        unsent?: true;
         cost?: number | null;
         denials?: string[];
         /** THIS turn's token total, as the provider reports it at the end: the
@@ -177,6 +180,8 @@ export type RuntimeEvent = RuntimeEventBase &
          * was already gone and the action never ran */
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
+        /** Optional reason attached to the approval card while waiting, preserved on timeout. */
+        heldReason?: string;
       }
     | {
         type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;
@@ -197,7 +202,9 @@ export type RuntimeEvent = RuntimeEventBase &
     // `limit`: a usage limit refused this turn: the account's on this engine ("engine"), one model's own window
     // ("model"), or that model's extra usage credits ("credits"); the engine's other models still work for the last two.
     // `limitModels`: the models a "model" limit holds, when one allowance is shared (OpenCode's free models).
-    | { type: "runtime.error"; message: string; partial?: boolean; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
+    // `blockedAfterReply` (with `partial`): every call that failed was blocked by the safety floor, so it ran nothing,
+    // after the bot's answer text had come back.
+    | { type: "runtime.error"; message: string; partial?: boolean; blockedAfterReply?: boolean; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
         stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits"; limitModels?: string[];
         /** `message` as a `chat.notice.*` key and params, when it is one of the server's fixed sentences. */
         text?: ServerText }

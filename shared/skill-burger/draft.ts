@@ -52,10 +52,25 @@ function parsedOutput(layer: BurgerLayer): unknown {
   if (!layer.output) return undefined;
   let value: unknown;
   try { value = JSON.parse(layer.output); } catch { return layer.output; }
-  // One tool of a multi-app call answers in its own slot of the shared result.
+  if (layer.kind !== "app" || layer.replay !== "exact") return value;
+  const frame = isRecord(value) && isRecord(value.result) ? value.result : value;
+  const content = Array.isArray(frame) ? frame : isRecord(frame) && Array.isArray(frame.content) ? frame.content : undefined;
+  const part = content?.find((one) => isRecord(one) && one.type === "text" && "text" in one);
+  if (isRecord(part)) {
+    value = part.text;
+    if (typeof value === "string") {
+      try { value = JSON.parse(value); } catch { return value; }
+    }
+  }
+  if (layer.tool.includes(".")) return value;
   const index = /#(\d+)$/.exec(layer.id)?.[1];
   const results = isRecord(value) && isRecord(value.data) && Array.isArray(value.data.results) ? value.data.results : undefined;
-  return index !== undefined && results ? results[Number(index)] : value;
+  if (results) {
+    const result = index !== undefined ? results[Number(index)] : results.find((one) => isRecord(one) && one.tool_slug === layer.tool) ?? (results.length === 1 ? results[0] : undefined);
+    const response = isRecord(result) && isRecord(result.response) ? result.response : undefined;
+    return response && "data" in response ? response.data : value;
+  }
+  return isRecord(value) && "data" in value ? value.data : value;
 }
 
 /** Where `target` sits in `value`, as a dotted path; "" for the value itself. */
@@ -109,12 +124,14 @@ interface Recorded { id: string; output: unknown; read: boolean }
 
 export interface DraftOptions {
   summary?: string;
+  /** Inputs of the workflow being extended: recorded values reuse these defaults or take a free name. */
+  existingArgs?: Workflow["args"];
   /** Who a teammate is, from the id or name the run used: its name and role now. */
   teammate?: (idOrName: string) => { id?: string; name: string; role?: string } | undefined;
 }
 
 class Drafter {
-  readonly args: Workflow["args"] = {};
+  readonly args: Workflow["args"];
   readonly steps: WorkflowStep[] = [];
   private readonly recorded: Recorded[] = [];
   private readonly ask: string;
@@ -124,6 +141,7 @@ class Drafter {
   private readonly options: DraftOptions;
 
   constructor(ask: string, summary: string, options: DraftOptions = {}) {
+    this.args = { ...options.existingArgs };
     this.askText = ask;
     this.ask = ask.toLowerCase();
     this.summary = summary;
@@ -165,7 +183,8 @@ class Drafter {
   private composer(id: string, field: string, example: string, looked = false, file?: string): WorkflowRef | null {
     const read = [...this.recorded].reverse().find((entry) => entry.read) ?? [...this.recorded].reverse().find((entry) => entry.output !== undefined && entry.output !== "");
     if (!read && !looked) return null;
-    const aiId = `${id}_write`;
+    let aiId = `${id}_write`;
+    for (let n = 2; this.steps.some((step) => step.id === aiId); n += 1) aiId = `${id}_write_${n}`;
     const what = file ?? `the ${field.replace(/_/g, " ")}`;
     const request = this.request(400);
     this.steps.push({
@@ -332,7 +351,7 @@ class Drafter {
         example: redactSecretsInText(heredoc[3]!).slice(0, EXAMPLE_MAX),
       });
     } else if (layer.kind === "shell") {
-      const cwd = typeof layer.args.cwd === "string" && !new RegExp(CONVERSATION_FOLDER.source).test(layer.args.cwd) ? layer.args.cwd : undefined;
+      const cwd = typeof layer.args.cwd === "string" ? layer.args.cwd.replace(CONVERSATION_FOLDER, ".") : undefined;
       this.steps.push({ id, kind: "shell", label: label.replace(CONVERSATION_FOLDER, "."), run: this.shell(command.replace(CONVERSATION_FOLDER, ".")), ...(cwd ? { cwd } : {}) });
     } else if (layer.kind === "file") {
       const content = String(layer.args.content ?? "");

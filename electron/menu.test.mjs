@@ -68,6 +68,21 @@ describe("buildApplicationMenu", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+  it.each([["linux", false], ["linux", true], ["win32", false], ["win32", true]])(
+    "registers Ctrl+, on %s with Open at Login present: %s",
+    (platform, loginItem) => {
+      const onOpenSettings = vi.fn();
+      const template = build(platform, { onOpenSettings,
+        openAtLogin: loginItem ? { checked: false, onToggle: vi.fn() } : null });
+      const items = template.flatMap((menu) => menu.submenu ?? []).filter((item) => item.accelerator === "CmdOrCtrl+,");
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ label: "Settings…", visible: false });
+      items[0].click();
+      expect(onOpenSettings).toHaveBeenCalledTimes(1);
+      expect(template.find((menu) => menu.role === "fileMenu").submenu).toContain(items[0]);
+    },
+  );
+
   it.each(["linux", "win32"])("does not add an app menu on %s", (platform) => {
     const template = build(platform);
     expect(template[0].role).toBe("fileMenu");
@@ -110,7 +125,7 @@ describe("buildApplicationMenu", () => {
     expect(items.map((entry) => entry.label)).toEqual(["Back to My Cloud", "Office — office.example.test", "Add Server from Copied Pairing Link…", "Forget “Office”"]);
     items[0].click();
     expect(home.onBack).toHaveBeenCalledOnce();
-    expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to a server/.test(entry.label))).toBe(false);
+    expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to another computer/.test(entry.label))).toBe(false);
     const onCloud = build("darwin", { environments: [cloud, office], activeId: "c", home }).find((entry) => entry.label === "Server").submenu;
     expect(onCloud.find((entry) => entry.id === "back-to-my-cloud").enabled).toBe(false);
   });

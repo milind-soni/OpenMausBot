@@ -10,6 +10,7 @@ import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
+import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -28,6 +29,7 @@ import type { hostedModelPolicy } from "../hosted-models.ts";
 import { heldFrom } from "../host/room-reads.ts";
 import { unreadTargetTask } from "../task-record.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
+import { mainThreadChoicePatch } from "../main-thread.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
 import { profileSnapshot } from "../profile-revision.ts";
@@ -95,6 +97,7 @@ export interface BotPatchRouteDeps {
   turnBots?: { values(): Iterable<BotRecord> };
   /** A bot's model changed, from `before` to `after`, seen in `threadId` (host/no-terminal.ts says there what it takes away). */
   modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
+  vpsServerSwitched?(bot: BotRecord): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -243,11 +246,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // null clears the choice; otherwise an open conversation the main-thread resolver may pick, never a routine run or archived.
       // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
       if (body.mainThreadChoice !== undefined) {
-        const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
-        patch.mainThreadKept = undefined;
-        if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
-        else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
-        else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+        const choice = body.mainThreadChoice === null || typeof body.mainThreadChoice === "string" ? mainThreadChoicePatch(deps.mainThreadTasks(m[1]), body.mainThreadChoice) : null;
+        if (!choice) return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+        Object.assign(patch, choice);
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
@@ -255,16 +256,33 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
-        const chain: Array<{ instanceId: string; model: string }> = [];
+        const primarySelection = normalizedSelection ?? existingBot?.modelSelection;
+        const primaryInstance = primarySelection ? registry.get(primarySelection.instanceId) : null;
+        const primaryEngine = primaryInstance ? { driverKind: primaryInstance.driverKind, capabilities: primaryInstance.adapter.capabilities } : null;
+        const saved = new Set((existingBot?.fallback ?? []).map((entry) => `${entry.instanceId}\u0000${entry.model}`));
+        const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
-          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
+          const row = entry && typeof entry === "object" ? (entry as Partial<Record<keyof ModelSelection, unknown>>) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
-          if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          const instance = registry.get(row.instanceId);
+          if (!instance) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           const model = row.model.trim();
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
-          chain.push({ instanceId: row.instanceId, model });
+          // A backup that cannot use the bot's workspace or tools can never take over automatically. An entry saved
+          // before this check stays editable, so a chain can still be repaired without deleting it first.
+          if (primaryEngine && !saved.has(`${row.instanceId}\u0000${model}`)) {
+            const incompatible = recoveryCapabilityError(primaryEngine, { driverKind: instance.driverKind, capabilities: instance.adapter.capabilities });
+            if (incompatible) return json(res, 400, { error: incompatible });
+          }
+          if (row.effort === undefined && row.variant === undefined) {
+            chain.push({ instanceId: row.instanceId, model });
+          } else {
+            const checked = deps.checkedModelSelection(row);
+            if (!checked.ok) return json(res, checked.status, refusalBody(checked));
+            chain.push(checked.selection);
+          }
         }
         patch.fallback = chain;
       }
@@ -727,6 +745,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      const beforeVpsAlias = freshBrowserBot ? vpsSshAliasForBot(cfg, freshBrowserBot) : null;
+      // Fires once the alias commits, so a later profile save that throws cannot strand the old tunnel and idle timer.
+      let vpsSwitchNotified = false;
+      const notifyVpsSwitch = (next: BotRecord | null | undefined) => {
+        if (!existingBot || !next || vpsSwitchNotified || vpsSshAliasForBot(cfg, next) === beforeVpsAlias) return;
+        vpsSwitchNotified = true;
+        deps.vpsServerSwitched?.(next);
+      };
       // A mark goes out with its hold in one frame, below.
       delete patch.unread;
       if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
@@ -735,7 +761,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // Runtime fields keep their fail-closed order; only the profile fields commit atomically.
         const runtimePatch = { ...patch };
         for (const field of Object.keys(profile.patch)) delete runtimePatch[field];
-        if (Object.keys(runtimePatch).length) store.patchBot(m[1], runtimePatch);
+        if (Object.keys(runtimePatch).length) notifyVpsSwitch(store.patchBot(m[1], runtimePatch));
         bot = store.patchBotProfile(m[1], profile.patch);
       } else {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
@@ -757,6 +783,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (normalizedSelection && existingBot) deps.modelSwitched?.(bot.id, movedTask?.threadId ?? existingBot.threadId, movedTask?.modelSelection ?? existingBot.modelSelection, normalizedSelection, true);
       if (existingBot) {
         settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
+        notifyVpsSwitch(bot);
       }
       const chiefChanges =
         body.chiefOfStaff === true || chiefMovedSections

@@ -679,8 +679,11 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("opencodeGo", "typed::opencode-go/new-model"), "a Go model typed by hand").toBe(NOW + 4 * HOUR);
     expect(instance.blockedUntil("opencodeGo"), "no model named: the whole engine, as before").toBe(NOW + 4 * HOUR);
     expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle")).toBeNull();
+    expect(instance.holdScope("opencodeGo", "opencode-go/kimi-k2"), "a meter that covers some models holds them as model scope").toBe("model");
+    expect(instance.holdScope("opencodeGo", "opencode/big-pickle")).toBeNull();
     instance.noteRefusal("opencodeGo", NOW + 2 * HOUR);
     expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle"), "a refusal of the whole account still holds every model").not.toBeNull();
+    expect(instance.holdScope("opencodeGo", "opencode-go/kimi-k2"), "a refusal of the whole account is engine scope").toBe("engine");
     expect(instance.resetAt("opencodeGo", "opencode/big-pickle"), "a free model resets with the refusal, not the Go meter").toBeLessThan(NOW + 4 * HOUR);
     expect(instance.resetAt("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
   });
@@ -689,6 +692,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
     instance.noteUsage(report(claude([100, NOW + 2 * HOUR], [40, NOW + 3 * 24 * HOUR])));
     expect(instance.blockedUntil("claude", "claude-sonnet-5")).toBe(NOW + 2 * HOUR);
+    expect(instance.holdScope("claude", "claude-sonnet-5"), "a meter that covers the whole account is engine scope").toBe("engine");
   });
 
   it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {

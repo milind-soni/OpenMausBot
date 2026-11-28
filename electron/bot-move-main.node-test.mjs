@@ -89,6 +89,32 @@ test("while lending can't take the bots' folders yet, a later look does, and the
   assert.equal(w.journal.moves[0].lend, undefined);
 });
 
+test("a person who chose in the move step not to lend the bots' folders gets none lent; the default lends them", async () => {
+  const kept = world();
+  kept.move.start(bots(2), null, { keepFolders: false });
+  await settle(kept);
+  assert.equal(kept.journal.moves[0].phase, "done");
+  assert.equal(kept.journal.moves[0].keepFolders, false);
+  assert.deepEqual(kept.lent, [], "nothing is lent the person said no to");
+  const lent = world();
+  lent.move.start(bots(1), null, { keepFolders: true });
+  await settle(lent);
+  assert.equal("keepFolders" in lent.journal.moves[0], false, "the journal of a default move is as before");
+  assert.deepEqual(lent.lent, [["/work/b0"]]);
+});
+
+test("commands that couldn't be turned on with the move stay on its line until the next move", async () => {
+  const w = world();
+  w.move.start(bots(1), null, { commandsError: "Sign in to the Cloud before lending it the terminal." });
+  assert.equal(w.move.view()?.commandsError, "Sign in to the Cloud before lending it the terminal.");
+  await settle(w);
+  assert.equal(w.move.view()?.phase, "done");
+  assert.equal(w.move.view()?.commandsError, "Sign in to the Cloud before lending it the terminal.");
+  const next = world();
+  next.move.start(bots(1));
+  assert.equal("commandsError" in (next.move.view() ?? {}), false);
+});
+
 test("any number of bots go in one move, and an untouched bot, which a move has nothing to carry of, stays here", async () => {
   const many = world({ untouched: ["b7"] });
   many.move.start(bots(1_000));

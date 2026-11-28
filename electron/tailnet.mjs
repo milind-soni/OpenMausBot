@@ -4,6 +4,7 @@
 const TAILSCALE_V6 = /^fd7a:115c:a1e0:/i;
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const TAILNET_NAME = new RegExp(`^(?=.{1,253}$)${LABEL}(?:\\.${LABEL})*\\.ts\\.net$`);
+const NODE_NAME = new RegExp(`^(?=.{1,253}$)${LABEL}(?:\\.${LABEL})+$`);
 
 /** An address as a socket reports it, without the IPv4-mapped prefix, zone or brackets. */
 export const bareAddress = (address) => String(address ?? "").trim().replace(/^\[|\]$/g, "").replace(/^::ffff:(?=\d)/i, "").replace(/%.*$/, "").toLowerCase();
@@ -27,6 +28,13 @@ export function inTailscaleRange(address) {
 /** A MagicDNS name, like `macmini.tail1234.ts.net`; a trailing dot is allowed. */
 export function isTailnetName(host) {
   return TAILNET_NAME.test(String(host ?? "").trim().toLowerCase().replace(/\.$/, ""));
+}
+
+/** The name Tailscale itself gives this computer: a MagicDNS name, or on a tailnet run by a control server such as
+ * Headscale, a name under that tailnet's own suffix (`mini.example.internal`). Two labels at least, never an address. */
+function isNodeName(host) {
+  const name = String(host ?? "").trim().toLowerCase().replace(/\.$/, "");
+  return NODE_NAME.test(name) && !/^[0-9.]+$/.test(name);
 }
 
 /** A host only a tailnet reaches: a MagicDNS name or an address in Tailscale's ranges. */
@@ -70,7 +78,7 @@ export function readTailscaleStatusJson(stdout) {
   const addresses = (Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs : []).map(bareAddress).filter(inTailscaleRange);
   const certDomains = Array.isArray(parsed.CertDomains) && parsed.CertDomains.some((domain) => typeof domain === "string" && domain);
   const capability = self.CapMap && typeof self.CapMap === "object" && Object.hasOwn(self.CapMap, "https");
-  return { state, name: isTailnetName(dns) ? dns : null, addresses: addresses.sort((a, b) => Number(a.includes(":")) - Number(b.includes(":"))), https: Boolean(certDomains || capability) };
+  return { state, name: isNodeName(dns) ? dns : null, addresses: addresses.sort((a, b) => Number(a.includes(":")) - Number(b.includes(":"))), https: Boolean(certDomains || capability) };
 }
 
 const authority = (host, port) => (host.includes(":") ? `[${host}]` : host) + (port ? `:${port}` : "");

@@ -1,5 +1,5 @@
 // Three threads of one bot, each with a turn held open by a gate only the test releases, as a desktop, personal Cloud and Team Cloud server.
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -543,5 +543,54 @@ describe("a Starter Cloud", () => {
     await whenStarted(threads[2]!);
     f.finish(threads[0]!);
     await whenStarted(threads[1]!);
+  }, 90_000);
+});
+
+// The Cloud's browser sandbox, behind a stand-in of the Admin's relay that counts its starts: a call that waits for
+// another thread's browser and is refused must never have spent one.
+describe.skipIf(process.platform === "win32")("a refused browser call on a personal Cloud with the browser sandbox", () => {
+  let f: Fixture;
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await f?.stop();
+    for (const server of servers.splice(0)) { server.closeAllConnections(); server.close(); }
+  });
+
+  it("is refused by its seat before the sandbox is asked anything, so it spends no start", async () => {
+    const legacyName = `ogb-browser-${createHash("sha256").update("browser").digest("hex").slice(0, 6)}`;
+    const box = { id: "bx_23456789", name: legacyName, state: "archived" };
+    let resumes = 0, probes = 0;
+    const relay = createServer((req, res) => {
+      const path = new URL(req.url ?? "/", "http://relay.test").pathname.replace(/^\/relay\/api\/box\/v1/, "");
+      req.resume();
+      req.on("end", () => {
+        const answer = (status: number, payload: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(payload)); };
+        if (path === "/browser-sandbox") { probes += 1; return answer(200, { ok: true, type: "browser.sandbox", available: true, boxId: box.id, chromes: 2 }); }
+        if (path === "/boxes" && req.method === "GET") return answer(200, { ok: true, boxes: [box], pageInfo: { nextCursor: null } });
+        if (path === `/boxes/${box.id}` && req.method === "GET") return answer(200, { ok: true, box });
+        if (path === `/boxes/${box.id}/resume`) { resumes += 1; box.state = "ready"; return answer(200, { ok: true }); }
+        // Chrome does not come up: the call opens the home's browser, and the sandbox is stopped again.
+        if (path === `/boxes/${box.id}/browser`) { box.state = "archived"; return answer(200, { ok: true, chrome: false, policy: true, home: "/home/user" }); }
+        return answer(404, { ok: false, code: "not_found", message: "Not found" });
+      });
+    });
+    servers.push(relay);
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    const relayBase = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+    f = new Fixture("home");
+    f.extraEnv = { OMB_AGENT_BROWSER_PATH: inertBrowser(f.home), OMB_COMPUTER_CALL_WAIT_MS: "500", OMB_CLOUD_BOAT_URL: `${relayBase}/relay/api/box/v1`, OMB_CLOUD_BOAT_TOKEN: "box_omb_fixture" };
+    await f.start();
+    const { botId, threads } = await botWithThreads(f, CLAUDE, 2);
+    await send(f, botId, threads[0]!, "First job");
+    await send(f, botId, threads[1]!, "Second job");
+    await expect.poll(() => f.claudeTurnsStarted(), { timeout: 20_000, interval: 50 }).toBe(2);
+    expect((await browse(f, threads[0]!)).body.result.isError, "the first thread browses, in the home after the sandbox failed it").toBeFalsy();
+    expect(resumes).toBe(1);
+    const waiting = await browse(f, threads[1]!);
+    expect(waiting.body.result).toEqual({ isError: true, content: [{ type: "text", text: browserBusyText(500) }] });
+    expect(resumes, "the refused call woke nothing").toBe(1);
+    expect(probes).toBe(1);
+    f.release();
+    await expect.poll(async () => (await botRow(f, botId)).busy, { timeout: 20_000, interval: 100 }).toBe(false);
   }, 90_000);
 });

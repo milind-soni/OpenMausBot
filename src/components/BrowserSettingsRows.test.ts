@@ -141,6 +141,28 @@ describe("Built-in browser proxy setting", () => {
     expect(fixture.dispatch.mock.calls[0]![0].config.browserEngine.proxyConfigured).toBe(true);
   });
 
+  it("keeps a reopened saved proxy empty and says it is saved", async () => {
+    const saved = { features: { browser: true }, browserEngine: { kind: "engine", proxySaved: true, proxyConfigured: true } };
+    fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", proxyConfigured: false } };
+    fixture.api.mockResolvedValue(saved);
+    show();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="SOCKS5 proxy"]')!;
+    expect(input.placeholder).toBe("socks5://127.0.0.1:1080");
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "socks5://127.0.0.1:1080");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    flushSync(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Save")?.click());
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved }));
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    show();
+    const again = host.querySelector<HTMLInputElement>('input[aria-label="SOCKS5 proxy"]')!;
+    expect(again.value).toBe("");
+    expect(again.placeholder).toBe("Proxy saved. Enter a new address to replace it.");
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Remove")).toBe(true);
+  });
+
   it("hides the shared proxy control from Team Cloud admins who are not the owner", () => {
     owner.value = true;
     fixture.config = { team: { id: "team", name: "Team" }, features: { browser: true }, browserEngine: { kind: "engine", proxyEditable: false } };

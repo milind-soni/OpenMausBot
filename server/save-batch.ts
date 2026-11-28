@@ -8,13 +8,25 @@ let depth = 0;
 const pending = new Map<object, () => void>();
 
 export function batchSaves<T>(run: () => T): T {
-  depth += 1;
+  beginSaves();
   try {
     return run();
   } finally {
-    depth -= 1;
-    if (depth === 0) writePending();
+    endSaves();
   }
+}
+
+/** The same pass, opened by hand, for one that yields between stretches of synchronous work: open before a stretch,
+ * close before each yield, so the stretch's saveSoon writes land once, at its end, not once per change. */
+export function beginSaves(): void {
+  depth += 1;
+}
+
+/** Closes one stretch (or the whole pass): what its saves asked for writes now. */
+export function endSaves(): void {
+  if (depth === 0) return;
+  depth -= 1;
+  if (depth === 0) writePending();
 }
 
 /** Writes now, or once at the end of the running batch; `owner` keeps one pending write per file. */

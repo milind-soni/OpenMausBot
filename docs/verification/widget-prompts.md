@@ -52,7 +52,7 @@ Expect: A list to pick from. Choosing one and confirming sends it, on the Mac an
 Draft a two-line note to my team saying the release moved to Friday, and check with me before you send it.
 ```
 
-Expect: The draft and one short question such as "Shall I send it?", with no widget: a yes or no is answered in a word or with a 👍 or 👎 on that message ([Reactions](reactions.md)). After a 👍 the bot goes on by itself.
+Expect: The draft and one short question such as "Shall I send it?", with no widget: a yes or no is answered in a word or with a 👍 on that message; a 👎 reaches the bot quietly with the person's next message ([Reactions](reactions.md)). After a 👍 the bot goes on by itself.
 
 ### 7. Table
 

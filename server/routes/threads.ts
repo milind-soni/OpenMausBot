@@ -21,10 +21,10 @@ import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
 import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";
 import {
-  listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
-  messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
+  canOpenOutsideWorkspaceMessageFile, listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
+  messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, openOutsideWorkspaceMessageFile, referencedFileName,
 } from "../message-file.ts";
-import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
+import { ownerOrAdmin, resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
@@ -78,6 +78,8 @@ export interface ThreadRouteDeps {
   attachmentInUse(name: string): boolean;
   /** The stored files a Settings clear must leave (pictures, banner, routine and calendar-call files), null until those load; absent on a Team Cloud, which has no clear. */
   keptAttachments?(): ReadonlySet<string> | null;
+  /** Directories a self-hosted owner still cannot open via single outside-workspace file links (app data dir, user data). */
+  ownerOutsideFileRefuse?: readonly string[];
 }
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
@@ -279,6 +281,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       if (folderEntry === null) return json(res, 400, { error: "entry must be one file name" });
       // An inline image is read whole by the browser; a saved file is streamed below, so it may be larger.
       const maxBytes = streamsMessageImage ? MESSAGE_FILE_MAX_BYTES : MESSAGE_FILE_DOWNLOAD_MAX_BYTES;
+      const ownerCanOpenOutside = Boolean(deps.ownerOutsideFileRefuse) && !HOSTED_WORKSPACE && ownerOrAdmin(auth) && method === "POST" && message.role === "bot" && !botAttachment && !folderEntry && !asksMediaLink;
       let file: Awaited<ReturnType<typeof openMessageFile>> | undefined;
       try {
         try {
@@ -299,6 +302,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           if (copy) {
             file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
             downloadName = copy.name;
+          } else if (code === "outside_workspace" && ownerCanOpenOutside) {
+            if (body?.allowOutsideWorkspace === true && body?.listFolder !== true) {
+              file = await openOutsideWorkspaceMessageFile(href, deps.ownerOutsideFileRefuse!, maxBytes);
+            } else if (await canOpenOutsideWorkspaceMessageFile(href, deps.ownerOutsideFileRefuse!)) {
+              return json(res, 403, { error: error instanceof Error ? error.message : "the linked file is outside this conversation's workspace", code: "outside_workspace", canOpenOutside: true });
+            } else {
+              throw error;
+            }
           } else {
             // Only a client that asks for listings gets one; older clients keep the 400.
             if (body?.listFolder !== true || folderEntry || code !== "directory") throw error;

@@ -14,7 +14,8 @@ import type { MoveKind } from "../electron/cloud-send-parts.mjs";
 import type { AppTrigger } from "../shared/app-triggers.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 import { isSkillName } from "../shared/skill-md.ts";
-import type { InstalledPlaybook, InstalledPackageMetadata } from "../shared/wire.ts";
+import { EFFORT_LEVELS, type InstalledPlaybook, type InstalledPackageMetadata } from "../shared/wire.ts";
+import { isModelVariant } from "./contracts.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
@@ -246,7 +247,10 @@ const botFieldsSchema = z.object({
   pinned: z.boolean().nullable().optional(),
   chiefOfStaff: z.boolean().nullable().optional(),
   managedSections: z.array(z.string().trim().max(60)).max(100).nullable().optional(),
-  fallback: z.array(z.object({ instanceId: z.string().regex(/^[\w.-]{1,128}$/u), model: z.string().min(1).max(500) })).max(5).nullable().optional(),
+  fallback: z.array(z.object({
+    instanceId: z.string().regex(/^[\w.-]{1,128}$/u), model: z.string().min(1).max(500),
+    effort: z.enum(EFFORT_LEVELS).optional(), variant: z.string().refine(isModelVariant).optional(),
+  }).refine((entry) => entry.effort === undefined || entry.variant === undefined)).max(5).nullable().optional(),
   projects: z.array(z.object({ id: z.string().regex(/^[\w-]{1,128}$/u), name: z.string().min(1).max(80), emoji: z.string().max(16).optional() }).passthrough()).max(200).nullable().optional(),
   playbooks: z.array(playbookSchema).max(50).nullable().optional(),
   installedPackage: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -292,6 +296,15 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: A
   }
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
+  // A bot coming back here (bot-moves.ts) stays hidden until it arrived: its archived switch waits on its hold till then.
+  // It never takes this place's Chief's crown or MausBot mark: those stay where they are (a Chief does not move back).
+  const coming = (bot.movedTo as { back?: true } | undefined)?.back === true;
+  if (coming) {
+    if (Object.hasOwn(patch, "hidden")) (patch as Record<string, unknown>).movedTo = { ...bot.movedTo, archived: patch.hidden === true };
+    for (const key of ["hidden", "chiefOfStaff", "managedSections"] as const) delete patch[key];
+    deps.store.patchBot(id, patch);
+    return;
+  }
   deps.store.patchBot(id, patch);
   // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take the crown from this
   // place's Chief, whichever bot that is, also when a later pass sends its Chief fields without its MausBot mark.
@@ -327,7 +340,7 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
     held.runs.push(...arriving.filter((run) => !have.has(run.id)));
     return [adopted];
   });
-  if (adopted) deps.ownRoutine?.(adopted, owner.person);
+  if (adopted && !owner.here) deps.ownRoutine?.(adopted, owner.person);
   deps.arrived?.();
 }
 

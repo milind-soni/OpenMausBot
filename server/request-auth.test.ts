@@ -29,6 +29,7 @@ import {
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
+import { desktopMainMover } from "./move-back.ts";
 import { SESSION_TTL_MS, SessionRegistry } from "./sessions.ts";
 import { webSessionHeaders } from "../companion/src/session-route.ts";
 
@@ -189,7 +190,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/queue/q/steer"], ["POST", "/api/groups/g/queue/q/steer"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
-      ["POST", "/api/cli-test"], ["GET", "/api/cli-candidates"], ["GET", "/api/instances"], ["PATCH", "/api/instances/claude"],
+      ["POST", "/api/cli-test"], ["GET", "/api/cli-candidates"], ["PATCH", "/api/instances/claude"],
       ["POST", "/api/bots/x/computer/exec"], ["POST", "/api/bots/x/computer/join"], ["POST", "/api/local-computer/run"],
       ["POST", "/api/bots/x/local-computer/join"], ["POST", "/api/bots/x/local-computer/screenshot"],
       ["GET", "/api/computers/boxes"], ["POST", "/api/computers/boxes/bx_23456789/delete"],
@@ -214,6 +215,10 @@ describe("scopes", () => {
       ["GET", "/api/bots/x/queue/q/steer"], ["POST", "/api/bots/x/queue/q/steer/more"], ["POST", "/api/groups/g/queue/q/steer/more"],
       ["POST", "/api/tts/voices/add"], ["GET", "/api/inbox/read-all"], ["PUT", "/api/inbox/read-all"], ["POST", "/api/inbox/read-all/extra"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
+  it("lets any signed-in client read instance capabilities (queueing) so bots can be steered", () => {
+    expect(requiredScope("GET", "/api/instances")).toBe("client");
   });
 
   it("lets a Team Cloud member reach only their own connections; who connects what stays an admin's", () => {
@@ -789,7 +794,23 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
 
   it("ignores service trust while the desktop capability is in force", () => {
     expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
-      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"], desktopMain: true });
+  });
+
+  it("marks the desktop app's own main process apart from its pages, a paired phone and any other program here", () => {
+    const desktop = { desktopToken: "owner-token" };
+    const main = check("PUT", "/api/cloud-send/kind", { ...desktop, headers: { "x-openmausbot-desktop-owner": "owner-token", "sec-fetch-mode": "cors" } }).auth;
+    expect(main).toEqual({ kind: "loopback", scopes: ["admin", "client"], desktopMain: true });
+    const page = check("PUT", "/api/cloud-send/kind", { ...desktop, headers: { "x-openmausbot-desktop-owner": "owner-token", origin: "http://127.0.0.1:8799", "sec-fetch-site": "same-origin", "sec-fetch-dest": "empty" } }).auth;
+    expect(page).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(check("GET", "/api/cloud-send", desktop).auth, "a program here without the capability").toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(check("PUT", "/api/cloud-send/kind", desktop).auth, "and it may not write").toBeNull();
+    expect(check("GET", "/api/cloud-send", { headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth, "no desktop on this server").toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    const place = { desktopManaged: true, managed: false };
+    expect(desktopMainMover(main!, place)).toBe(true);
+    expect([desktopMainMover(page!, place), desktopMainMover(main!, { desktopManaged: false, managed: false }), desktopMainMover(main!, { desktopManaged: true, managed: true })]).toEqual([false, false, false]);
+    expect(desktopMainMover({ ...main!, companionDevice: "phone-1" } as never, place), "a paired phone never is").toBe(false);
+    expect(desktopMainMover({ kind: "loopback", scopes: ["client"], trust: "service", desktopMain: true } as never, place), "nor a shared workspace's program").toBe(false);
   });
 
   it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {

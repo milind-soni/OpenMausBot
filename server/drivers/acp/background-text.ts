@@ -79,6 +79,7 @@ export interface AcpOneShotInput {
   /** Model applied outside `selectModel` (e.g. via argv or `configure`), used for usage attribution once configured. */
   configuredModel?: string;
   pickAuthMethod: (methods: Array<{ id?: string }>) => string | null;
+  authMeta?: Record<string, unknown>;
   authRequired: boolean | "if-requested";
   loginNote: string;
   /** Whether a session/new refusal asks for a sign-in; it then fails with `loginNote`. */
@@ -216,7 +217,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       const methodId = input.pickAuthMethod(methods);
       if (methodId) {
         try {
-          await request("authenticate", { methodId });
+          await request("authenticate", { methodId, ...(input.authMeta ? { _meta: input.authMeta } : {}) });
         } catch {
           if (input.authRequired) throw new Error(input.loginNote);
         }

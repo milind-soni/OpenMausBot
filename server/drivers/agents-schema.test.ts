@@ -12,7 +12,7 @@ const record = (value: unknown): value is Json => value !== null && typeof value
 /** Every switch on: each tool the catalog can list, in the form tools/list sends it. */
 const LISTED = availableTools(catalogProfileFromEnv({
   OMB_BOT_ID: WATCHER_OPTIONS_CARD_BOT_ID, OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1", OMB_MAUSBOT: "1",
 }));
 
 /** Each keyword the advertised node lacks, with where it sat in the full one. */
@@ -164,5 +164,12 @@ describe("every agents call is held to its full schema", () => {
     expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_000) })).toBeUndefined();
     expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_001) }))
       .toBe("coordinate_bots was not run: message takes at most 12000 characters (it has 12001). Fix these and call it again.");
+  });
+});
+
+describe("coordinate_bots rework", () => {
+  it("covers the follow-up work the 'already completed' refusal sends the bot to it for", () => {
+    const coordinate = LISTED.find((tool) => tool.name === "coordinate_bots")!.inputSchema.properties as Record<string, Json>;
+    expect(coordinate.rework!.description).toMatch(/follow-up/);
   });
 });

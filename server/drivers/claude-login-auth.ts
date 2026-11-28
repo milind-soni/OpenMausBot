@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
+import { withSignInReason, type SignInOutcome } from "../../shared/sign-in-outcome.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { canonicalPath } from "./device-auth.ts";
 
@@ -40,11 +41,14 @@ export function claudeLoginPrompt(output: string): { authorizationUrl: string } 
   return null;
 }
 
-/** What Anthropic's page shows after sign-in: a code, sometimes with `#state`. */
+/** What Anthropic's page shows after sign-in: a code, sometimes with `#state`. Never the short digits-only login code
+ * Claude emails, which belongs on Claude's own page. */
 export function claudeLoginCode(value: string): string | null {
   const code = value.trim();
-  return /^[A-Za-z0-9_\-#.:]{8,1024}$/.test(code) ? code : null;
+  return /^[A-Za-z0-9_\-#.:]{8,1024}$/.test(code) && !/^\d{1,8}$/.test(code) ? code : null;
 }
+
+const NOT_THE_CODE = "That is not the code from Claude's page. If it is the login code Claude emails you, enter it on Claude's page, click Authorize, then paste the longer code Claude shows.";
 
 type Flow = {
   status: ProviderAuthenticationStatus;
@@ -121,10 +125,10 @@ export class ClaudeLoginController {
         homeKey,
         env,
         startupTimer: setTimeout(
-          () => this.finish(flow, "failed", "Claude Code did not show a sign-in link in time. Check that it is installed and up to date on the server, then try again."),
+          () => this.finish(flow, "failed", "Claude Code did not show a sign-in link in time. Check that it is installed and up to date on the server, then try again.", "timed_out"),
           this.options.startupTimeoutMs ?? 30_000,
         ),
-        expiryTimer: setTimeout(() => this.finish(flow, "expired", "The Claude sign-in link expired. Start sign-in again."), this.options.lifetimeMs ?? 15 * 60_000),
+        expiryTimer: setTimeout(() => this.finish(flow, "expired", "The Claude sign-in link expired. Start sign-in again.", "expired"), this.options.lifetimeMs ?? 15 * 60_000),
       };
       flow.startupTimer.unref();
       flow.expiryTimer.unref();
@@ -147,7 +151,7 @@ export class ClaudeLoginController {
     if (flow.status.phase !== "waiting" || !flow.ready) throw new Error(NOT_AVAILABLE);
     if (flow.codeSent) throw new Error("A code was already sent for this sign-in. Wait for the result, or cancel and start again.");
     const code = claudeLoginCode(pasted);
-    if (!code) throw new Error("Paste the whole code shown on Anthropic's page after signing in.");
+    if (!code) throw withSignInReason(new Error(NOT_THE_CODE), "wrong_code");
     const child = flow.child;
     const stdin = child?.stdin;
     if (!child || !stdin || child.exitCode !== null || child.signalCode !== null) throw new Error(NOT_AVAILABLE);
@@ -155,12 +159,12 @@ export class ClaudeLoginController {
     await new Promise<void>((resolveDone, rejectDone) => {
       flow.completion = { resolve: resolveDone, reject: rejectDone };
       const timer = setTimeout(
-        () => this.finish(flow, "failed", "Claude Code did not finish the sign-in after the code was entered. Start sign-in again."),
+        () => this.finish(flow, "failed", "Claude Code did not finish the sign-in after the code was entered. Start sign-in again.", "timed_out"),
         this.options.completeTimeoutMs ?? 60_000,
       );
       timer.unref();
       stdin.write(`${code}\n`, (error) => {
-        if (error) this.finish(flow, "failed", "The code could not be handed to Claude Code on the server. Start sign-in again.");
+        if (error) this.finish(flow, "failed", "The code could not be handed to Claude Code on the server. Start sign-in again.", "failed");
       });
     });
   }
@@ -171,7 +175,7 @@ export class ClaudeLoginController {
   }
 
   async cancel(): Promise<void> {
-    if (this.flow?.status.phase === "waiting") this.finish(this.flow, "cancelled", "Claude sign-in cancelled.");
+    if (this.flow?.status.phase === "waiting") this.finish(this.flow, "cancelled", "Claude sign-in cancelled.", "cancelled");
     await this.flow?.stopping;
     if (this.flow?.terminationFailed) throw new Error(this.flow.status.message);
     if (this.logoutChild && !await this.stopChild(this.logoutChild)) {
@@ -318,14 +322,14 @@ export class ClaudeLoginController {
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      this.finish(flow, "failed", "Claude Code could not start on this server. Install or update the configured Claude CLI, then try again.");
+      this.finish(flow, "failed", "Claude Code could not start on this server. Install or update the configured Claude CLI, then try again.", "failed");
       return;
     }
     flow.child = child;
     const receive = (chunk: Buffer) => {
       if (flow.status.phase !== "waiting") return;
       if (flow.output.length + chunk.length > MAX_OUTPUT) {
-        this.finish(flow, "failed", "Claude Code returned an unexpected sign-in response. Update the server's Claude CLI and try again.");
+        this.finish(flow, "failed", "Claude Code returned an unexpected sign-in response. Update the server's Claude CLI and try again.", "failed");
         return;
       }
       flow.output += chunk.toString("utf8");
@@ -343,7 +347,7 @@ export class ClaudeLoginController {
       const message = error.code === "ENOENT"
         ? "Claude Code is not installed on this server. Install it on the server, then try again."
         : "Claude Code could not start on this server. Check the configured CLI path and its executable permissions.";
-      this.finish(flow, "failed", message);
+      this.finish(flow, "failed", message, error.code === "ENOENT" ? "not_installed" : "failed");
     });
     child.once("close", (code) => {
       if (flow.child === child) flow.child = null;
@@ -356,18 +360,20 @@ export class ClaudeLoginController {
           this.finish(flow, "succeeded");
           return;
         }
+        const refused = flow.codeSent && /invalid|expired|denied|rejected/i.test(output);
         this.finish(flow, "failed", flow.codeSent
-          ? /invalid|expired|denied|rejected/i.test(output)
+          ? refused
             ? "Anthropic did not accept that code. Start sign-in again and paste the whole code it shows."
             : "Claude Code finished but is not signed in. Start sign-in again."
           : code === 0
             ? "Claude Code finished but is not signed in. Start sign-in again."
-            : "Claude Code stopped before the sign-in finished. Check the server's connection and try again.");
+            : "Claude Code stopped before the sign-in finished. Check the server's connection and try again.", refused ? "refused" : "exited");
       });
     });
   }
 
-  private finish(flow: Flow, phase: Exclude<ProviderAuthenticationStatus["phase"], "waiting">, message?: string): void {
+  /** `reason`: why it ended, as a fixed code, on the status and on the error a waiting start or code gets. */
+  private finish(flow: Flow, phase: Exclude<ProviderAuthenticationStatus["phase"], "waiting">, message?: string, reason?: SignInOutcome): void {
     if (flow.status.phase !== "waiting") return;
     clearTimeout(flow.startupTimer);
     clearTimeout(flow.expiryTimer);
@@ -377,15 +383,20 @@ export class ClaudeLoginController {
       authorizationUrl: null,
       expiresAt: null,
       ...(phase !== "succeeded" && message ? { message } : {}),
+      ...(phase !== "succeeded" && reason ? { reason } : {}),
     };
     flow.output = "";
+    const failure = () => {
+      const error = new Error(message ?? "Claude sign-in did not finish.");
+      return reason ? withSignInReason(error, reason) : error;
+    };
     if (!flow.ready) {
       if (phase === "succeeded") flow.resolve({ ...flow.status, phase });
-      else flow.reject(new Error(message ?? "Claude sign-in did not finish."));
+      else flow.reject(failure());
     }
     if (flow.completion) {
       if (phase === "succeeded") flow.completion.resolve();
-      else flow.completion.reject(new Error(message ?? "Claude sign-in did not finish."));
+      else flow.completion.reject(failure());
       flow.completion = undefined;
     }
     flow.stopping = this.stopChild(flow.child)
@@ -397,7 +408,7 @@ export class ClaudeLoginController {
           return;
         }
         flow.terminationFailed = true;
-        flow.status = { ...flow.status, phase: "failed", message: "Claude Code could not be stopped on this server. Ask the server administrator to stop the login process before trying again." };
+        flow.status = { ...flow.status, phase: "failed", message: "Claude Code could not be stopped on this server. Ask the server administrator to stop the login process before trying again.", reason: "failed" };
         const child = flow.child;
         if (!child || child.exitCode !== null || child.signalCode !== null) release();
         else child.once("close", release);

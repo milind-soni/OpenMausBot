@@ -69,9 +69,11 @@ restarts, and logs how many tools each server left out.
 Zen's free models have an allowance of their own, apart from any Go
 subscription on the same login. A free model that reaches it ("Free usage
 limit reached…") holds that login's free models, never the account: new turns
-can still run on its paid models, Go's included. A limit on the account's own
-allowance (a Go limit, or a monthly one) holds the whole account until its
-window resets, as with the other engines.
+can still run on its paid models, Go's included. A limit holds the provider it
+comes from — a Go limit holds the Go subscription's models, a limit on another
+provider's key holds that provider's models — and leaves the instance's other
+providers working until its window resets. Only a refusal that names no
+provider holds the whole account, as with the other engines.
 
 The limit card and the plan panel read Go's rolling, weekly and monthly
 windows from `opencode.ai/zen/go/v1/usage` with the key saved under Settings →

@@ -1,9 +1,11 @@
 // Dev-only gallery of Remote access with the end-to-end phone connection, served at /phone-relay-preview.html; not in
-// the packaged app. It mounts the real settings section and pairing screen over a fake companion bridge.
+// the packaged app. It mounts the real Devices page and pairing screen over a fake companion bridge.
 // ?view=phones|qr&e2e=on|off&relay=connected|off&skin=midnight|daylight&lang=de
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { PhoneDevicesSection } from "@/components/PhoneDevicesSection";
+import { DevicesPage } from "@/components/settings/pages/DevicesPage";
+import { fullContext } from "@/components/settings/settings-index";
+import { SettingsShellContext, type SettingsShell } from "@/components/settings/settings-shell";
 import { PhoneSetupFlowView, type CompanionState, type PhoneSetupController } from "@/components/PhoneSetupFlow";
 import { phonePairingLink } from "../shared/pairing-link";
 import { loadLocale } from "@/lib/i18n";
@@ -73,12 +75,14 @@ const controller = {
   tailscaleAvailable: true, pairingExpired: false, setupTimedOut: false, act: async () => {}, accountAct: async () => {},
 } as unknown as PhoneSetupController;
 
+const shell: SettingsShell = { ctx: fullContext({ advanced: false }), place: { name: "This computer", kind: "computer", color: null, named: false }, page: "devices", anchor: null, go: () => {} };
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <StoreContext.Provider value={{ state: initialState, dispatch: () => {} } as never}>
-      <div className="min-h-screen bg-app p-8 text-ink">
+    <StoreContext.Provider value={{ state: { ...initialState, config: { profile: { email: "ada@example.com" } } }, dispatch: () => {} } as never}>
+      <div className="min-h-screen bg-app p-8 text-ink" data-settings-look="simple">
         <div className={view === "qr" ? "mx-auto max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6" : "mx-auto max-w-[640px]"}>
-          {view === "qr" ? <PhoneSetupFlowView controller={controller} /> : <PhoneDevicesSection profileEmail="ada@example.com" />}
+          {view === "qr" ? <PhoneSetupFlowView controller={controller} /> : <SettingsShellContext.Provider value={shell}><div className="flex flex-col gap-6"><DevicesPage /></div></SettingsShellContext.Provider>}
         </div>
       </div>
     </StoreContext.Provider>

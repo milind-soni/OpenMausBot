@@ -8,6 +8,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { request as httpsRequest } from "node:https";
 import type { Socket } from "node:net";
 
+import { guardedHandler, trimmedHeaderValues, unsendableHeader, unusableCredentialBody } from "./broker-headers.ts";
 import { MAX_REFUSABLE_CALL_BYTES, refusedCallAnswer } from "./broker-mcp-refusal.ts";
 import type { McpServerApp } from "../mcp-server-app.ts";
 
@@ -137,7 +138,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const name of Object.keys(input.grants)) if (!GRANT.test(name)) throw new Error(`Not a grant name: ${name.slice(0, 40)}`);
     const token = `${BROKER_TOKEN_PREFIX}${randomBytes(24).toString("hex")}`;
     const expiresAt = now() + (input.ttlMs ?? (bound === "process" ? BROKER_PROCESS_TTL_MS : BROKER_THREAD_TTL_MS));
-    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers }, ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}), ...(grant.serve ? { serve: grant.serve } : {}) }]));
+    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: trimmedHeaderValues(grant.headers), ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}), ...(grant.serve ? { serve: grant.serve } : {}) }]));
     tokens.set(hashToken(token).toString("hex"), { hash: hashToken(token), botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants, bound });
     return { token, botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants };
   };
@@ -153,7 +154,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
   };
   const requestFn = options.request;
 
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server: Server = createServer(guardedHandler("credential broker", (req: IncomingMessage, res: ServerResponse) => {
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
     const inPath = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
     const inHeader = inPath ? null : /^\/g\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
@@ -169,34 +170,48 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     }
     const upstream = upstreamUrl(verdict.grant.upstream, path, query);
     if (!upstream) return refuse(502, "bad_upstream");
+    // A saved key Node cannot put in a header (a control character, a character beyond Latin-1) fails this request
+    // with words naming it, never the process: the request would throw where it is built.
+    const unsendable = unsendableHeader(verdict.grant.headers);
+    const unusable = (header: string) => {
+      stats.refused += 1;
+      res.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" }).end(unusableCredentialBody(verdict.grant.mcpServer ? `the MCP server ${verdict.grant.mcpServer}` : grant, header));
+      req.resume();
+    };
+    if (unsendable) return unusable(unsendable);
     const headers = forwardableHeaders(req.headers);
     for (const [name, value] of Object.entries(verdict.grant.headers)) headers[name.toLowerCase()] = value;
     headers.host = upstream.host;
     const send = requestFn ?? (upstream.protocol === "https:" ? httpsRequest : httpRequest);
     const relay = (answer: IncomingMessage) => {
-      res.writeHead(answer.statusCode ?? 502, relayableHeaders(answer.headers));
+      try { res.writeHead(answer.statusCode ?? 502, relayableHeaders(answer.headers)); } catch { answer.resume(); res.destroy(); return; }
       answer.pipe(res);
     };
     const mcpServer = req.method === "POST" ? verdict.grant.mcpServer : undefined;
     const sent: Buffer[] = [];
     let sentBytes = 0;
     if (mcpServer) req.on("data", (chunk: Buffer) => { sentBytes += chunk.length; if (sentBytes <= MAX_REFUSABLE_CALL_BYTES) sent.push(chunk); });
-    const forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
-      if (!mcpServer || answer.statusCode !== 401) return relay(answer);
-      const decide = () => {
-        const sentCredentials = Object.values(verdict.grant.headers).some((value) => value !== "");
-        const refusal = sentBytes <= MAX_REFUSABLE_CALL_BYTES ? refusedCallAnswer(mcpServer, sentCredentials, Buffer.concat(sent).toString("utf8"), verdict.grant.mcpApp) : null;
-        if (refusal === null) return relay(answer);
-        answer.resume();
-        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(refusal);
-      };
-      if (req.readableEnded) decide(); else req.once("end", decide);
-    });
+    let forwarded: ReturnType<typeof httpRequest>;
+    try {
+      forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
+        if (!mcpServer || answer.statusCode !== 401) return relay(answer);
+        const decide = () => {
+          const sentCredentials = Object.values(verdict.grant.headers).some((value) => value !== "");
+          const refusal = sentBytes <= MAX_REFUSABLE_CALL_BYTES ? refusedCallAnswer(mcpServer, sentCredentials, Buffer.concat(sent).toString("utf8"), verdict.grant.mcpApp) : null;
+          if (refusal === null) return relay(answer);
+          answer.resume();
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(refusal);
+        };
+        if (req.readableEnded) decide(); else req.once("end", decide);
+      });
+    } catch {
+      return unusable(unsendableHeader(headers) ?? "a header");
+    }
     stats.forwarded += 1;
     forwarded.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: "upstream_unreachable" })); else res.destroy(); });
     req.pipe(forwarded);
     res.on("close", () => forwarded.destroy());
-  });
+  }));
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));

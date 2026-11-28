@@ -9,6 +9,8 @@ vi.mock("@/state/store", () => ({
   useStore: () => ({ state: { pluginsSurface: "apps", bots: [], instances: [] }, dispatch: vi.fn() }),
 }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
+vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", () => ({ X_CARD_SEARCH: "x", XCard: () => null }));
 
 const { PluginsPanel } = await import("./PluginsPanel");

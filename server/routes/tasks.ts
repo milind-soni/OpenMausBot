@@ -15,7 +15,7 @@ import { parseSurface } from "../surface.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
 import { titleConversationExcerpt, type ThreadTitleSource } from "../thread-title.ts";
 import type { MessagePage } from "./channels.ts";
-import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { madeThread, sawThread } from "../thread-presence.ts";
@@ -230,8 +230,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const refused: BulkDeleteRefusal[] = [];
       for (const threadId of parsed.threadIds) {
         const refusal = deleteRefusal(auth, bot.id, threadId);
-        if (!refusal) allowed.push(threadId);
-        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.taskByThread(bot.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
       }
       const result = deleteTasks(bot.id, allowed);
       if (!result) return json(res, 404, { error: "no such bot" });
@@ -252,8 +253,8 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
-      deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast, notificationListed(auth));
+      // "seen=0": the page showed it by itself at launch; what waits there for the person stays unseen until they open it.
+      if (url.searchParams.get("seen") !== "0") { deps.threadRead?.(auth, m[2]); readThreadNotifications(m[2], broadcast, notificationListed(auth)); }
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).

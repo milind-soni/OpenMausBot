@@ -1,12 +1,12 @@
 // First-party Android phone MCP server: physical USB devices only (no emulators, wireless or network ADB).
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
-import { createInterface } from "node:readline";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 
 import { PHONE_STEP_TOOLS, type PhoneStepTool } from "../../shared/phone-steps.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_WAIT_MS } from "../control-client.ts";
+import { readStdioLines } from "../stdio-lines.ts";
 
 type Json = Record<string, unknown>;
 type Device = { serial: string; state: string; model: string; connection: "usb" | "network" | "emulator" };
@@ -735,8 +735,7 @@ async function handle(message: Json, ensureClaim: EnsureClaim) {
 
 if (process.argv[1] && existsSync(process.argv[1]) && /phone-proxy\.(?:ts|js)$/.test(process.argv[1])) {
   const ensureClaim = createPhoneClaim();
-  const lines = createInterface({ input: process.stdin, terminal: false });
-  lines.on("line", (line) => {
+  readStdioLines(process.stdin, (line) => {
     try {
       const message = JSON.parse(line) as Json;
       void handle(message, ensureClaim).catch((error) => rpcError(message.id, -32603, error instanceof Error ? error.message : String(error)));

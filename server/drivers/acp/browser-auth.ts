@@ -42,6 +42,8 @@ export interface AcpBrowserSignInSpec {
 
 export interface AcpBrowserAuthOptions {
   cli: string;
+  /** The driver kind, whose sign-in in the server's HOME the boxed sign-in may write. */
+  engine?: string;
   /** The engine's own session spawn args, so the sign-in runs with a turn's environment. */
   sessionArgs?: (env: Env) => readonly string[];
   cwd?: string;
@@ -132,7 +134,7 @@ export class AcpBrowserAuth {
         const extra = (this.spec.args ?? []).map((arg) => typeof arg === "function" ? arg(env) : arg).filter((arg): arg is string => arg !== undefined);
         const sessionArgs = this.options.sessionArgs ? this.options.sessionArgs(env) : [];
         const argv = [this.options.cli, ...extra, ...sessionArgs];
-        child = spawnCli(argv[0], argv.slice(1), { cwd: this.options.cwd, env, stdio: ["pipe", "pipe", "pipe"] }, "bot");
+        child = spawnCli(argv[0], argv.slice(1), { cwd: this.options.cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { engine: this.options.engine } }, "bot");
       } catch (error) {
         spawnFail(error instanceof Error && typeof (error as { code?: unknown }).code === "string"
           ? String((error as { code?: unknown }).code) : undefined);

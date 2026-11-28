@@ -38,7 +38,11 @@ export function sanitizeAcpToolMessage(message: any): unknown {
 /** What the native log keeps of any ACP message: inline images stay on the wire but never go in as base64. */
 export function acpNativeLogMessage(msg: any, sanitizeToolPayload: boolean): unknown {
   let redacted = msg;
-  const prompt = msg?.method === "session/prompt" ? msg?.params?.prompt : null;
+  // authenticate carries the API key in _meta: keep it on the wire, never in the native log.
+  if (msg?.method === "authenticate" && msg?.params?._meta !== undefined) {
+    redacted = { ...msg, params: { ...msg.params, _meta: "[redacted]" } };
+  }
+  const prompt = redacted?.method === "session/prompt" ? redacted?.params?.prompt : null;
   if (Array.isArray(prompt)) {
     redacted = {
       ...msg,
