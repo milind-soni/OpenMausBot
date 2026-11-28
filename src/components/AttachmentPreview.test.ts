@@ -40,6 +40,10 @@ describe("attachment image navigation", () => {
     expect(previewKeyAction("ArrowRight", 3)).toBe("next");
     expect(previewKeyAction("ArrowRight", 1)).toBeNull();
     expect(previewKeyAction("Enter", 3)).toBeNull();
+    expect(previewKeyAction("+", 1)).toBe("zoom-in");
+    expect(previewKeyAction("=", 1)).toBe("zoom-in");
+    expect(previewKeyAction("-", 1)).toBe("zoom-out");
+    expect(previewKeyAction("0", 1)).toBe("zoom-reset");
   });
 
   it("uses compact responsive grids for one, two, and many images", () => {

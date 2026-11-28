@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { PREVIEW_ZOOM_MAX, wheelPixels, zoomAtPoint, type PreviewZoom } from "./preview-zoom";
+import { PREVIEW_ZOOM_MAX, panBy, wheelPixels, zoomAtPoint, zoomByStep, type PreviewZoom } from "./preview-zoom";
 
 const imagePixelAt = (zoom: PreviewZoom, point: { x: number; y: number }) =>
   ({ x: (point.x - zoom.x) / zoom.scale, y: (point.y - zoom.y) / zoom.scale });
@@ -31,6 +31,26 @@ describe("zooming a previewed image at a point", () => {
 
   it("leaves a fitted image fitted when the wheel turns down", () => {
     expect(zoomAtPoint({ scale: 1, x: 0, y: 0 }, 100, { x: 10, y: 10 })).toEqual({ scale: 1, x: 0, y: 0 });
+  });
+
+  it("zooms by half again per button step around the given point, and back to fitted", () => {
+    const center = { x: 200, y: 150 };
+    const once = zoomByStep({ scale: 1, x: 0, y: 0 }, 1, center);
+    expect(once.scale).toBeCloseTo(1.5);
+    expect(imagePixelAt(once, center)).toEqual({ x: expect.closeTo(200), y: expect.closeTo(150) });
+    expect(zoomByStep(zoomByStep(once, 1, center), -1, center).scale).toBeCloseTo(1.5);
+    expect(zoomByStep(once, -1, center)).toEqual({ scale: 1, x: 0, y: 0 });
+  });
+
+  it("stops button steps at the largest zoom", () => {
+    let zoom: PreviewZoom = { scale: 1, x: 0, y: 0 };
+    for (let step = 0; step < 12; step++) zoom = zoomByStep(zoom, 1, { x: 0, y: 0 });
+    expect(zoom.scale).toBe(PREVIEW_ZOOM_MAX);
+  });
+
+  it("moves a zoomed image by the drag distance, and leaves a fitted image in place", () => {
+    expect(panBy({ scale: 2, x: -40, y: 10 }, 15, -25)).toEqual({ scale: 2, x: -25, y: -15 });
+    expect(panBy({ scale: 1, x: 0, y: 0 }, 15, -25)).toEqual({ scale: 1, x: 0, y: 0 });
   });
 
   it("reads a wheel's lines and pages as pixels", () => {
