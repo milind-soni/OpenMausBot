@@ -460,10 +460,17 @@ describe("pairing", () => {
     expect(paired.status).toBe(200);
     const h = (extra: Record<string, string> = {}) => remote("10.0.0.40", { authorization: `Bearer ${paired.body.token}`, ...extra });
     expect((await call("/api/bots", { headers: h() })).status).toBe(200);
-    for (const [method, path] of [["POST", "/api/cli-test"], ["GET", "/api/instances"], ["POST", "/api/webhooks"], ["GET", "/api/mcp/servers"], ["POST", "/api/local-computer/run"]] as const) {
+    for (const [method, path] of [["POST", "/api/cli-test"], ["POST", "/api/webhooks"], ["GET", "/api/mcp/servers"], ["POST", "/api/local-computer/run"]] as const) {
       const r = await call(path, { method, headers: h(), body: method === "POST" ? "{}" : undefined });
       expect(r.status, `${method} ${path}`).toBe(403);
       expect(r.body.error, `${method} ${path}`).toContain("admin scope");
+    }
+    // The engine list, for picking a model and steering: names, models and capabilities, no accounts or paths.
+    const engines = await call("/api/instances", { headers: h() });
+    expect(engines.status).toBe(200);
+    for (const instance of engines.body.instances as Array<Record<string, unknown>>) {
+      expect(Object.keys(instance).filter((key) => !["instanceId", "driverKind", "displayName", "readOnly", "icon", "access", "models", "capabilities", "snapshot"].includes(key))).toEqual([]);
+      expect(Object.keys(instance.snapshot as object).filter((key) => key !== "state" && key !== "authenticated")).toEqual([]);
     }
     const created = await call("/api/bots", { method: "POST", body: JSON.stringify({ name: "Scoped" }) });
     const botId = created.body?.id ?? created.body?.bot?.id;

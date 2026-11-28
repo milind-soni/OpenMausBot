@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { antigravityHarnessLimit } from "../antigravity-turn-outcome.ts";
+import { antigravityHarnessFailure } from "../antigravity-turn-outcome.ts";
 import { ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS } from "../antigravity.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { ANTIGRAVITY_HARNESS_FAILURE_LOG } from "./harness-failure.ts";
@@ -93,7 +93,7 @@ describe("an agent whose own log says its local harness failed", () => {
       + "Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[metadata:map[quotaResetDelay:38m0s] reason:QUOTA_EXHAUSTED]]";
     const driver = createAcpDriver({
       ...SUPPORT,
-      stderrFailure: { line: ANTIGRAVITY_HARNESS_FAILURE_LOG, message: "The local agent connection failed.", failure: (line) => antigravityHarnessLimit("Turn Health Test", line) },
+      stderrFailure: { line: ANTIGRAVITY_HARNESS_FAILURE_LOG, message: "The local agent connection failed.", failure: (line) => antigravityHarnessFailure("Turn Health Test", line) },
     });
     instance = await driver.create({
       instanceId: "turn-health-quota", displayName: "Turn Health", enabled: true, config: driver.defaultConfig(),

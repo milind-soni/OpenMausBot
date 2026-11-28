@@ -152,6 +152,19 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     if (aside) setAside.current = { key: transcriptKey, selection: aside };
     return next;
   };
+  /**
+   * `next`, widened over the rows on screen: rows that draw nothing (folded tool steps) can leave a whole window shorter
+   * than the view. Unbounded, since no more rows can be on screen than fit on it.
+   */
+  const keepOnScreen = (next: TranscriptWindowBounds): TranscriptWindowBounds => {
+    const el = scrollRef.current, list = transcriptRef.current;
+    if (!el || !list) return next;
+    const shown = rowsInView(el, list, restingCardId.current)
+      .map((row) => messages.findIndex((message) => message.id === row.rowId))
+      .filter((index) => index >= 0);
+    if (shown.length === 0) return next;
+    return holdRows(next, messages.length, { first: Math.min(...shown), last: Math.max(...shown) }, Infinity)!;
+  };
   const readingBottom = () => {
     const el = scrollRef.current;
     return Boolean(el) && gapBelow(el!) <= el!.clientHeight;
@@ -179,7 +192,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     ? { start: current.restore?.start ?? tailStart, end: current.restore?.end ?? null, added: -1 }
     : nextWindow(transcriptWindow, messages, following, readingBottom);
   const moves = proposed.start !== transcriptWindow.start || proposed.end !== transcriptWindow.end;
-  const next = !switched && moves ? { ...proposed, ...keepSelection(proposed) } : proposed;
+  const next = !switched && moves ? { ...proposed, ...keepSelection(following ? proposed : keepOnScreen(proposed)) } : proposed;
   if (switched || next.start !== transcriptWindow.start || next.end !== transcriptWindow.end || first !== transcriptWindow.first) {
     // Rows came in front of the drawn ones or left their top: the DOM is still the last commit's, so it is read now.
     if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow();
@@ -390,7 +403,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   /** Draws the window `step` gives, in a transition so its rows mount between frames; false when there is nothing to draw. */
   const stepWindow = (step: (window: TranscriptWindowBounds, total: number) => TranscriptWindowBounds) => {
-    const target = keepSelection(step(drawnBounds, messages.length), drawnBounds);
+    const target = keepSelection(keepOnScreen(step(drawnBounds, messages.length)), drawnBounds);
     if (target.start === drawnBounds.start && target.end === drawnBounds.end) return false;
     holdRow(windowRef.current);
     startTransition(() => setTranscriptWindow((w) => w.key === transcriptKey ? { ...w, ...target } : w));
@@ -438,6 +451,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     if (expandingRef.current || drawFromRef.current || laterCount === 0) return;
     expandingRef.current = stepWindow(windowLater);
   };
+  const latestAutoEarlier = useRef(triggerAutoEarlier);
+  latestAutoEarlier.current = triggerAutoEarlier;
 
   useEffect(() => {
     const sentinel = topSentinelRef.current;
@@ -446,8 +461,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
+        // An observer can report between a step's commit and this effect re-running: the step it made would start
+        // from the window before, ask for the window already drawn, and hold every later step forever.
         if (entry?.isIntersecting && !followRef.current && !movingDown.current) {
-          triggerAutoEarlier();
+          latestAutoEarlier.current();
         }
       },
       { root, rootMargin: `${STEP_AHEAD_VIEWS * 100}% 0px 0px 0px` },

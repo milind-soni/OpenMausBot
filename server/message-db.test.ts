@@ -33,6 +33,8 @@ import { closeMessageDb,
   recallMessages,
   searchMessages,
   setActiveLeaf,
+  attachmentNameIndex,
+  threadsReferencing,
   updateMessage, describeMissingFts5 } from "./message-db.ts";
 import type { NotificationLogEntry } from "../shared/notification.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
@@ -48,6 +50,14 @@ const msg = (id: string, text: string, extra: Partial<Message> = {}): Message =>
   text,
   at: Date.now(),
   ...extra,
+});
+const UPLOAD_A = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d.png";
+const UPLOAD_B = "9e8d7c6b-5a49-4f3e-ab1a-0c9d8e7f6a5b.jpg";
+const storedUpload = (name: string): NonNullable<Message["attachments"]>[number] => ({
+  kind: "file",
+  path: join(DATA_DIR, "attachments", name),
+  mime: "application/pdf",
+  name: "notes.pdf",
 });
 
 describe("message-db", () => {
@@ -186,6 +196,50 @@ describe("message-db", () => {
     const counts = breaker.prepare("SELECT thread_id, count(*) AS n FROM messages GROUP BY thread_id ORDER BY thread_id").all();
     breaker.close();
     expect(counts.map((row) => ({ ...row }))).toEqual([{ thread_id: "r1", n: 1 }, { thread_id: "r2", n: 1 }]);
+  });
+
+  it("threadsReferencing answers a stored upload's name from the index: a patch-added name is found and a patch-removed one is not", () => {
+    insertMessage("t1", msg("m1", "hello", { attachments: [storedUpload(UPLOAD_B)] }));
+    expect(threadsReferencing(UPLOAD_A)).toEqual([]); // the first query builds the index from the rows
+    insertMessage("t1", msg("m2", "", { attachments: [storedUpload(UPLOAD_A)] }));
+    expect(threadsReferencing(UPLOAD_A)).toEqual(["t1"]);
+    // host/turn-attachments.ts patches attachments onto an existing reply, and the upsert keeps the row's old rowid:
+    updateMessage("t1", msg("m2", ""));
+    expect(threadsReferencing(UPLOAD_A)).toEqual([]);
+    expect(threadsReferencing(UPLOAD_B)).toEqual(["t1"]);
+  });
+
+  it("threadsReferencing stops finding a name once a thread that named it is deleted", () => {
+    insertMessage("t1", msg("m1", "", { attachments: [storedUpload(UPLOAD_A)] }));
+    insertMessage("t2", msg("m1", "", { attachments: [storedUpload(UPLOAD_A)] }));
+    expect(threadsReferencing(UPLOAD_A).sort()).toEqual(["t1", "t2"]);
+    deleteThread("t2");
+    expect(threadsReferencing(UPLOAD_A)).toEqual(["t1"]);
+  });
+
+  it("threadsReferencing rebuilds the attachment-name index when messages.db reopens, so it stays exact", () => {
+    insertMessage("t1", msg("m1", "", { attachments: [storedUpload(UPLOAD_A)] }));
+    expect(threadsReferencing(UPLOAD_A)).toEqual(["t1"]);
+    closeMessageDb();
+    insertMessage("t2", msg("m1", "", { attachments: [storedUpload(UPLOAD_A)] })); // the reopen resets the index; the write hook is quiet until the next build
+    expect(threadsReferencing(UPLOAD_A).sort()).toEqual(["t1", "t2"]);
+    expect(threadsReferencing(UPLOAD_B)).toEqual([]);
+  });
+
+  it("threadsReferencing reads the rows for a name no stored upload can have", () => {
+    insertMessage("t1", msg("m1", "saved it as my notes.txt in the folder"));
+    expect(threadsReferencing("my notes.txt")).toEqual(["t1"]);
+    expect(threadsReferencing("no-such-thing.txt")).toEqual([]);
+  });
+
+  it("builds the attachment-name index once, not per query or per write", () => {
+    const before = attachmentNameIndex.builds;
+    insertMessage("t1", msg("m1", "", { attachments: [storedUpload(UPLOAD_A)] }));
+    threadsReferencing(UPLOAD_A);
+    threadsReferencing(UPLOAD_A);
+    updateMessage("t1", msg("m1", "edited", { attachments: [storedUpload(UPLOAD_A)] }));
+    expect(threadsReferencing(UPLOAD_A)).toEqual(["t1"]);
+    expect(attachmentNameIndex.builds).toBe(before + 1);
   });
 
   it("recall ranks by relevance, scopes to the given threads, and survives updates and deletes", () => {

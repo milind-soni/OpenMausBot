@@ -167,7 +167,7 @@ describe("a bot hands one step to the person", () => {
     await w.requests.request(BOT, "work", ask);
     const rows = w.rows();
     rows.push({ id: "step", at: 2_000_000, role: "bot", kind: "activity", tool: { name: "agent_browser_open", ok: true, input: "https://github.com/" } } as Message);
-    w.settle.verified("dachs", "work", 0);
+    w.settle.verified("dachs", "work");
     expect(signInOutcome(w.rows()[0]!.signIn!)).toBeNull();
   });
 });

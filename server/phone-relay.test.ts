@@ -2,10 +2,10 @@
 // are the phones, and every relayed request reaches the handler as a remote one.
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Socket } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
@@ -24,6 +24,7 @@ import { SessionRegistry } from "./sessions.ts";
 const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 const signingKey = generateKeyPairSync("ed25519").privateKey;
+const secondSigningKey = generateKeyPairSync("ed25519").privateKey;
 const keys = new Map([["k1", ed25519RawPublicKey(signingKey)]]);
 const NODE = "relay1.openmausbot.com";
 
@@ -408,6 +409,62 @@ describe("phones through MausBot Relay on a server", () => {
       expect(() => statSync(join(dir, PHONE_RELAY_KEY_FILE))).toThrow();
       sessions.close();
     }
+  });
+
+  it("asks for its token from the credential document a sign-in writes, and re-reads it when the relay refuses the old one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-phone-relay-doc-"));
+    cleanup.push(() => removeTempDir(dir));
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    cleanup.push(() => sessions.close());
+    const hostId = randomBytes(16);
+    let credential = `omb_install_${randomBytes(16).toString("base64url")}.${randomBytes(32).toString("base64url")}`;
+    let signing = signingKey;
+    const requests: Array<{ credential: string; body: Record<string, unknown> }> = [];
+    const controlPlane = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const given = (req.headers.authorization ?? "").slice("Bearer ".length);
+      if (req.method !== "POST" || req.url !== "/v1/installations/self/relay-token" || given !== credential) {
+        return void res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
+      }
+      requests.push({ credential: given, body: JSON.parse(raw) });
+      const iat = Math.floor(Date.now() / 1000);
+      const token = mintRelayToken({ v: 1, kid: "k1", hid: b64u(hostId), iid: "test-install", iat, exp: iat + 43_200 }, signing);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        token, hostId: b64u(hostId), nodes: [NODE], expiresAt: (iat + 43_200) * 1000, refreshAfter: (iat + 3_600) * 1000,
+      }));
+    });
+    await new Promise<void>((resolve) => controlPlane.listen(0, "127.0.0.1", resolve));
+    cleanup.push(() => new Promise<void>((resolve) => controlPlane.close(() => resolve())));
+    // What `openmausbot login --relay` leaves behind: the installation credential, and no tunnel address.
+    writeFileSync(join(dir, "tunnel-account.json"), JSON.stringify({ companionInstallationCredential: credential }), { mode: 0o600 });
+
+    const relay = await startFakeRelay({ keys });
+    cleanup.push(() => relay.close());
+    const upgrades = createUpgrades();
+    cleanup.push(() => upgrades.close());
+    const phoneRelay = startPhoneRelay({
+      env: { OMB_PHONE_RELAY: "1", OMB_PHONE_RELAY_URL: relay.url, OMB_CONTROL_PLANE_URL: `http://127.0.0.1:${(controlPlane.address() as AddressInfo).port}` },
+      dataDir: dir, sessions, handle: () => {}, upgrades,
+      serverName: () => "VPS", publicOrigin: () => null, version: SERVER_VERSION, refusal: null,
+      log: () => {},
+    })!;
+    cleanup.push(() => phoneRelay.stop());
+    await waitFor(() => phoneRelay.status().relay === "connected", 5_000);
+    expect(phoneRelay.status().grant).toBe("ok");
+    expect(requests).toEqual([{ credential, body: { appVersion: SERVER_VERSION, devices: { e2e: 0, legacy: 0 }, kind: "server" } }]);
+
+    // Signing in again rotates the credential; the relay refuses the token it holds, and the next fetch re-reads
+    // the document, so a sign-in needs no restart of the server or the relay to be serving phones again.
+    credential = `omb_install_${randomBytes(16).toString("base64url")}.${randomBytes(32).toString("base64url")}`;
+    signing = secondSigningKey;
+    keys.set("k1", ed25519RawPublicKey(secondSigningKey));
+    cleanup.push(() => keys.set("k1", ed25519RawPublicKey(signingKey)));
+    writeFileSync(join(dir, "tunnel-account.json"), JSON.stringify({ companionInstallationCredential: credential }), { mode: 0o600 });
+    relay.restart();
+    await waitFor(() => phoneRelay.status().relay === "connected" && requests.length === 2, 5_000);
+    expect(requests[1]).toMatchObject({ credential });
+    expect(phoneRelay.status().grant).toBe("ok");
   });
 
   it("pairs only with the QR's credential: a typed code and the browser's pairing route are refused", async () => {
