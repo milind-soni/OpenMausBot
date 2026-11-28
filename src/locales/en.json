@@ -4080,6 +4080,7 @@
   "settings.profiles.browserLabel": "Browser",
   "settings.profiles.builtIn": "Built-in",
   "settings.profiles.myChrome": "My Chrome",
+  "settings.profiles.myChromeConfigured": "This profile uses the Chrome set in the server configuration. Sign in and out of sites in that Chrome.",
   "settings.profiles.myChromeHint": "Bots on this profile act inside your real Chrome, signed in as you, with your cookies and your open tabs. Use it for sites that refuse the built-in browser, such as Google sign-in. To connect, open chrome://inspect/#remote-debugging in Chrome and turn remote debugging on; Chrome asks you to allow the connection. Sign in and out of sites in Chrome itself.",
   "settings.profiles.myChromeUnavailable": "My Chrome is for the desktop app, where bots run on your own computer. Anywhere else, such as the Cloud, there is no Chrome of yours to use, so every profile uses the built-in browser.",
   "settings.profiles.myChromeLent": "On My Cloud this is the Chrome on {name}, your {device}. It works while that {device} is awake with {app} open, in conversations you started yourself.",

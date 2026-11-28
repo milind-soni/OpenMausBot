@@ -16,6 +16,30 @@ export function isValidCdpTarget(value: unknown): value is string {
   return CDP_URL.test(value);
 }
 
+const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
+const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
+
+/** A named browser session whose id selects a durable Electron partition. */
+export const browserProfileSchema = z.object({
+  // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
+  id: z.string().regex(BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
+  name: z.string().trim().min(1).max(40),
+  /** "chrome" uses the person's own running Chrome (My Chrome). */
+  browser: z.literal("chrome").optional(),
+}).strict();
+
+export const legacyBrowserProfileSchema = browserProfileSchema.extend({
+  id: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
+  partitionId: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved").optional(),
+  /** DevTools endpoint set only in config.json. It may contain a credential. */
+  cdpUrl: z.string().trim().max(2048).refine((value) => isValidCdpTarget(value) && (CDP_PORT.test(value) || URL.canParse(value)),
+    { message: "Enter a CDP port (1-65535) or an http(s)/ws(s) URL" }).optional(),
+}).refine((profile) => profile.cdpUrl === undefined || profile.browser === "chrome", {
+  path: ["cdpUrl"], message: "A CDP address requires a My Chrome profile",
+});
+
+export type BrowserProfile = z.output<typeof legacyBrowserProfileSchema>;
+
 export type BrowserEngineKind = "agent-browser" | "chrome";
 
 /** `attachCdpUrl`: a running Chrome that My Chrome profiles attach to. Config only, never env: the ambient environment must not redirect a bot's browser. */

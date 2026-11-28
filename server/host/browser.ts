@@ -219,7 +219,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // The desktop's idle time, not a Cloud home's shorter one: each reconnect may make Chrome ask the person to Allow again.
   const doors = lentChrome ? new LentChromeDoors({ route: () => lentChrome.route(), allowed: lentChromeAllowed, idleMs: () => browserIdleMs(cfg, { cloudHome: false }) }) : undefined;
   const doorUrls = new Map<string, string>();
-  const leftovers = new Map<string, Promise<void>>();
+  const leftovers = new Map<string, Promise<boolean>>();
   async function lentChromeDoor(session: string): Promise<string | undefined> {
     if (!doors) return undefined;
     // A browser already running when this server first opens the session's door was told another address: an earlier
@@ -231,11 +231,24 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     doorUrls.set(session, url);
     return url;
   }
-  async function closeLeftover(session: string): Promise<void> {
+  async function closeLeftover(session: string): Promise<boolean> {
     const engine = browserEngineStatus();
-    if (engine.kind !== "ready" || !browserRunning(session, undefined)) return;
+    if (engine.kind !== "ready" || !browserRunning(session, undefined)) return true;
     const closed = await closeBrowserSession(engine.binaryPath, browserRuntimeEnv({ AGENT_BROWSER_SESSION: session })).catch(() => false);
-    if (!closed) console.warn(`browser ${session}: could not close the browser left running before its door to your Chrome opened`);
+    if (!closed) console.warn(`browser ${session}: could not close the browser left running before connecting to My Chrome`);
+    return closed;
+  }
+  async function prepareProfileChrome(profileId: string | undefined, session: string): Promise<void> {
+    if (!profileCdpUrl(profileId)) return;
+    let closed = leftovers.get(session);
+    if (!closed) {
+      closed = closeLeftover(session);
+      leftovers.set(session, closed);
+    }
+    if (!await closed) {
+      if (leftovers.get(session) === closed) leftovers.delete(session);
+      throw new Error("Could not disconnect the previous My Chrome session. Reopen the browser to try again.");
+    }
   }
   /** A profile switched back to the built-in browser keeps its session name and its door, but its calls no longer use it. */
   function viaDoor(session: string, spec: { env: NodeJS.ProcessEnv }): boolean {
@@ -532,12 +545,19 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (closed) await browserRuntime.close(session);
     else console.warn(`temporary browser ${session}: could not close its session; run agent-browser --session ${session} close on this server`);
   }
+  function profileCdpUrl(profileId: string | undefined): string | undefined {
+    if (!profileId || CLOUD_HOME || deps.HOSTED_WORKSPACE) return undefined;
+    return cfg.browserProfiles?.find((profile) => profile.id === profileId && profile.browser === "chrome")?.cdpUrl;
+  }
   function myChromeAvailable(): boolean {
     return DESKTOP_MANAGED || browserEngineAttachCdpUrl(cfg) !== null || Boolean(lentChrome?.lender());
   }
+  function browserProfilesForStatus() {
+    return (cfg.browserProfiles ?? []).map(({ cdpUrl, ...profile }) => ({ ...profile, ...(cdpUrl && profileCdpUrl(profile.id) ? { attachedChrome: true as const } : {}) }));
+  }
   /** A My Chrome profile on My Cloud: the person's lent Chrome, through this session's door. */
   function lentChromeSession(profileId: string | undefined): boolean {
-    return !DESKTOP_MANAGED && browserEngineAttachCdpUrl(cfg) === null && doors !== undefined && usesMyChrome(profileId);
+    return !DESKTOP_MANAGED && !profileCdpUrl(profileId) && browserEngineAttachCdpUrl(cfg) === null && doors !== undefined && usesMyChrome(profileId);
   }
   /** Where My Chrome is on My Cloud: the computer that lends it, or that one could. */
   function lentChromeSummary(): { myChromeOn?: ChromeLender; myChromeLendable?: true } {
@@ -548,12 +568,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   /** On My Cloud a My Chrome profile stays the person's Chrome while no computer lends it: its calls say so, and never
    * fall back to the built-in browser, whose sign-ins differ. */
   function usesMyChrome(profileId: string | undefined): boolean {
-    return Boolean(profileId) && (myChromeAvailable() || lentChrome !== undefined)
+    return Boolean(profileId) && (Boolean(profileCdpUrl(profileId)) || myChromeAvailable() || lentChrome !== undefined)
       && cfg.browserProfiles?.some((profile) => profile.id === profileId && profile.browser === "chrome") === true;
   }
   /** `cloudUrl`: the session's browser runs on the bot's cloud computer, reached through this address. */
   function browserSessionSpec(binaryPath: string, session: string, profile: string | undefined, egressPort?: number, cdpUrl?: string, cloudUrl?: string) {
-    const attachCdpUrl = cdpUrl ?? browserEngineAttachCdpUrl(cfg);
+    const attachCdpUrl = cdpUrl ?? profileCdpUrl(profile) ?? browserEngineAttachCdpUrl(cfg);
     const locale = browserLanguage(process.env, deps.language?.());
     return agentBrowserIntegration({
       binaryPath, session, encryptionKey: browserEngineEncryptionKey(), persistent: profile !== "guest", egressPort,
@@ -630,6 +650,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return null;
     }
     const session = currentBrowserSession(botId, profile, audience);
+    await prepareProfileChrome(browserProfileId, session);
     const lent = lentChromeSession(browserProfileId);
     const cdpUrl = lent ? await lentChromeDoor(session) : undefined;
     const cloudUrl = lent ? undefined : await cloudBrowserUrl(botId, profile, session, audience, options.opening, options.params);
@@ -656,6 +677,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const used = usedBrowserSessions.get(session);
     if (used) return { session, spec: used };
     const profileId = browserProfileIdOf(profile);
+    await prepareProfileChrome(profileId, session);
     const cdpUrl = lentChromeSession(profileId) ? await lentChromeDoor(session) : undefined;
     const cloudUrl = cloudBrowser?.active(session) ?? undefined;
     return { session, spec: browserSessionSpec(engine.binaryPath, session, profileId, usesMyChrome(profileId) || cloudUrl ? undefined : await browserEgress.open(session), cdpUrl, cloudUrl) };
@@ -893,7 +915,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   return {
     browserRuntime, browserLive, browserRoom, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
-    currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
+    currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, browserProfilesForStatus, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
     eraseAudienceBrowsers, browserOwners, closeCapBrowsers, signInBackupRoutes,

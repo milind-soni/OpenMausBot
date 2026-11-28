@@ -504,6 +504,39 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
   });
 });
 
+describe("configured My Chrome targets", () => {
+  it("routes each turn and viewer to its own profile's CDP endpoint, with a global fallback", async () => {
+    vi.mocked(browserEngineStatus).mockReturnValue({ kind: "ready", binaryPath: "/fixture/agent-browser", version: "0.37.0", managed: false });
+    try {
+      const { cfg, host, bots } = setup("chrome", { server: true });
+      cfg.browserProfiles = [
+        { id: "scout", name: "Scout Chrome", browser: "chrome", cdpUrl: "http://127.0.0.1:9333" },
+        { id: "chief", name: "Chief Chrome", browser: "chrome", cdpUrl: "http://127.0.0.1:9444" },
+        { id: "shared", name: "Shared Chrome", browser: "chrome" },
+      ];
+      expect(host.usesMyChrome("scout")).toBe(true);
+      expect(host.usesMyChrome("shared")).toBe(false);
+      expect(host.browserProfilesForStatus()).toEqual([
+        { id: "scout", name: "Scout Chrome", browser: "chrome", attachedChrome: true },
+        { id: "chief", name: "Chief Chrome", browser: "chrome", attachedChrome: true },
+        { id: "shared", name: "Shared Chrome", browser: "chrome" },
+      ]);
+      for (const [profile, target] of [["scout", "http://127.0.0.1:9333"], ["chief", "http://127.0.0.1:9444"], ["shared", "9555"]] as const) {
+        if (profile !== "scout") cfg.browserEngine = { engine: "chrome", attachCdpUrl: "9555" };
+        Object.assign(bots[0]!, { browserProfile: profile });
+        const viewer = await host.currentBrowserSpec("scout", profile);
+        const agent = await host.browserIntegration("scout", profile, turn);
+        expect(agent?.session).toBe(viewer?.session);
+        expect(viewer?.spec.env).toMatchObject({ AGENT_BROWSER_CDP: target, AGENT_BROWSER_RESTORE_SAVE: "never" });
+        expect(agent?.spec.env).toMatchObject({ AGENT_BROWSER_CDP: target, AGENT_BROWSER_RESTORE_SAVE: "never" });
+      }
+      expect(host.currentBrowserSession("scout", "scout")).not.toBe(host.currentBrowserSession("scout", "chief"));
+    } finally {
+      vi.mocked(browserEngineStatus).mockRestore();
+    }
+  });
+});
+
 describe("how long an unused browser stays open", () => {
   it("is three minutes on a Cloud home and ten on a desktop, unless config.json sets it", () => {
     const cloud = setup(undefined, { cloudHome: true });

@@ -92,6 +92,17 @@ describe("browser profile manager", () => {
     expect(html).toContain("Signed-in sites");
   });
 
+  it("shows the configured Chrome for a profile even without a workspace-wide target", () => {
+    fixture.myChrome = false;
+    fixture.profiles = [{ id: "work", name: "Work", browser: "chrome", attachedChrome: true }];
+    const html = renderToStaticMarkup(createElement(BrowserProfilesManager, { bot }));
+    expect(html).toContain('<option value="chrome" selected="">My Chrome</option>');
+    expect(html).toContain("This profile uses the Chrome set in the server configuration.");
+    expect(html).not.toContain("Signed-in sites");
+    expect(html).not.toContain("My Chrome is for the desktop app");
+    expect(html).not.toContain("can't browse");
+  });
+
   it("on My Cloud, My Chrome names the lent computer and says when it is offline", () => {
     fixture.engine = { myChrome: true, myChromeOn: { name: "Studio Mac", device: "Mac", online: false } };
     fixture.profiles = [{ id: "work", name: "Work", browser: "chrome" }];

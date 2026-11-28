@@ -569,6 +569,18 @@ describe("configuration boundaries", () => {
     expect(browserEngineAttachCdpUrl({ browserEngine: { attachCdpUrl: "" } })).toBeNull();
   });
 
+  it("keeps a private per-profile Chrome address while migrating a legacy partition", () => {
+    const configured = { id: "Scout", name: "Scout Chrome", browser: "chrome", cdpUrl: " http://127.0.0.1:9333 " };
+    expect(parseStoredConfig({ browserProfiles: [configured] }).browserProfiles).toEqual([
+      { ...configured, id: "scout", partitionId: "Scout", cdpUrl: "http://127.0.0.1:9333" },
+    ]);
+    for (const cdpUrl of ["", "70000", "ftp://localhost:9333", "https://", "https://somehost:70000"]) {
+      expect(() => parseStoredConfig({ browserProfiles: [{ ...configured, cdpUrl }] })).toThrow("browserProfiles.0.cdpUrl");
+    }
+    expect(() => parseStoredConfig({ browserProfiles: [{ id: "scout", name: configured.name, cdpUrl: configured.cdpUrl }] })).toThrow("browserProfiles.0.cdpUrl");
+    expect(() => parseConfigPatch({ browserProfiles: [{ ...configured, id: "scout" }] })).toThrow();
+  });
+
   it("takes browserEngine.idleTimeoutMinutes as whole minutes up to the engine's own hour", () => {
     for (const value of [1, 10, 60]) {
       expect(parseStoredConfig({ browserEngine: { idleTimeoutMinutes: value } })).toEqual({ browserEngine: { idleTimeoutMinutes: value } });
@@ -1907,6 +1919,15 @@ describe("credential env preference", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).instances.openaiCompat).toEqual({
       ...entry, config: driver === "openai-compat" ? {} : entry.config,
     });
+  });
+
+  it("preserves per-profile CDP targets through settings edits", () => {
+    const profile = { id: "scout", name: "Scout", browser: "chrome", cdpUrl: "9333" };
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ browserProfiles: [profile] }));
+    saveConfig({ browserProfiles: [{ id: "scout", name: "Scout Chrome", browser: "chrome" }] });
+    expect(loadConfig().browserProfiles).toEqual([{ ...profile, name: "Scout Chrome" }]);
+    saveConfig({ browserProfiles: [{ id: "scout", name: "Scout Built-in" }] });
+    expect(loadConfig().browserProfiles).toEqual([{ id: "scout", name: "Scout Built-in" }]);
   });
 
   it("loads legacy browser profiles without resetting config and canonicalizes them on the next write", () => {
