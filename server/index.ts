@@ -7542,7 +7542,7 @@ async function beginTurn(
   console.log(turnStartLogLine({ botId, text: resolvedImages.text, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken }));
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
-    || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
+    || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.userMessage?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
   let { model, effort, variant, quickModel } = checkedDirectRoute(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
 
   let userMessage = opts?.userMessage;
