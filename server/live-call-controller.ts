@@ -72,7 +72,7 @@ export interface LiveCallDeps {
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
-  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; geminiVoice?: string; readTypedReplies: boolean; idleMinutes: number };
+  settings(botId?: string): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; geminiVoice?: string; readTypedReplies: boolean; idleMinutes: number };
   /** The called bot's own Live call voice, used over the app's when it is the call provider's. */
   botVoice?(botId: string): string | undefined;
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
@@ -187,7 +187,7 @@ export class LiveCallController {
   }
 
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string; relays?: readonly LiveRelayClient[] }): Promise<LiveCallStarted> {
-    const settings = this.deps.settings();
+    const settings = this.deps.settings(input.botId);
     // First: someone refused here is not told about a running call, or sent to set Azure or a relayed service up.
     // The chosen relayed service comes before a key's endpoint, so its refusal and its mismatch check apply.
     const relayedChoice = relayedProvider(settings.provider);

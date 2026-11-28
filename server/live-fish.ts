@@ -11,7 +11,7 @@ const CREATE_TIMEOUT_MS = 20_000;
 const END_TIMEOUT_MS = 5_000;
 const SETUP_TIMEOUT_MS = 8_000;
 /** Fish agent ids as the dashboard and `GET /v1/agent/agents` show them. */
-const AGENT_ID = /^[\w-]{1,128}$/;
+export const FISH_AGENT_ID = /^[\w-]{1,128}$/;
 const HISTORY_MESSAGES = 8;
 const HISTORY_MESSAGE_CHARS = 600;
 const HISTORY_TOTAL_CHARS = 6_000;
@@ -31,7 +31,7 @@ export function fishLiveBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 /** `model` is the agent id, "" while no usable one is saved. */
 export function fishLiveEndpoint(agentId: string | null | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
   const id = agentId?.trim() ?? "";
-  return { provider: "fish", apiBase: `${fishLiveBaseUrl(env)}/v1/agent`, model: AGENT_ID.test(id) ? id : "" };
+  return { provider: "fish", apiBase: `${fishLiveBaseUrl(env)}/v1/agent`, model: FISH_AGENT_ID.test(id) ? id : "" };
 }
 
 /** Which Fish Audio account an agent was set up on, without keeping its key. */
@@ -42,7 +42,7 @@ export function fishKeyPrint(key: string): string {
 /** The saved agent, while it belongs to the account of `key` or was set by the operator (no `fishAgentFor`). */
 export function usableFishAgent(live: LiveConfig | undefined, key: string): string | null {
   const id = live?.fishAgentId?.trim() ?? "";
-  if (!AGENT_ID.test(id)) return null;
+  if (!FISH_AGENT_ID.test(id)) return null;
   return live?.fishAgentFor === undefined || (key.trim() !== "" && live.fishAgentFor === fishKeyPrint(key)) ? id : null;
 }
 
@@ -78,7 +78,7 @@ export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, produc
     name: `${product} Live calls`.slice(0, 120),
     config: { voice: { engine: "live3", speaking_language: language }, tools: { enabled: true, tool_ids: [toolId] } },
   });
-  const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
+  const agentId = typeof agent.agent_id === "string" && FISH_AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
   if (!agentId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
   await call("PATCH", `/agents/${encodeURIComponent(agentId)}`, { overrides_allowed: ["system_prompt"] });
   await call("POST", `/agents/${encodeURIComponent(agentId)}/publish`, {});

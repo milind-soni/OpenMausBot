@@ -63,6 +63,7 @@ export function CallButton({ bot, placement = "header", fill, ink, inverse, mode
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
+      liveOverride={bot.liveOverride?.provider}
       voices={[bot.voice]}
       setupBotId={bot.id}
       requireExplicitVoices={false}
@@ -76,6 +77,7 @@ export function CallTargetButton({
   targetId,
   targetName,
   threadId,
+  liveOverride,
   voices,
   setupBotId,
   requireExplicitVoices,
@@ -95,13 +97,14 @@ export function CallTargetButton({
   targetId: string;
   targetName: string;
   threadId?: string;
+  liveOverride?: NonNullable<Bot["liveOverride"]>["provider"];
   voices: Array<string | undefined>;
   setupBotId?: string;
   requireExplicitVoices: boolean;
   liveCapable?: boolean;
   onStart: (mode: CallMode) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, flushBotPatches } = useStore();
   const showThreads = useShowThreads();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const media = useLiveMedia();
@@ -198,15 +201,17 @@ export function CallTargetButton({
     const request = ++pending.request;
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      const live = (thread: string) => {
+      const live = async (thread: string) => {
+        const saved = await flushBotPatches?.(targetId);
         if (pending.waiting === request) pending.waiting = 0;
-        if (pending.request === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
+        const provider = (saved ? saved.liveOverride?.provider : liveOverride) ?? state.config?.live?.provider;
+        if (pending.request === request) void startLiveCall({ botId: targetId, threadId: thread, provider });
       };
+      pending.waiting = request;
       if (isNewChatThread(liveThreadId)) {
-        pending.waiting = request;
         const failed = () => { if (pending.waiting === request) pending.waiting = 0; };
         dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live, onError: failed });
-      } else live(liveThreadId);
+      } else void live(liveThreadId);
       return;
     }
     if (!turnsReady) {
@@ -359,7 +364,7 @@ export function CallTargetButton({
           id={keyId}
           className={cn("animate-pop-in absolute right-0 z-30 max-h-[calc(100dvh-80px)] w-[340px] max-w-[90vw] overflow-y-auto overscroll-contain rounded-xl shadow-2xl", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
         >
-          <LiveKeyNeeded />
+          <LiveKeyNeeded override={liveOverride} />
         </div>
       )}
 

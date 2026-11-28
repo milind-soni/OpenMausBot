@@ -52,6 +52,8 @@ export interface LiveEndpoint {
   apiBase: string;
   /** The OpenAI model id, the Azure deployment name, the Fish Audio agent id or ElevenLabs agent id ('' until one is set up) or the Gemini Live model id. */
   model: string;
+  /** A selected Fish agent belongs to its account and is never modified by the harness. */
+  fixedAgent?: true;
 }
 
 export function liveProviderName(provider: LiveProvider): string {

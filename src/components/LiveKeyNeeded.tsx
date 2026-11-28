@@ -9,9 +9,16 @@ import { openKeySettings } from "./keys/key-focus";
 import { LiveKeySetup } from "./LiveKeySetup";
 import { LiveProviderSettings } from "./LiveProviderSettings";
 
-export function LiveKeyNeeded() {
+export function LiveKeyNeeded({ override }: { override?: "openai" | "fish" } = {}) {
   const { state, dispatch } = useStore();
   const titleId = useId();
+  if (override) {
+    const copy = liveKeyCopy(override);
+    return <section aria-labelledby={titleId} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left text-[13px]">
+      <h2 id={titleId} className="font-medium text-ink">{t(copy.needs)}</h2>
+      <button type="button" className="ui-button ui-button-primary self-start" onClick={() => { dismissLiveNotice(); dispatch(openKeySettings(override === "fish" ? "fishAudio" : "openai")); }}>{t("call.live.openApiKeys")}</button>
+    </section>;
+  }
   const live = state.config?.live;
   const azure = live?.provider === "azure";
   const custom = live?.provider === "custom";

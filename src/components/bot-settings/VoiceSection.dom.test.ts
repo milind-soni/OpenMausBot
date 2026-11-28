@@ -11,6 +11,9 @@ import { BotEditorContext } from "./BotEditorContext";
 import { VoiceSection } from "./VoiceSection";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
+let admin = false;
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => admin }));
+
 const atlas: Bot = {
   id: "atlas", threadId: "thread-atlas", name: "Atlas", title: "", description: "", notifications: true, color: "green",
   unread: false, modelSelection: { instanceId: "claude", model: "test" }, messages: [],
@@ -33,6 +36,7 @@ const picker = () => card()?.querySelector("select") ?? null;
 beforeEach(() => {
   setLocale("en");
   patch.mockReset();
+  admin = false;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -71,6 +75,29 @@ describe("a bot's Live call voice in its voice settings", () => {
     expect(card()).toBeNull();
     render({ ...openAiLive, provider: "elevenlabs" });
     expect(card()).toBeNull();
+  });
+
+  it("lets an admin choose a Fish agent, a GPT-Live voice, or the workspace service", () => {
+    admin = true;
+    render(openAiLive);
+    expect(picker()?.value).toBe("");
+    picker()!.value = "fish";
+    flushSync(() => picker()!.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(patch).toHaveBeenLastCalledWith({ liveOverride: { provider: "fish" } });
+
+    render(openAiLive, { ...atlas, liveOverride: { provider: "fish" } });
+    const agent = card()?.querySelector("input");
+    expect(agent).toBeDefined();
+    agent!.value = "fish-atlas";
+    flushSync(() => agent!.dispatchEvent(new Event("focusout", { bubbles: true })));
+    expect(patch).toHaveBeenLastCalledWith({ liveOverride: { provider: "fish", fishAgentId: "fish-atlas" } });
+
+    render({ ...openAiLive, provider: "fish" }, { ...atlas, liveOverride: { provider: "openai" }, liveVoice: "cedar" });
+    expect(picker()?.value).toBe("openai");
+    expect(card()?.querySelectorAll("select")[1]?.value).toBe("cedar");
+    picker()!.value = "";
+    flushSync(() => picker()!.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(patch).toHaveBeenLastCalledWith({ liveOverride: null });
   });
 
   it("is not on a bot being created, whose defaults keep no call voice", () => {

@@ -64,6 +64,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
 
   const startFish = async (key: string, endpoint: LiveEndpoint, botId: string, threadId: string) => {
     const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl };
+    if (endpoint.fixedAgent) return { agent: endpoint, token: await createFishLiveSession({ ...session, endpoint }) };
     const language = fishSpeakingLanguage(input.language?.());
     if (endpoint.model) await speakLanguage(key, endpoint, language);
     let agent = endpoint.model ? endpoint : await setUpAgent(key, endpoint, language);

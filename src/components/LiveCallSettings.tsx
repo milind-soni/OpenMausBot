@@ -14,7 +14,7 @@ import { Select } from "./Select";
 const IDLE_CHOICES = [1, 2, 3, 5, 10, 15, 30, 60];
 
 /** With `bot`, the bot on the call: it can have a voice of its own, and the other voice is the default for every other bot. */
-export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "name" | "liveVoice">; onClose: () => void }) {
+export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "name" | "liveVoice" | "liveOverride">; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const [saving, setSaving] = useState(false);
@@ -32,6 +32,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const fish = live.provider === "fish";
   const gemini = live.provider === "gemini";
   const elevenlabs = live.provider === "elevenlabs";
+  const botProvider = bot?.liveOverride?.provider ?? live.provider;
   const copy = liveKeyCopy(live.provider);
   const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : elevenlabs ? "elevenlabs" : "live");
   // Gemini has its own voices, kept apart from the GPT-Live one.
@@ -82,10 +83,10 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
       {/* Fish Audio and ElevenLabs calls speak in their agent's own voice. */}
-      {!fish && !elevenlabs && <>
-      {bot && (
-        <BotLiveVoiceSelect bot={bot} gemini={gemini} onChange={(liveVoice) => dispatch({ type: "updateBot", botId: bot.id, patch: { liveVoice } })} />
+      {bot && botProvider !== "fish" && botProvider !== "elevenlabs" && (
+        <BotLiveVoiceSelect bot={bot} gemini={botProvider === "gemini"} onChange={(liveVoice) => dispatch({ type: "updateBot", botId: bot.id, patch: { liveVoice } })} />
       )}
+      {!fish && !elevenlabs && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t(bot ? "call.live.defaultVoice" : "call.live.voice")}</span>
         <Select

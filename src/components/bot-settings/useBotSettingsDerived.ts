@@ -55,6 +55,7 @@ export type BotPatch = Partial<
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   phoneApps?: Bot["phoneApps"] | null;
+  liveOverride?: Bot["liveOverride"] | null;
   acknowledgeLocalAuto?: boolean;
   acknowledgePeerScope?: boolean;
 };

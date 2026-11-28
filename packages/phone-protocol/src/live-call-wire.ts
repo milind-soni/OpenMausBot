@@ -61,6 +61,9 @@ export interface LiveCallRecord {
  * "custom": an OpenAI-compatible server the person names (a gateway that serves the GPT-Live API), reached like OpenAI. */
 export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom";
 
+/** A bot can choose GPT-Live or Fish Live 3 while sharing the workspace's provider credentials. */
+export type BotLiveOverride = { provider: "openai" } | { provider: "fish"; fishAgentId?: string };
+
 /** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key;
  * `fishAudio`: the Fish Audio key from Settings → API keys, the only key a Fish Audio call uses;
  * `gemini`: the Gemini key from Settings → API keys, the only key a Gemini call uses;
