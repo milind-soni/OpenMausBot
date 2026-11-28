@@ -407,7 +407,11 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       models: () => reasoningCatalog(catalog, reasoningFor),
       prepareTurn: (turn, signal) => loading && (turn.variant || isOllamaServer(config)) ? waitForCatalog(loading, signal) : undefined,
       selectedReasoning: (model, variant) => Boolean(variant && fact(model)?.thinking?.choices.includes(variant)),
-      refreshModels: async () => { await (firstGlmList ?? fetchModels()); },
+      refreshModels: async () => { if (firstGlmList) {
+          await firstGlmList;
+          if (catalog !== seeded) return;
+        }
+        await fetchModels(); },
       imageInput: (model) => fact(model)?.vision ?? true,
       ...(gemini ? { videoBytes: GEMINI_VIDEO_BYTES } : {}),
       toolUse: (model) => fact(model)?.tools ?? true,

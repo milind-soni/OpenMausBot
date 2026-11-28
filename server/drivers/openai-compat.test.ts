@@ -182,6 +182,26 @@ describe("OpenAICompatDriver", () => {
     }
   });
 
+  it("retries a failed GLM discovery when setup is awaiting an explicit refresh", async () => {
+    let respond!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => { respond = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(first).mockResolvedValueOnce(Response.json({ data: [{ id: "glm-5.3" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "glm", displayName: "GLM", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.z.ai/api/paas/v4", key: "test" }), environment: {},
+    });
+    try {
+      const refreshed = instance.refreshModels?.();
+      respond(new Response(null, { status: 503 }));
+      await refreshed;
+      expect(instance.models.options.map((option) => option.id)).toEqual(["glm-5.3"]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("lists Gemini's chat models by their plain IDs", async () => {
     const fetchMock = vi.fn(async () => Response.json({ object: "list", data: [
       { id: "models/gemini-2.5-pro", object: "model", owned_by: "google" },

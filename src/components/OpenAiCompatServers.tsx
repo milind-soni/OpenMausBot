@@ -388,7 +388,7 @@ export function GlmServer({ onAdded }: { onAdded: (id: string) => void }) {
   const { busy, error, add } = useAddServer();
   const endpoint = GLM_ENDPOINTS[region];
 
-  return <form data-glm-server="" className="flex flex-col gap-2 px-3.5 py-3" onSubmit={(event) => {
+  return <form data-glm-server="" className="flex flex-col gap-2 px-3 py-3" onSubmit={(event) => {
     event.preventDefault();
     if (busy || !key.trim()) return;
     void add({ displayName: endpoint.name, url: endpoint.url, key: key.trim() }, onAdded).then((added) => { if (added) setKey(""); });
