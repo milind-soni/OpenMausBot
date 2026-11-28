@@ -6,7 +6,7 @@ import { privateHandBack } from "./acting-person.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, CARD_SETTLE_MS, createAskCards, settleRequestCard, type AskCardsDeps } from "./ask-cards.ts";
+import { copiedQuestionAnswer, askToolName, CARD_SETTLE_MS, createAskCards, settleRequestCard, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -226,6 +226,18 @@ describe("at Full access a teammate's question goes to its requester", () => {
 });
 
 describe("a handoff tool question for the person", () => {
+  it("routes copies of the same provider request id back to separate workers", () => {
+    const w = world();
+    for (const threadId of ["work-a", "work-b"]) {
+      const card = { title: "Question", options: [], requestId: "request-1", handoffQuestion: { from: threadId, copyTo: "root" } };
+      const source = w.store.appendMessage(threadId, { role: "bot", kind: "options", card });
+      const requestId = `handoff-copy:${source.id}`;
+      w.store.appendMessage("root", { role: "bot", kind: "options", card: { ...card, requestId },
+        inbox: { kind: "ask", from: { botId: "ledger", name: "Ledger", color: "teal" }, origin: { botId: "ledger", threadId, title: "Work", messageId: source.id } } });
+      expect(copiedQuestionAnswer(w.store, "root", requestId)).toEqual({ threadId, requestId: "request-1" });
+    }
+  });
+
   it("targets the root conversation of a nested hand-off only when it may receive the question", () => {
     const w = world({ privateThreads: ["private-work"] });
     const origin = { kind: "user" as const, request: "Prepare a footer" };
