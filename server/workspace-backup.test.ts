@@ -653,9 +653,10 @@ describe("encrypted full workspace backups", () => {
     const root = directory();
     const outside = directory();
     writeFileSync(join(outside, "secret"), "must never be read");
-    symlinkSync(join(outside, "secret"), join(root, "external"));
+    mkdirSync(join(root, "files"));
+    symlinkSync(join(outside, "secret"), join(root, "files", "external"));
     await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/outside the workspace/);
-    rmSync(join(root, "external"));
+    rmSync(join(root, "files"), { recursive: true });
     writeFileSync(join(root, "regular"), "data");
     symlinkSync(join(root, "regular"), join(root, "internal"));
     await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/user-created symbolic link/);
@@ -668,6 +669,37 @@ describe("encrypted full workspace backups", () => {
     symlinkSync(skill, join(native, "example"), process.platform === "win32" ? "junction" : "dir");
     const exported = await createWorkspaceBackup(root, { password: PASSWORD });
     expect(exported.summary.warnings.some((warning) => warning.includes("1 managed skill"))).toBe(true);
+  });
+
+  it("follows a top-level folder moved to another drive by a link, and says so; links inside it keep their rules", async () => {
+    const root = directory();
+    const drive = directory();
+    const kind = process.platform === "win32" ? "junction" : "dir";
+    mkdirSync(join(drive, "events"));
+    writeFileSync(join(drive, "events", "2026-11.jsonl"), "{}\n");
+    symlinkSync(join(drive, "events"), join(root, "events"), kind);
+    const project = join(drive, "workspaces", "ws", "project");
+    mkdirSync(join(project, ".agents", "skills", "review"), { recursive: true });
+    mkdirSync(join(project, ".claude"), { recursive: true });
+    writeFileSync(join(project, ".agents", "skills", "review", "SKILL.md"), "# Review");
+    symlinkSync(join("..", ".agents", "skills"), join(project, ".claude", "skills"), kind);
+    symlinkSync(join(drive, "workspaces"), join(root, "workspaces"), kind);
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    expect(exported.summary.warnings).toContain("2 top-level item(s) of the data folder link to another place and were saved as copies of what they point to; restoring puts them back as regular folders and files: events, workspaces.");
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("1 symbolic link(s) inside a workspace were saved as copies"))).toBe(true);
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data");
+    expect(readFileSync(join(data, "events", "2026-11.jsonl"), "utf8")).toBe("{}\n");
+    expect(readFileSync(join(data, "workspaces", "ws", "project", ".claude", "skills", "review", "SKILL.md"), "utf8")).toBe("# Review");
+
+    // A second top-level link into the same place would carry it twice.
+    symlinkSync(join(drive, "events"), join(root, "logs"), kind);
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/user-created symbolic link/);
+    rmSync(join(root, "logs"));
+    // A link to a folder that holds the data folder is a loop.
+    symlinkSync(join(root, ".."), join(root, "up"), kind);
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toMatchObject({ errorKey: "serverError.backup.recursiveLink" });
   });
 
   it("saves links inside one workspace as copies of what they point to, and refuses loops and links to other workspaces", async () => {
@@ -722,7 +754,8 @@ describe("encrypted full workspace backups", () => {
     expect(existsSync(join(data, "task-workspaces", "bot", "thread", "node_modules"))).toBe(false);
     expect(existsSync(join(data, "task-workspaces", "bot", "thread", "linked-secret"))).toBe(false);
     expect(existsSync(join(data, "workspaces", "bot", "project", "node_modules"))).toBe(false);
-    symlinkSync(join(outside, "secret"), join(root, "external"));
+    mkdirSync(join(root, "files"));
+    symlinkSync(join(outside, "secret"), join(root, "files", "external"));
     await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/outside the workspace/);
   });
 

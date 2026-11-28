@@ -332,8 +332,23 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   let skippedWorkLinks = 0;
   let copiedLinks = 0;
   const leftLinks: string[] = [], leftProfiles: string[] = [];
+  // A top-level item linked to another place (a folder moved to another drive, a Windows junction) is followed, and
+  // what is under where it points counts as under its name here.
+  const moved: { name: string; target: string }[] = [];
   try {
     const root = realpathSync(dataDir);
+    const under = (folder: string, path: string) => {
+      const rel = relative(folder, path);
+      return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? undefined : rel;
+    };
+    const dataRelative = (target: string) => {
+      const rel = under(root, target);
+      if (rel !== undefined) return rel;
+      for (const link of moved) {
+        const inside = under(link.target, target);
+        if (inside !== undefined) return inside ? join(link.name, inside) : link.name;
+      }
+    };
     await snapshotDatabases(root, snapshot);
     const teamPrivate = teamPrivateThreads({ starters: join(root, "thread-starters.json"), groups: join(root, "groups.json"), bots: join(root, "bots.json") });
     const privacy = teamPrivate && { ...teamPrivate, attachments: teamPrivateAttachments(root, join(snapshot, SNAPSHOT_DATABASES["messages.db"]!), teamPrivate) };
@@ -374,28 +389,36 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           // named in the backup's note; anywhere else it still stops the backup.
           const leave = path.startsWith("workspaces/");
           try { target = realpathSync(source); } catch { if (leave) { leftLinks.push(path); continue; } throw new Error(`Cannot back up dangling symbolic link: ${path}`); }
-          const rel = relative(root, target);
-          if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
-            if (leave) { leftLinks.push(path); continue; }
-            throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`);
-          }
-          const portableRel = rel.replaceAll("\\", "/");
-          // Only the app's disposable native-discovery links may be omitted; any other link is user data.
-          if (/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) &&
-            portableRel.startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
-            skippedLinks++;
-            continue;
-          }
-          const workspace = /^workspaces\/[^/]+\//.exec(path)?.[0];
-          if (!workspace || !portableRel.startsWith(workspace)) {
-            throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
+          const rel = dataRelative(target);
+          const followed = rel === undefined && !prefix;
+          if (!followed) {
+            if (rel === undefined) {
+              if (leave) { leftLinks.push(path); continue; }
+              throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`);
+            }
+            const portableRel = rel.replaceAll("\\", "/");
+            // Only the app's disposable native-discovery links may be omitted; any other link is user data.
+            if (/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) &&
+              portableRel.startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
+              skippedLinks++;
+              continue;
+            }
+            const workspace = /^workspaces\/[^/]+\//.exec(path)?.[0];
+            if (!workspace || !portableRel.startsWith(workspace)) {
+              throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
+            }
           }
           if (chain.some((folder) => folder === target || folder.startsWith(`${target}${sep}`))) {
             throw userErrorThrown("serverError.backup.recursiveLink", { path });
           }
+          // A second top-level link into a place already followed would carry it twice.
+          if (followed && moved.some((link) => under(target, link.target) !== undefined)) {
+            throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
+          }
           source = target;
           stat = lstatSync(source);
-          copiedLinks++;
+          if (followed) moved.push({ name, target });
+          else copiedLinks++;
         }
         if (entries.length >= MAX_WORKSPACE_BACKUP_FILES) throw new Error("The workspace exceeds the 100,000-entry backup limit.");
         const caseTwin = foldedPaths.get(path.toLowerCase());
@@ -433,6 +456,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     walk(root);
     if (skippedLinks) warnings.push(`${skippedLinks} managed skill discovery link(s) were omitted and are recreated by the app.`);
     if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules or Python virtual environments) were omitted; reinstall them in the project after restoring.`);
+    if (moved.length) warnings.push(`${moved.length} top-level item(s) of the data folder link to another place and were saved as copies of what they point to; restoring puts them back as regular folders and files: ${examplePaths(moved.map((link) => link.name))}.`);
     if (copiedLinks) warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
     if (leftProfiles.length) warnings.push(`${leftProfiles.length} browser profile folder(s) in bot folders were left out with their sign-ins, cookies and caches; sign in again after restoring: ${examplePaths(leftProfiles)}.`);
     if (leftLinks.length) warnings.push(`${leftLinks.length} symbolic link(s) in bot folders were left out because they point to nothing or outside this backup: ${examplePaths(leftLinks)}.`);
