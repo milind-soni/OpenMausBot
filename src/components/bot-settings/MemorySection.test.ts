@@ -180,7 +180,7 @@ describe("MemoryUpkeepCard", () => {
     expect(on).toContain("this bot still keeps its own notes and tidies them");
     expect(on).toContain('aria-label="Learn facts into About me"');
     const unchecked = render(createElement(MemoryUpkeepCard, { enabled: true, status: null, tidying: false, onToggle: noop, onTidy: noop, aboutMe: { ...aboutMe, enabled: false } }));
-    expect(unchecked).not.toContain('aria-checked="true" aria-label="Learn facts into About me"');
+    expect(unchecked).toMatch(/<button(?=[^>]*aria-label="Learn facts into About me")(?=[^>]*aria-checked="false")[^>]*>/);
     const off = render(createElement(MemoryUpkeepCard, { enabled: false, status: null, tidying: false, onToggle: noop, onTidy: noop, aboutMe }));
     expect(off).not.toContain("Learn facts into About me");
   });
