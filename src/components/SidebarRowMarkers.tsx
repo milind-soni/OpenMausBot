@@ -11,6 +11,7 @@ export function rowSurface(selected: boolean): string {
 
 /** The conversation the chat window has open: the same plain fill as a selected row. */
 export const rowSelectedSurface = "bg-raised";
+export const sidebarSelectedSurface = "bg-raised sidebar-selected-row";
 
 export type RowActivity = "working" | "failed" | "teammate" | "queued";
 

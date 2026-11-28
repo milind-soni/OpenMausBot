@@ -76,7 +76,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
       onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
       className={cn(
         "flex h-[92px] w-[95px] shrink-0 cursor-pointer flex-col items-center rounded-xl bg-[var(--tile)] px-2 pb-1 pt-1.5 transition-colors duration-150", SIMPLE_ROW_FOCUS,
-        selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]",
+        selected ? "[--tile:var(--sidebar-selection-fill,var(--color-raised))]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]",
         pinnedCircleDragClass({ drag, dragging, drop }),
       )}
     >

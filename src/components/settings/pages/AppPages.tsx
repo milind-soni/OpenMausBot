@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { FEEDBACK_URL, HELP_CENTER_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
+import { parseSidebarSelectionAccent, setSidebarSelectionAccent, useSidebarSelectionAccent } from "@/lib/sidebar-preferences";
 import { useStoreDispatch } from "@/state/store-select";
 import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
@@ -20,6 +21,7 @@ import { NotificationRows } from "../../NotificationSettingsRows";
 import { OpenAtLoginRow } from "../../OpenAtLoginRow";
 import { PinnedPanelsSettings } from "../../PinnedPanelsSettings";
 import { RemoteComputerSection } from "../../RemoteComputerSection";
+import { Select } from "../../Select";
 import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "../../SettingsPrimitives";
 import { SkinPicker } from "../../SkinPicker";
 import { TalkShortcutRow } from "../../TalkShortcutRow";
@@ -157,6 +159,17 @@ function ThemePickerRow({ open, onToggle }: { open: boolean; onToggle: () => voi
   );
 }
 
+function SidebarSelectionAccentRow() {
+  const accent = useSidebarSelectionAccent();
+  const title = t("sidebar.selectionAccent.title");
+  return <SettingRow title={title}>
+    <Select size="sm" aria-label={title} value={accent} onChange={(event) => setSidebarSelectionAccent(parseSidebarSelectionAccent(event.target.value))}>
+      <option value="charcoal">{t("sidebar.selectionAccent.charcoal")}</option>
+      <option value="blue">{t("sidebar.selectionAccent.blue")}</option>
+    </Select>
+  </SettingRow>;
+}
+
 export function AppearancePage() {
   const { ctx, place, go, anchor } = useSettingsShell();
   const [themes, setThemes] = useState(anchor === "themes");
@@ -184,6 +197,7 @@ export function AppearancePage() {
         <ChromeRailRow />
         <WindowFrameRow />
         <ShowThreadsRow />
+        {ctx.advanced && <SidebarSelectionAccentRow />}
         <SidebarToolsLayoutRow />
         <PinnedCirclesRow />
         <UniversalPinsRow />

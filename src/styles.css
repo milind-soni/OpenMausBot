@@ -1702,6 +1702,32 @@ body {
 }
 :root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
 
+[data-sidebar-selection="blue"] {
+  --sidebar-selection-base: var(--color-panel);
+  --sidebar-selection-fill: color-mix(in srgb, var(--color-accent) 15%, var(--sidebar-selection-base));
+  --sidebar-selection-edge: 3px;
+}
+[data-sidebar-selection="blue"]:dir(rtl) { --sidebar-selection-edge: -3px; }
+@media (width < 48rem) {
+  [data-sidebar-selection="blue"] { --sidebar-selection-base: var(--color-app); }
+}
+[data-sidebar-selection="blue"] .sidebar-selected-row {
+  --row: var(--sidebar-selection-fill);
+  background-color: var(--row);
+  box-shadow: inset var(--sidebar-selection-edge) 0 var(--color-accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+@media (hover: hover) {
+  [data-sidebar-selection="blue"] .sidebar-selected-row:hover {
+    --row: color-mix(in srgb, var(--color-accent) 20%, var(--sidebar-selection-base));
+  }
+}
+[data-sidebar-selection="blue"] [data-sidebar-selection-avatar] {
+  border-radius: 9999px;
+  box-shadow: 0 0 0 2px var(--sidebar-selection-base),
+    0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+
 /* The chat header's model pill folds to its AI's mark while a side panel narrows the chat (ModelPickerTrigger).
    The pill glides over the panel's own 240ms on the motion curve: its padding and the mark's gap close, and the rest
    rides a grid column from 1fr to 0fr, so no width is measured and the first paint lands folded or open with no jump.
