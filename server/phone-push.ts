@@ -16,6 +16,7 @@ import {
   PAIRING_TAG,
   PHONE_PUSH_RELAY_PATHS,
   PHONE_PUSH_WIRE_VERSION,
+  PUSH_BOT_CHANNELS_MAX,
   PUSH_ID,
   PUSH_KINDS,
   PUSH_NAME_MAX,
@@ -81,10 +82,11 @@ export function phonePushEnabled(cfg: { features?: { phonePush?: boolean } }, en
 }
 
 const kindsSchema = z.array(z.enum(PUSH_KINDS)).max(PUSH_KINDS.length);
+const botChannelsSchema = z.array(z.string().regex(PUSH_ID)).max(PUSH_BOT_CHANNELS_MAX);
 
 export const registrationSchema = z.discriminatedUnion("platform", [
   z.object({ platform: z.literal("apns"), token: z.string().trim().toLowerCase().regex(APNS_TOKEN), environment: z.enum(["production", "sandbox"]).default("production"), pairing: z.string().regex(PAIRING_TAG).optional(), kinds: kindsSchema.optional() }).strict(),
-  z.object({ platform: z.literal("fcm"), token: z.string().trim().regex(FCM_TOKEN), environment: z.literal("production").optional(), pairing: z.string().regex(PAIRING_TAG).optional(), kinds: kindsSchema.optional() }).strict(),
+  z.object({ platform: z.literal("fcm"), token: z.string().trim().regex(FCM_TOKEN), environment: z.literal("production").optional(), pairing: z.string().regex(PAIRING_TAG).optional(), kinds: kindsSchema.optional(), botChannels: botChannelsSchema.optional() }).strict(),
 ]);
 
 const storedDevice = z.object({
@@ -94,6 +96,7 @@ const storedDevice = z.object({
   environment: z.enum(["production", "sandbox"]),
   pairing: z.string().regex(PAIRING_TAG).optional(),
   kinds: kindsSchema,
+  botChannels: botChannelsSchema.optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 }).refine((device) => validPushToken(device.platform, device.token));
@@ -238,7 +241,7 @@ export class PhonePush {
   private publicDevice(key: string): PublicPushDevice | null {
     const device = this.devices.find((candidate) => candidate.key === key);
     if (!device) return null;
-    return { platform: device.platform, environment: device.environment, ...(device.pairing ? { pairing: device.pairing } : {}), kinds: [...device.kinds], updatedAt: device.updatedAt };
+    return { platform: device.platform, environment: device.environment, ...(device.pairing ? { pairing: device.pairing } : {}), kinds: [...device.kinds], ...(device.platform === "fcm" ? { botChannels: [...(device.botChannels ?? [])] } : {}), updatedAt: device.updatedAt };
   }
 
   /** The device token a phone registered, for the Live Activity and ongoing-notification pushes that share its relay. */
@@ -311,6 +314,7 @@ export class PhonePush {
       environment: input.platform === "apns" ? input.environment ?? "production" : "production",
       ...(input.pairing ? { pairing: input.pairing } : {}),
       kinds: [...new Set(input.kinds ?? PUSH_KINDS)],
+      ...(input.platform === "fcm" && input.botChannels?.length ? { botChannels: [...new Set(input.botChannels)] } : {}),
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
     };
@@ -438,7 +442,14 @@ export class PhonePush {
     if (this.options.live(job.key)) return "live";
     // Near the hour's cap a finished reply gives way, so the asks still get through.
     if (!this.roomFor(job.key, job.push.kind === "done" ? "other" : "ask", now)) return "dropped";
-    const body = { v: PHONE_PUSH_WIRE_VERSION, token: device.token, ...(device.pairing ? { pairing: device.pairing } : {}), ...(job.collapseId ? { collapseId: job.collapseId } : {}), notification: job.push };
+    const body = {
+      v: PHONE_PUSH_WIRE_VERSION,
+      token: device.token,
+      ...(device.pairing ? { pairing: device.pairing } : {}),
+      ...(job.collapseId ? { collapseId: job.collapseId } : {}),
+      ...(device.botChannels?.includes(job.push.botId) && this.viaInstallation() ? { botChannel: true } : {}),
+      notification: job.push,
+    };
     let answer = await this.relay(PHONE_PUSH_RELAY_PATHS.send, body);
     if (answer?.status === 404 && answer.code === PUSH_RELAY_ERRORS.unknownDevice) {
       const registered = await this.relay(PHONE_PUSH_RELAY_PATHS.register, this.registerBody(device));
@@ -469,6 +480,13 @@ export class PhonePush {
   private pause(ms: number): PushOutcome {
     this.pausedUntil = Math.max(this.pausedUntil, this.now() + Math.min(Math.max(ms, 1_000), 6 * 60 * 60_000));
     return "paused";
+  }
+
+  /** Whether relay calls go to the control plane itself. A Cloud home's Admin checks the send body against its own copy
+   * of the schema, which does not take `botChannel`. */
+  private viaInstallation(): boolean {
+    const access = this.options.access();
+    return !!access && "credential" in access;
   }
 
   /** One POST to the relay; null when it could not be reached. The credential travels only in the Authorization header,

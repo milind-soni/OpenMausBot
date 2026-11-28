@@ -32,6 +32,8 @@ export const PAIRING_TAG = /^[A-Za-z0-9_-]{8,64}$/;
 export const PUSH_COLLAPSE_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 export const PUSH_ID = /^[\w-]{1,120}$/;
 export const PUSH_NAME_MAX = 80;
+/** The most bots one registration can name in `botChannels`: a full list of UUID ids stays well inside the 16 KB body. */
+export const PUSH_BOT_CHANNELS_MAX = 200;
 export const PUSH_TITLE_MAX = 200;
 
 /** The kinds a closed app is woken for: a bot waits on the person (approval, question, sign-in), or a reply is ready.
@@ -49,6 +51,9 @@ export interface PhonePushRegistration {
   /** The kinds this phone wants pushed, from its own notification switches. Absent: all of `PUSH_KINDS`. Empty: none,
    * the registration is kept. */
   kinds?: PushKind[];
+  /** FCM only: the bots (ids) that have a notification channel of their own on this phone, `bot_messages.<botId>`.
+   * A push for one of them is sent on it, so the person can give that bot its own sound. Absent: none. */
+  botChannels?: string[];
 }
 
 /** Whether pushes can leave this server at all: `off` until the owner switches phone push on, `no-account` while it
@@ -61,6 +66,9 @@ export interface PublicPushDevice {
   environment: ApnsEnvironment;
   pairing?: string;
   kinds: PushKind[];
+  /** FCM only: the bots registered with a channel of their own. A computer that takes `botChannels` always lists it
+   * (maybe empty), so a phone sends its list only to one that answers with it. */
+  botChannels?: string[];
   updatedAt: number;
 }
 
@@ -86,6 +94,8 @@ export interface PushRelaySendRequest {
   token: string;
   pairing?: string;
   collapseId?: string;
+  /** The phone has a channel of the bot's own: a bot message goes on it instead of the shared one (Android only). */
+  botChannel?: true;
   notification: PhonePushNotification;
 }
 
