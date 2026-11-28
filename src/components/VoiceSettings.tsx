@@ -1,6 +1,7 @@
 // Security: the harness holds the cloud provider keys; the renderer never talks to ElevenLabs or Fish Audio itself.
 import { DEFAULT_OPENAI_VOICE, OPENAI_VOICES } from "../../shared/openai-voice";
 import { DEFAULT_DEEPSEEK_VOICE, DEEPSEEK_VOICES } from "../../shared/deepseek-voice";
+import { FISH_TTS_MODELS, type FishSynthesis, type FishTtsModel } from "../../shared/fish-voice";
 import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Volume2 } from "lucide-react";
 
@@ -25,11 +26,11 @@ import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 import { KeysLink } from "./keys/KeysLink";
 
-const FISH_MODELS = [
-  { value: "s2.1-pro", label: "voice.fish.modelPro" },
-  { value: "s2.1-pro-free", label: "voice.fish.modelFree" },
+const FISH_SYNTHESIS_FIELDS = [
+  { name: "temperature", label: "voice.fish.temperature", min: 0, max: 1, defaultValue: 0.7 },
+  { name: "topP", label: "voice.fish.topP", min: 0, max: 1, defaultValue: 0.7 },
+  { name: "speed", label: "voice.fish.speed", min: 0.5, max: 2, defaultValue: 1 },
 ] as const;
-type FishModel = (typeof FISH_MODELS)[number]["value"];
 
 export function VoiceSettings({
   bot,
@@ -263,11 +264,11 @@ export function VoiceSettings({
       .finally(() => setSavingServer(false));
   };
 
-  const saveFishModel = (next: FishModel) => {
-    if (next === tts?.fishModel || savingFishModel) return;
+  const saveFishSettings = (patch: { fishModel?: FishTtsModel; fishSynthesis?: FishSynthesis }) => {
+    if (savingFishModel) return;
     setSavingFishModel(true);
     setError(null);
-    api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { fishModel: next } }) })
+    api("/api/config", { method: "PUT", body: JSON.stringify({ tts: patch }) })
       .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
       .catch((e: Error) => setError(e.message))
       .finally(() => setSavingFishModel(false));
@@ -410,18 +411,52 @@ export function VoiceSettings({
           <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.fish.model")}</div>
           <Select
             value={tts.fishModel ?? "s2.1-pro"}
-            onChange={(e) => saveFishModel(e.target.value as FishModel)}
+            onChange={(e) => saveFishSettings({ fishModel: e.target.value as FishTtsModel })}
             disabled={savingFishModel}
             aria-label={t("voice.fish.model")}
             className="w-full"
           >
-            {FISH_MODELS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {t(option.label)}
+            {FISH_TTS_MODELS.map((model) => (
+              <option key={model} value={model}>
+                {model === "s2.1-pro" ? t("voice.fish.modelPro") : model === "s2.1-pro-free" ? t("voice.fish.modelFree") : "Drama 3"}
               </option>
             ))}
           </Select>
           <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("voice.fish.modelHint")}</div>
+          <form key={JSON.stringify(tts.fishSynthesis)} onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            const fishSynthesis: FishSynthesis = {};
+            for (const { name } of FISH_SYNTHESIS_FIELDS) {
+              const value = data.get(name);
+              if (typeof value === "string" && value !== "") fishSynthesis[name] = Number(value);
+            }
+            if (data.get("mp3Bitrate") === "128") fishSynthesis.mp3Bitrate = 128;
+            saveFishSettings({ fishSynthesis });
+          }}>
+            <fieldset disabled={savingFishModel} className="mt-3 grid grid-cols-2 gap-2">
+              {FISH_SYNTHESIS_FIELDS.map(({ name, label, min, max, defaultValue }) => (
+                <label key={name} className="text-[13px] text-ink-secondary">
+                  {t(label)}
+                  <input
+                    name={name} type="number" min={min} max={max} step="any"
+                    defaultValue={tts.fishSynthesis?.[name]} placeholder={String(defaultValue)}
+                    className="mt-1 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-ink placeholder:text-ink-secondary"
+                  />
+                </label>
+              ))}
+              <label className="text-[13px] text-ink-secondary">
+                {t("voice.fish.bitrate")}
+                <Select name="mp3Bitrate" defaultValue={tts.fishSynthesis?.mp3Bitrate ?? 64} className="mt-1 w-full">
+                  <option value="64">64 kbps</option>
+                  <option value="128">128 kbps</option>
+                </Select>
+              </label>
+              <button type="submit" className="col-span-2 justify-self-start rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+                {t("common.save")}
+              </button>
+            </fieldset>
+          </form>
         </div>
       )}
 

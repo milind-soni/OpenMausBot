@@ -1,5 +1,5 @@
 // The API key stays on the harness: the renderer gets only voice metadata and audio bytes.
-import type { FishTtsModel } from "../config.ts";
+import type { FishSynthesis, FishTtsModel } from "../../shared/fish-voice.ts";
 import { userErrorThrown } from "../user-errors.ts";
 
 const API = (process.env.OMB_FISH_AUDIO_API || "https://api.fish.audio").replace(/\/+$/, "");
@@ -181,6 +181,7 @@ export async function synthesize(
   key: string,
   model: FishTtsModel = DEFAULT_FISH_MODEL,
   signal?: AbortSignal,
+  synthesis: FishSynthesis = {},
 ): Promise<Audio> {
   let res: Response;
   try {
@@ -197,8 +198,11 @@ export async function synthesize(
         reference_id: voiceId,
         format: "mp3",
         sample_rate: 44_100,
-        mp3_bitrate: 64,
+        mp3_bitrate: synthesis.mp3Bitrate ?? 64,
         latency: "normal",
+        temperature: synthesis.temperature,
+        top_p: synthesis.topP,
+        prosody: synthesis.speed === undefined ? undefined : { speed: synthesis.speed },
       }),
       redirect: "error",
       signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),

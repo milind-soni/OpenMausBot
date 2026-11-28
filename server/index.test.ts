@@ -8402,7 +8402,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("saves the Fish Audio model and keeps it across provider switches", async () => {
+  it("saves Fish Audio synthesis settings and keeps them across provider switches", async () => {
     try {
       const fish = await api("PUT", "/api/config", { tts: { provider: "fish" } });
       expect(fish.status).toBe(200);
@@ -8413,14 +8413,21 @@ describe("harness HTTP API", () => {
       expect(free.body.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
       expect((await api("PUT", "/api/config", { tts: { fishModel: "s1" } })).status).toBe(400);
 
+      const fishSynthesis = { temperature: 0.6, speed: 1.5 };
+      const tuned = await api("PUT", "/api/config", { tts: { fishModel: "drama-3", fishSynthesis } });
+      expect(tuned.status).toBe(200);
+      expect(tuned.body.tts).toMatchObject({ fishModel: "drama-3", fishSynthesis });
       const away = await api("PUT", "/api/config", { tts: { provider: "elevenlabs" } });
       expect(away.body.tts).not.toHaveProperty("fishModel");
+      expect(away.body.tts).not.toHaveProperty("fishSynthesis");
       const back = await api("PUT", "/api/config", { tts: { provider: "fish" } });
-      expect(back.body.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+      expect(back.body.tts).toMatchObject({ provider: "fish", fishModel: "drama-3", fishSynthesis });
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+      expect(disk.tts).toMatchObject({ provider: "fish", fishModel: "drama-3", fishSynthesis });
+      const reset = await api("PUT", "/api/config", { tts: { fishSynthesis: {} } });
+      expect(reset.body.tts.fishSynthesis).toEqual({});
     } finally {
-      await api("PUT", "/api/config", { tts: { provider: "elevenlabs", voice: "", fishModel: "s2.1-pro" } }).catch(() => undefined);
+      await api("PUT", "/api/config", { tts: { provider: "elevenlabs", voice: "", fishModel: "s2.1-pro", fishSynthesis: {} } }).catch(() => undefined);
     }
   });
 

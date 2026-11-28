@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { ImageGenerationConfig } from "../shared/image-generation.ts";
+import { fishSynthesisSchema, FISH_TTS_MODELS, type FishSynthesis, type FishTtsModel } from "../shared/fish-voice.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -40,10 +41,6 @@ export * from "./vps-config.ts";
 const optionalText = z.string().optional(), secretText = z.string().trim().optional(); // secretText: a saved key without a paste's surrounding whitespace (a trailing newline), so it can go in a header.
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
-
-/** Fish Audio speech models (`tts.fishModel`); unset means `s2.1-pro`, and `s2.1-pro-free` is Fish's free tier. */
-export const FISH_TTS_MODELS = ["s2.1-pro", "s2.1-pro-free"] as const;
-export type FishTtsModel = (typeof FISH_TTS_MODELS)[number];
 
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
@@ -362,7 +359,8 @@ const appConfigSchema = z.object({
       .refine((value) => !value || /^https?:\/\//i.test(value), "the Chatterbox server address must start with http:// or https://")
       .optional(),
     model: optionalText, ...hearingConfigShape,
-    fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
+    fishModel: z.enum(FISH_TTS_MODELS).optional(), fishSynthesis: fishSynthesisSchema.optional(),
+    everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
   }).optional(),
   decider: deciderConfigSchema.optional(),
   live: liveConfigSchema.optional(),
@@ -456,7 +454,7 @@ export interface AppConfig extends HelperConfig {
   vps?: VpsConfig;
   vpsServers?: VpsServer[];
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; fishSynthesis?: FishSynthesis; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;

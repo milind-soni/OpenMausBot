@@ -1,6 +1,7 @@
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
+import type { FishSynthesis, FishTtsModel } from "../../shared/fish-voice";
 import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
@@ -105,7 +106,8 @@ export interface ConfigStatus {
     /** The language the person speaks to Scribe (ISO 639 code); absent lets Scribe detect it. */
     hearLanguage?: string;
     /** Fish Audio speech model; present only while Fish is the provider. */
-    fishModel?: "s2.1-pro" | "s2.1-pro-free";
+    fishModel?: FishTtsModel;
+    fishSynthesis?: FishSynthesis;
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
     included?: boolean;
   };

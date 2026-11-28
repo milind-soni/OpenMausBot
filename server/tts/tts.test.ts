@@ -466,6 +466,20 @@ describe("Fish Audio", () => {
       .not.toHaveProperty("fishModel");
   });
 
+  it("sends the selected Drama 3 model and optional synthesis settings", async () => {
+    const { describeVoice, speak } = await voice();
+    const fishSynthesis = { temperature: 0, topP: 0.9, speed: 1.25, mp3Bitrate: 128 } as const;
+    const tuned = cfg({ ...ready, fishModel: "drama-3", fishSynthesis });
+    expect(describeVoice(tuned)).toMatchObject({ fishModel: "drama-3", fishSynthesis });
+    await speak(tuned, "hello there");
+    const call = seen.at(-1)!;
+    expect(call.headers.model).toBe("drama-3");
+    expect(JSON.parse(call.body)).toEqual({
+      text: "hello there", reference_id: "fish-1", format: "mp3", sample_rate: 44_100,
+      mp3_bitrate: 128, latency: "normal", temperature: 0, top_p: 0.9, prosody: { speed: 1.25 },
+    });
+  });
+
   it("returns a useful bounded error without echoing arbitrary response bodies", async () => {
     refuse = { status: 422, body: { detail: "x".repeat(500) } };
     const { synthesize } = await fish();

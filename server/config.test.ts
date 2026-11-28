@@ -145,10 +145,20 @@ describe("configuration boundaries", () => {
   });
 
   it("accepts only known Fish Audio speech models", () => {
-    for (const fishModel of ["s2.1-pro", "s2.1-pro-free"]) {
+    for (const fishModel of ["s2.1-pro", "s2.1-pro-free", "drama-3"]) {
       expect(parseConfigPatch({ tts: { fishModel } }).tts).toEqual({ fishModel });
     }
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
+  });
+
+  it("validates optional Fish Audio synthesis settings", () => {
+    const tts = { fishSynthesis: { temperature: 0, topP: 1, speed: 0.5, mp3Bitrate: 128 } };
+    expect(parseConfigPatch({ tts }).tts).toEqual(tts);
+    expect(parseStoredConfig({ tts }).tts).toEqual(tts);
+    const invalid: Record<string, number>[] = [{ temperature: -0.1 }, { topP: 1.1 }, { speed: 3 }, { mp3Bitrate: 1 }];
+    for (const fishSynthesis of invalid) {
+      expect(() => parseConfigPatch({ tts: { fishSynthesis } })).toThrow("fishSynthesis");
+    }
   });
 
   it("keeps how the person is heard and the language they speak, and refuses anything else", () => {

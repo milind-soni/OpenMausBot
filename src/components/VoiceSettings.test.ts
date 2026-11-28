@@ -95,6 +95,30 @@ describe("VoiceSettings", () => {
 });
 
 
+it("offers Drama 3 and saves Fish synthesis settings with blank fields omitted", async () => {
+  fixture.config = { tts: { configured: true, provider: "fish", voice: "fish-1", fishSynthesis: { topP: 0.8 } } };
+  fixture.api.mockResolvedValue({ voices: [] });
+  await render(bot("pepper"), vi.fn());
+  const model = host.querySelector<HTMLSelectElement>('select[aria-label="Fish Audio model"]')!;
+  expect([...model.options].find((option) => option.value === "drama-3")?.textContent).toBe("Drama 3");
+  model.value = "drama-3";
+  await act(async () => model.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { fishModel: "drama-3" } }) });
+
+  const form = host.querySelector("form")!;
+  const topP = form.querySelector<HTMLInputElement>('input[name="topP"]')!;
+  expect(topP.value).toBe("0.8");
+  topP.value = "";
+  form.querySelector<HTMLInputElement>('input[name="temperature"]')!.value = "0";
+  form.querySelector<HTMLInputElement>('input[name="speed"]')!.value = "1.5";
+  form.querySelector<HTMLSelectElement>('select[name="mp3Bitrate"]')!.value = "128";
+  await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(fixture.api).toHaveBeenLastCalledWith("/api/config", {
+    method: "PUT", body: JSON.stringify({ tts: { fishSynthesis: { temperature: 0, speed: 1.5, mp3Bitrate: 128 } } }),
+  });
+});
+
+
 describe("OpenAI voice settings", () => {
   const openaiRadio = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) => radio.textContent === "OpenAI")!;
   it("selects marin only after the person chooses OpenAI, without enabling readout", async () => {
