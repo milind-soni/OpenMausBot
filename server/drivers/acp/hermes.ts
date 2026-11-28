@@ -484,13 +484,16 @@ const support: AcpSupport = {
         `effort "${turn.effort}"`,
       );
     } else {
-      // Reset a pooled session to Hermes' default; older Hermes builds without the option may refuse, which is harmless.
-      await applySetting(
-        request,
-        "session/set_config_option",
-        { sessionId, configId: "reasoning_effort", value: "" },
-        "default effort",
-      ).catch(() => undefined);
+      // Reset a pooled session to Hermes' default. Only an older build refusing the option (method/params rejected) is harmless;
+      // a timeout or transport failure would leave the previous turn's effort active, so it fails the turn.
+      try {
+        await request("session/set_config_option", { sessionId, configId: "reasoning_effort", value: "" });
+      } catch (e) {
+        const code = (e as { code?: unknown }).code;
+        if (code !== -32601 && code !== -32602) {
+          throw new Error(`Hermes rejected default effort via session/set_config_option: ${(e as Error).message}`);
+        }
+      }
     }
   },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
