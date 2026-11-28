@@ -1,7 +1,7 @@
 // Hermes Agent (Nous Research's `hermes acp`), custom-only. ACP ignores `hermes -m` (cmd_acp does not
 // forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
 // Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -83,7 +83,14 @@ export function ensureHermesInjectProvider(
     text = "";
   }
   const next = upsertHermesProvider(text, inject.host, host.baseUrl, hostApiKey(host, env));
-  if (next !== text) writeFileSync(path, next);
+  // The provider entry carries its api key, so this file is the server user's alone: the mode applies only when
+  // the write creates it, so an existing file is chmodded too.
+  if (next !== text) {
+    writeFileSync(path, next, { mode: 0o600 });
+    try {
+      chmodSync(path, 0o600);
+    } catch {}
+  }
   return hermesAcpModelId(modelId) ?? modelId;
 }
 
