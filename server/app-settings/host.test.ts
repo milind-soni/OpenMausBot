@@ -187,7 +187,9 @@ describe("reads", () => {
     expect(error).toContain(`The person can change it themselves in ${where}.`);
     expect(error).toContain("It is set for each bot on its own, so they change it on every bot they want it for.");
     // A server-wide setting keeps the plain words.
-    expect(String((await set("general.language", "de")).body.error)).not.toContain("for each bot on its own");
+    const serverWide = String((await set("general.language", "de")).body.error);
+    expect(serverWide).toContain("Several people share this server, so bots never change its settings.");
+    expect(serverWide).not.toContain("for each bot on its own");
   });
 
   it("refuses writes in a guest-driven conversation", async () => {
