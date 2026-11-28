@@ -19,14 +19,19 @@ export function createChatAttachmentRoutes<Vm extends { workspaceDir: string }>(
     if (!deps.sourceExists()) return json(res, 403, { error: "source conversation does not belong to sender" });
     const body = await deps.readBody();
     const attachments = () => collectChatAttachments(deps.messages(), deps.parked());
-    if (path.endsWith("/list")) return json(res, 200, { attachments: listChatAttachments(deps.attachmentStore, attachments()) });
+    if (path.endsWith("/list")) {
+      const listed = await listChatAttachments(deps.attachmentStore, attachments());
+      if (!deps.sourceExists()) return json(res, 403, { error: "source conversation does not belong to sender" });
+      return json(res, 200, { attachments: listed });
+    }
     if (typeof body.attachment_ref !== "string" || (body.destination_dir !== undefined && typeof body.destination_dir !== "string")) return json(res, 400, { error: "attachment_ref is required; destination_dir is optional text" });
     try {
       const vm = await deps.vmForTurn();
       if (!vm) return json(res, 409, { error: "This turn has no Local VM. Select a Local VM before fetching an attachment." });
       if (!deps.active(vm) || !deps.sourceExists()) return json(res, 409, { error: "This turn no longer owns the conversation or Local VM." });
-      const result = fetchChatAttachment({ attachmentStore: deps.attachmentStore, attachments: attachments(), workspace: vm.workspaceDir,
-        guestRoot: deps.guestRoot, botId: deps.botId, threadId: deps.threadId, maxBytes: FILE_MAX_BYTES }, body.attachment_ref, body.destination_dir);
+      const result = await fetchChatAttachment({ attachmentStore: deps.attachmentStore, attachments: attachments(), workspace: vm.workspaceDir,
+        guestRoot: deps.guestRoot, botId: deps.botId, threadId: deps.threadId, maxBytes: FILE_MAX_BYTES, isActive: () => deps.active(vm) && deps.sourceExists() }, body.attachment_ref, body.destination_dir);
+      if (!deps.active(vm) || !deps.sourceExists()) return json(res, 409, { error: "This turn no longer owns the conversation or Local VM." });
       return json(res, 200, result);
     } catch (error) {
       const status = (error as { status?: number }).status ?? 409;
