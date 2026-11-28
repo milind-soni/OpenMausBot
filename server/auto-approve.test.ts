@@ -219,3 +219,17 @@ describe("delegatedApprovalMode", () => {
     expect(delegatedApprovalMode({ ...base, senderMode: "auto", recipientDriverKind: "codex" })).toBe("auto");
   });
 });
+
+describe("an MCP tool's bare name", () => {
+  // Server names routinely carry underscores (mcp__claude_ai_Gmail__send_message), so the prefix has to be
+  // read past one, or the grants below never see the tool they are meant to decide about.
+  it("is read past a server name that itself has underscores", () => {
+    expect(autoVerdict("auto", "mcp__brave__web_search").source).toBe("web-search");
+    expect(autoVerdict("auto", "mcp__brave_search__web_search").source).toBe("web-search");
+  });
+
+  it("keeps the ask-a-person guard ahead of Full access, whatever the server is called", () => {
+    expect(autoVerdict("full", "AskUserQuestion").approve).toBeNull();
+    expect(autoVerdict("full", "mcp__my_agent__ask_user").approve).toBeNull();
+  });
+});

@@ -67,8 +67,11 @@ const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
 // Approve for me allows these names and nothing wider: a page fetch and every other tool stay a prompt.
 const WEB_SEARCH = new Set(["websearch", "web_search", "web-search", "search_web"]);
 
+/** The tool's own name without its MCP server prefix. The server segment may itself contain `_`, which the
+ * matching below relies on: a request like `mcp__claude_ai_Gmail__send_message` must read as `send_message`, or
+ * the grants and the ask-a-person guard never see the tool they are meant to decide about. */
 function bareToolName(tool: string): string {
-  return tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
+  return tool.replace(/^mcp__.+?__/, "").toLowerCase();
 }
 
 /** The decision log's "which rule": `full-access` and `command-allowlist` are user grants, `web-search` Approve for me's own,
