@@ -54,7 +54,7 @@ const samePanel = (a, b) => a.botId === b.botId && a.threadId === b.threadId && 
  * `fromPartition(name)`: Electron's session. `owner()`: the app window
  * or null. `chromeVersion`: process.versions.chrome.
  */
-export function createBrowserPanes({ createView, createPopup = null, createParking = null, keepsRunning = () => false, quitting = () => false, fromPartition, owner, chromeVersion, log = () => {}, now = Date.now, captureMs = CAPTURE_MS }) {
+export function createBrowserPanes({ createView, createPopup = null, createParking = null, keepsRunning = () => false, quitting = () => false, fromPartition, owner, chromeVersion, log = () => {}, now = Date.now, captureMs = CAPTURE_MS, platform = process.platform }) {
   const browsers = new Map();
   const configured = new Set();
   /** Per partition: Electron's own UA, read before this module changed it, and the identity mode in force. */
@@ -86,6 +86,16 @@ export function createBrowserPanes({ createView, createPopup = null, createParki
       }
     }
     return parking;
+  }
+
+  function restoreHostFocus({ visible, window: win, contents }) {
+    if (platform !== "darwin" || !visible || !win) return;
+    try {
+      // Electron's WebContents.focus() can activate its owner window on macOS.
+      if (win.isDestroyed() || !win.isFocused() || contents.isDestroyed() || !contents.isFocused()) return;
+      const hostContents = win.webContents;
+      if (hostContents && !hostContents.isDestroyed()) hostContents.focus();
+    } catch {}
   }
 
   /** Moves a pane's view into `target`; a view sits in one window at a time. */
@@ -171,6 +181,7 @@ export function createBrowserPanes({ createView, createPopup = null, createParki
             if (entry.window !== shownIn) place(entry, shownIn);
             else if (!entry.visible) shownIn.contentView.addChildView(entry.view);
           }
+          if (!visible) restoreHostFocus(entry);
           entry.view.setVisible(visible);
         } catch (error) {
           log(`browser pane: could not place ${tab}: ${error?.message ?? error}`);
@@ -396,6 +407,7 @@ export function createBrowserPanes({ createView, createPopup = null, createParki
     if (entry.popup) {
       try { if (!entry.popup.isDestroyed()) entry.popup.close(); } catch {}
     } else {
+      restoreHostFocus(entry);
       try { entry.view.setVisible(false); } catch {}
       try { if (!entry.window.isDestroyed()) entry.window.contentView.removeChildView(entry.view); } catch {}
     }
