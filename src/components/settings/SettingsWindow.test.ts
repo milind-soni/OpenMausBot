@@ -317,6 +317,15 @@ describe("Settings → Features", () => {
     expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, suggestedReplies: false });
   });
 
+  it.each([true, false])("sets promotional messages to the opposite of %s", async (promotions) => {
+    const { api } = await import("@/state/store");
+    fixture.config = { features: { promotions } };
+    expect(render("features")).toContain("Promotional messages");
+    expect(featureSwitches()).toEqual({ promotions });
+    fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "promotions")!.onClick!({} as never);
+    expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { promotions: !promotions } }) });
+  });
+
   it("shows no Board switch on a Team Cloud, even from an older server that still reports one", () => {
     fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false, teamBoard: false } };
     expect(render("features")).not.toContain("Board");
