@@ -12,7 +12,7 @@ import { writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath, findCliCandidates } from "../env-path.ts"; import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { boxAudienceKey, brokerSocketPath, describeSpawnFailure, killCliTree, spawnCli } from "../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../engine-stop.ts";
 import { execCliProbe } from "../cli-probe-cache.ts"; import { cliToLaunch, cliVersionProbe } from "../cli-version-probe.ts";
-import { claudeAuthStatus } from "./claude-auth-status.ts";
+import { claudeLoginState } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, folderSettingsEnv, withBotSettings } from "./claude-bot-settings.ts"; import { claudeHookSettings } from "./claude-hooks.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
@@ -630,6 +630,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     }
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
+    const loginState = claudeLoginState(config.cli);
     let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : endpointModelCatalog(config.endpointModels) ?? currentEngineCatalog("claude");
     const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
@@ -1288,6 +1289,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         active.delete(threadId);
         session.turn = null;
         retryState.delete(threadId);
+        if (stopReason === "auth_required") loginState.refuse();
         // `claude update` cannot change code this child already loaded, and a signed-out child can keep holding the shared OAuth refresh lock: retire both before completing.
         if (stopReason === "update_required" || stopReason === "auth_required") closeSession(threadId, stopReason === "auth_required" ? "authentication required" : "update required");
         else if (session.teamToolsFailed || session.customMcpFailed) closeSession(threadId, session.teamToolsFailed ? "team tools did not connect" : "an MCP server did not connect");
@@ -1752,8 +1754,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       return "steered";
     };
 
-    const login = new ClaudeLoginController({ cli: config.cli, environment, onAuthenticated: async () => { await refreshModels(); } });
-    let lastAuth: Awaited<ReturnType<typeof claudeAuthStatus>> = {};
+    const login = new ClaudeLoginController({ cli: config.cli, environment, signInRejected: loginState.rejected, onAuthenticated: async () => { loginState.renewed(); await refreshModels(); } });
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
       const env = environment();
@@ -1766,8 +1767,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
-      const probed: typeof lastAuth = config.requireApiKey ? { authenticated: true } : await claudeAuthStatus(config.cli, env);
-      const auth = probed.authenticated === undefined ? lastAuth : (lastAuth = probed);
+      const auth = config.requireApiKey ? { authenticated: true } : await loginState.read(env, !config.managed && !config.endpointModels);
       return { state: "available", version, ...auth, ...claudeBilling(env, auth.account), ...(update ? { update } : {}), ...(warning ? { warning } : {}) };
     };
 

@@ -251,6 +251,20 @@ describe("Claude server-owned sign-in", () => {
     expect(calls().map((call) => call.args)).toEqual([["auth", "status", "--json"]]);
   });
 
+  it("signs in again over a login Anthropic refused, though the status command still reports it", async () => {
+    let refused = true;
+    const controller = create("already", { signInRejected: () => refused, onAuthenticated: async () => { refused = false; } });
+    const first = await controller.start();
+    expect(first).toMatchObject({ phase: "waiting", authorizationUrl: expect.stringContaining("claude.com") });
+    await expect(controller.complete(first.flowId!, "WRONGCODE#abc"), "the refused login still in place is not a success")
+      .rejects.toThrow(/did not accept that code/);
+    expect(refused).toBe(true);
+    const again = await controller.start();
+    await controller.complete(again.flowId!, "GOODCODE#abc");
+    expect(await controller.get(again.flowId!)).toMatchObject({ phase: "succeeded" });
+    expect(refused).toBe(false);
+  });
+
   it("never shows a link that is not Anthropic's, and times out instead", async () => {
     // The startup timeout lands before the 3s link lifetime, so the rejection names the missing link.
     const controller = create("evil", { startupTimeoutMs: 1000 });

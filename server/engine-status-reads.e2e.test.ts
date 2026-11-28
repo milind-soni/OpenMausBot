@@ -1,6 +1,6 @@
 // Real server, fake Claude CLI that logs each status probe: an engine's CLI is probed once per answer, not once per reader.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,6 +158,30 @@ it("probes again after a sign-out, a model refresh, a saved key and a Claude upd
   await engines();
   expect(probeCount(probes, "auth")).toBe(step.before + 1);
 }, 60_000);
+
+it("shows a stored Claude login the chat refused as signed out, and Sign in replaces it instead of keeping it", async () => {
+  const home = freshHome();
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(join(home, ".claude", "fake-auth.json"), JSON.stringify({ email: "stale@example.test" }));
+  // `auth status` still reports this login, but every turn is refused: an expired session that could not refresh.
+  const refused = join(home, "refused");
+  writeFileSync(refused, "");
+  const server = await boot(home, { FAKE_CLAUDE_AUTH: "file", FAKE_CLAUDE_SIGNED_OUT_FILE: refused });
+  expect(claudeStatus(await server.call("GET", "/api/instances"))).toMatchObject({ authenticated: true });
+  const { bot } = await server.control("new-bot", "--name", "Stale login fixture");
+  await server.control("send", "--bot", bot.id, "--text", "hello");
+  await server.control("wait", "--bot", bot.id, "--timeout", "30");
+  await expect.poll(async () => claudeStatus(await server.call("GET", "/api/instances")), { timeout: 10_000 })
+    .toMatchObject({ authenticated: false, reason: expect.stringMatching(/sign in again/i) });
+
+  const { auth } = await server.call("POST", "/api/instances/claude/auth/start", {});
+  expect(auth, "a real sign-in, not the refused login confirmed again").toMatchObject({ phase: "waiting", authorizationUrl: expect.stringContaining("claude.ai") });
+  rmSync(refused);
+  await server.call("POST", "/api/instances/claude/auth/complete", { flowId: auth.flowId, code: "fresh-code" });
+  expect(claudeStatus(await server.call("GET", "/api/instances"))).toMatchObject({ authenticated: true, account: { email: "fresh@example.com" } });
+  await server.control("send", "--bot", bot.id, "--text", "hello again");
+  expect(await server.control("wait", "--bot", bot.id, "--timeout", "30")).toMatchObject({ status: "settled" });
+}, 90_000);
 
 it("hides and shows a provider without reloading its engine, and a read after a global invalidation still probes each engine once", async () => {
   const home = freshHome({ claude2: { driver: "claudeAgent", displayName: "Second fixture", config: { cli: FAKE_CLI } } });

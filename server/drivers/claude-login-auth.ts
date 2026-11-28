@@ -71,6 +71,8 @@ interface ClaudeLoginOptions {
   cli: string;
   environment: () => NodeJS.ProcessEnv;
   onAuthenticated?: () => Promise<void>;
+  /** Anthropic refused the stored sign-in though `auth status` still reports it. */
+  signInRejected?: () => boolean;
   startupTimeoutMs?: number;
   lifetimeMs?: number;
   completeTimeoutMs?: number;
@@ -133,10 +135,10 @@ export class ClaudeLoginController {
       flow.startupTimer.unref();
       flow.expiryTimer.unref();
       this.flow = flow;
-      // Never replace a working login because the button was clicked twice.
+      // Never replace a working login because the button was clicked twice; one Anthropic refused is not working, whatever status says.
       void this.signedIn(env).then((already) => {
         if (flow.status.phase !== "waiting") return;
-        if (already) {
+        if (already && !this.options.signInRejected?.()) {
           this.finish(flow, "succeeded");
           return;
         }
@@ -356,7 +358,8 @@ export class ClaudeLoginController {
       flow.output = "";
       void this.signedIn(flow.env).then((signedIn) => {
         if (flow.status.phase !== "waiting") return;
-        if (signedIn) {
+        // Over a refused login, status reads signed in whether or not this login worked: only its own success counts.
+        if (signedIn && (code === 0 || !this.options.signInRejected?.())) {
           this.finish(flow, "succeeded");
           return;
         }

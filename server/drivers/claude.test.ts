@@ -725,6 +725,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }, { timeout: 7_000 }).toBe(true);
   });
 
+  it("stops calling a login Claude refused signed in, though `auth status` still reports it, until a new sign-in", async () => {
+    // A stored login the CLI's status still reports, which every turn refuses: an expired session that could not refresh.
+    const configDir = join(scratch, ".claude");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "fake-auth.json"), JSON.stringify({ email: "stale@example.com" }));
+    await create("not-logged-in", { FAKE_CLAUDE_AUTH: "file", CLAUDE_CONFIG_DIR: configDir });
+    expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+    await instance.adapter.sendTurn({ threadId: "t-stale-login", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(await instance.snapshot()).toMatchObject({ authenticated: false, reason: expect.stringMatching(/sign in again/i) });
+
+    const start = await instance.startAuthentication!();
+    expect(start, "Sign in runs a real login instead of keeping the refused one").toMatchObject({ phase: "waiting", authorizationUrl: expect.stringContaining("claude.ai") });
+    await instance.completeAuthentication!(start.flowId!, "fresh-code");
+    expect(await instance.snapshot()).toMatchObject({ authenticated: true, account: { email: "fresh@example.com" } });
+  });
+
   it("reads an error result saying the OAuth session expired as a sign-out", async () => {
     await create("oauth-expired-result");
     await instance.adapter.sendTurn({ threadId: "t-oauth", text: "hi" });

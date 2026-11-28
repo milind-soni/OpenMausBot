@@ -1,6 +1,30 @@
 // What `claude auth status --json` says about the account a Claude instance runs on.
 import type { ProviderSnapshot } from "../contracts.ts";
 import { execCli } from "../procs.ts";
+import { claudeBilling } from "./claude-billing.ts";
+
+type ClaudeAuth = Pick<ProviderSnapshot, "authenticated" | "account" | "reason">;
+
+/** An instance's sign-in as Settings shows it: `auth status`, else its last clear answer. The status keeps reporting a
+ * stored claude.ai login Anthropic refuses (an expired session that could not refresh), so once a turn is refused that
+ * login reads signed out until a new sign-in replaces it or it is gone. */
+export function claudeLoginState(cli: string, run: typeof execCli = execCli) {
+  let last: ClaudeAuth = {}, refused = false;
+  return {
+    refuse: () => { refused = true; },
+    rejected: () => refused,
+    renewed: () => { refused = false; },
+    /** `ownLogin`: signing in again could fix it, not a company's or a custom endpoint's account. */
+    async read(env: NodeJS.ProcessEnv, ownLogin: boolean): Promise<ClaudeAuth> {
+      const probed = await claudeAuthStatus(cli, env, run);
+      if (probed.authenticated !== undefined) last = probed;
+      if (last.authenticated === false) refused = false;
+      // An API key or Bedrock is not fixed by a claude.ai sign-in.
+      return refused && last.authenticated === true && ownLogin && claudeBilling(env, last.account).billing === "subscription"
+        ? { authenticated: false, reason: "Claude's sign-in has expired. Sign in again in Settings → AI." } : last;
+    },
+  };
+}
 
 /** Whether `claude` is signed in, per the CLI's own `auth status`: credential storage varies by
  * platform (Keychain, a JSON file) and presence checks accept stale credentials. Only `loggedIn: false`
