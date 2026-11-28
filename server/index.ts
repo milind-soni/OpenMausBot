@@ -489,6 +489,7 @@ import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { serverTurnedOff } from "./drivers/agents-tool-groups.ts"; import { availableToolGroups, toolsOffPart } from "./tool-groups.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, handRoomSkills, roomSkillsRefusal, roomSkillsTurn, takeRoomSkills, type RoomSkillsClaim, type TurnKind } from "./agents-turn.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
+import { vpsComputerTools, vpsComputerTurn } from "./vps-computer-rpc.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills, skillsLibraryEnabled, readSkillLibraryIndex } from "./skill-library.ts";
 import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
@@ -5628,12 +5629,12 @@ function botComputerControlKey(bot: BotRecord): string {
   return computer ? teamComputerOwner(computer.id) : bot.id;
 }
 
-/** Waits here up to COMPUTER_CALL_WAIT_MS; a call that waited through a person's hold, or whose turn ended, is never performed. */
-async function computerCallGate(internalCapability: InternalCapability, signal?: AbortSignal, call?: ReturnType<typeof yourComputerCallFrom>): Promise<ControlState> {
+/** Waits here up to COMPUTER_CALL_WAIT_MS; a call that waited through a person's hold, or whose turn ended, is never performed. `since`, a `takeSequence`, is where a call that waited its turn counts takes from. */
+async function computerCallGate(internalCapability: InternalCapability, signal?: AbortSignal, call?: ReturnType<typeof yourComputerCallFrom>, since?: number): Promise<ControlState> {
   const { botId, threadId, generation } = internalCapability;
   const askedAt = Date.now();
   const deadline = askedAt + COMPUTER_CALL_WAIT_MS;
-  let personHeld = false; const owner = { threadId, generation }, person = { held: () => sharedVm.snapshot(botId, threadId).held, lastTake: () => sharedVm.lastTake(botId, threadId) }, tookFrom = sharedVm.takeSequence();
+  let personHeld = false; const owner = { threadId, generation }, person = { held: () => sharedVm.snapshot(botId, threadId).held, lastTake: () => sharedVm.lastTake(botId, threadId) }, tookFrom = since ?? sharedVm.takeSequence();
   for (;;) {
     const snapshot = sharedVm.snapshot(botId, threadId);
     const helpOpen = snapshot.helpReason !== null;
@@ -5812,12 +5813,10 @@ async function mountBotVps(
       opts.onClaimed(vpsCapture);
     },
   });
-  return {
-    integration: {
-      ...vpsMcp,
-      env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token },
-    },
-  };
+  // A boxed engine cannot dial the VPS itself (no routes, public-only egress), so its proxy runs here and the engine
+  // reaches it through the harness gate, as the cloud computer's tools are served.
+  if (botBox.enabled()) return { integration: vpsComputerTools(bot.id, vpsControl, `http://127.0.0.1:${PORT}`, { sshAlias: remote.sshAlias, container: remote.container_id ?? vps.vpsContainerName(bot.id) }) };
+  return { integration: { ...vpsMcp, env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token } } };
 }
 
 function mountBotBoat(
@@ -12932,9 +12931,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // The turn's capability names its Boat; the Boat credential stays here.
       if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody }), createAppFindRoute({ host: appSuggestions, botId: internalSender.id, readBody: readInternalBody, bot: (botId) => { const bot = connectorThread(botId, internalCapability.threadId)?.bot; return bot && bot.composio !== false && composio.configured(cfg) ? bot : null; }, refusal: (slug) => managedConnectorUnavailableReason(composio.connectionMode(cfg), slug) ?? managedPolicy.appRefusal(slug) ?? teamConnections.connectRefusal(internalCapability, [slug]) })], { req, res, url, path, method, auth, json, readBody })) return; if (method === "POST" && path === "/api/internal/computer/mcp") {
         const body = await readInternalBody();
-        if (internalCapability.boxId === undefined) return json(res, 403, { error: "this turn has no cloud computer" });
         const abort = new AbortController();
         res.once("close", () => { if (!res.writableEnded) abort.abort(); });
+        // A boxed turn's VPS computer is served from the host's own proxy (vps-computer-rpc.ts); no Boat is named.
+        if (internalCapability.boxId === undefined) return await vpsComputerTurn({ body, res, json, botId: internalCapability.botId, assertActive: requireActiveInternalCapability, takeSequence: () => sharedVm.takeSequence(), gate: (since) => computerCallGate(internalCapability, callSignal, undefined, since), signal: callSignal });
         return json(res, 200, { result: await cloudComputerRpc(body, {
           cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
