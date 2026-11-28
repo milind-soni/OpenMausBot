@@ -181,6 +181,61 @@ describe("encrypted full workspace backups", () => {
     expect(existsSync(join(target, "checkpoints", "bot-id"))).toBe(false);
   });
 
+  it("keeps a legacy backup containing checkpoints restorable: validated, staged, but left out of the restored tree", async () => {
+    const source = directory();
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    mkdirSync(join(target, "checkpoints", "kept-bot"), { recursive: true });
+    writeFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "destination rewind");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    // Rewrite the staged manifest the way a pre-exclusion backup wrote it: with top-level checkpoints entries.
+    const job = join(target, ".backups", staged.id);
+    const manifestPath = join(job, "staged", "manifest.json");
+    const manifest = readJson(manifestPath);
+    const tree = Buffer.from("legacy rewind history");
+    manifest.entries.push({ path: "checkpoints", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot/snap", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot/snap/tree.txt", type: "file", size: tree.length, mode: 0o600, sha256: createHash("sha256").update(tree).digest("hex") });
+    manifest.summary.files += 1;
+    manifest.summary.directories += 3;
+    manifest.summary.bytes += tree.length;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    mkdirSync(join(job, "staged", "data", "checkpoints", "bot", "snap"), { recursive: true });
+    writeFileSync(join(job, "staged", "data", "checkpoints", "bot", "snap", "tree.txt"), tree);
+    commitPendingWorkspaceRestore(target, staged.id);
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("kept");
+    expect(readFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "utf8")).toBe("destination rewind");
+    expect(existsSync(join(target, "checkpoints", "bot"))).toBe(false);
+  });
+
+  it("reads a legacy recovery journal that recorded a checkpoints entry, and rolls it back", async () => {
+    const source = directory();
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    // Simulate an interrupted legacy restore: its journal recorded a checkpoints dir it had already moved into the
+    // safety copy — before checkpoints were excluded — and it died mid-apply.
+    const root = join(target, ".backups");
+    const journalPath = join(root, "restore-journal.json");
+    const journal = readJson(journalPath);
+    expect(journal.existing).not.toContain("checkpoints");
+    const safetyData = join(root, `safety-${journal.id}`, "data");
+    mkdirSync(join(safetyData, "checkpoints", "bot"), { recursive: true });
+    writeFileSync(join(safetyData, "checkpoints", "bot", "moved.txt"), "moved by legacy restore");
+    writeFileSync(journalPath, JSON.stringify({ ...journal, phase: "applying", existing: [...journal.existing, "checkpoints"] }));
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ rolledBack: true });
+    expect(readFileSync(join(target, "checkpoints", "bot", "moved.txt"), "utf8")).toBe("moved by legacy restore");
+    expect(existsSync(join(safetyData, "checkpoints", "bot", "moved.txt"))).toBe(false);
+  });
+
   it("round-trips WAL conversations, binary files, drafts and IDs; preserves destination identity and connections", async () => {
     const source = directory();
     const db = fixture(source);

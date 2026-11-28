@@ -115,6 +115,13 @@ function forbiddenArchivePath(path: string): boolean {
   return excluded(folded.split("/")[0]) || excludedWorkspaceAuthPath(folded) ||
     (path !== folded && ["config.json", "webhooks.json"].includes(folded));
 }
+/** A top-level `checkpoints/` entry inside an archive. Checkpoints stopped being backed up in the version that added
+ * them to EXCLUDED, but archives and recovery journals written before that change still record them: they must stay
+ * readable, only skipped when restoring (they can be taken again, and a destination `checkpoints` stays in place). */
+function archiveCheckpointsEntry(path: string): boolean {
+  const folded = path.toLowerCase();
+  return folded === "checkpoints" || folded.startsWith("checkpoints/");
+}
 function preserved(name: string): boolean {
   // An existing WAL/SHM belongs to the old database, and existing waits to the old chats: neither may accompany restored ones.
   const folded = name.toLowerCase();
@@ -495,7 +502,8 @@ function validateManifest(value: unknown): Manifest {
   let bytes = 0;
   let files = 0;
   for (const raw of value.entries) {
-    if (!record(raw) || typeof raw.path !== "string" || !validRelative(raw.path) || forbiddenArchivePath(raw.path) ||
+    if (!record(raw) || typeof raw.path !== "string" || !validRelative(raw.path) ||
+      (forbiddenArchivePath(raw.path) && !archiveCheckpointsEntry(raw.path)) ||
       Object.keys(raw).some((key) => !["path", "type", "size", "mode", "sha256"].includes(key)) ||
       !["file", "directory"].includes(String(raw.type)) || !Number.isSafeInteger(raw.size) || (raw.size as number) < 0 ||
       ![0o600, 0o700].includes(raw.mode as number) || names.has(raw.path.toLowerCase())) throw new Error("Unsafe or duplicate workspace backup entry.");
@@ -689,7 +697,9 @@ function readJournal(path: string): RestoreJournal {
   const raw = privateJson(path);
   if (!record(raw) || typeof raw.id !== "string" || !ID.test(raw.id) || !["applying", "committed", "rolled-back"].includes(String(raw.phase))) throw new Error("Invalid restore recovery journal. Original data was preserved; recovery needs attention.");
   for (const key of ["existing", "incoming"] as const) {
-    if (!Array.isArray(raw[key]) || !raw[key].every((name) => typeof name === "string" && validRelative(name) && !name.includes("/") && !preserved(name)) || new Set(raw[key]).size !== raw[key].length) throw new Error("Invalid restore recovery paths.");
+    // Legacy journals may record a top-level `checkpoints` entry (it only became excluded later); it stays readable so
+    // rollback can move it back out of the safety copy.
+    if (!Array.isArray(raw[key]) || !raw[key].every((name) => typeof name === "string" && validRelative(name) && !name.includes("/") && (!preserved(name) || archiveCheckpointsEntry(name))) || new Set(raw[key]).size !== raw[key].length) throw new Error("Invalid restore recovery paths.");
   }
   return raw as unknown as RestoreJournal;
 }
@@ -726,7 +736,8 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   const prepared = join(job, "apply", "data");
   if (existsSync(join(job, "apply"))) rmSync(join(job, "apply"), { recursive: true, force: true });
   folder(prepared);
-  const installed = manifest.entries.filter((entry) => !ephemeralWorkspaceTokenPath(entry.path));
+  // Legacy checkpoints entries stay validated and staged, but are left out of the restored tree.
+  const installed = manifest.entries.filter((entry) => !ephemeralWorkspaceTokenPath(entry.path) && !archiveCheckpointsEntry(entry.path));
   for (const entry of installed.filter((entry) => entry.type === "directory")) folder(join(prepared, entry.path));
   for (const entry of installed) {
     const destination = join(prepared, entry.path);
