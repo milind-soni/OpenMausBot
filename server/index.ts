@@ -522,7 +522,7 @@ import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceR
 import { repairMovedWorkspacePaths } from "./moved-paths-repair.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
-import { pairingLinkBase, signInMailTarget } from "./pairing-base.ts"; import { lanUrl, listenHost } from "./lan-address.ts"; import { bootServer, type ServerBoot } from "./host/boot.ts"; import { createTailnetShare } from "./tailnet-listener.ts";
+import { pairingLinkBase, signInMailTarget } from "./pairing-base.ts"; import { lanUrl, listenHost } from "./lan-address.ts"; import { bootServer, startingIngressStatus } from "./host/boot.ts"; import { createTailnetShare } from "./tailnet-listener.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts"; import { createSignInTrace } from "./sign-in-trace.ts";
 import {
   clearSessionCookie,
@@ -9360,18 +9360,14 @@ ROUTES.push(createPerfDiagnosticsRoutes({ text: perf.text, bots: perf.bots, stor
   created: (id, auth) => cloudRoutineAuthors?.wrote(id, auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY) }));
 
 let webhookIngress: WebhookIngress | null = null;
-// Replaced by the live status the moment the main listener binds; until then a
-// request must see "starting" rather than read `bound` before it exists.
-let liveIngressStatus: ServerBoot["webhookIngressStatus"] = () => ({ available: false, baseUrl: "", error: "the server is still starting" });
-const webhookIngressStatus = () => liveIngressStatus();
+// "starting" until onBoundState publishes the live status the moment the listener binds.
+let liveIngressStatus = startingIngressStatus; const webhookIngressStatus = () => liveIngressStatus();
 ROUTES.push(createTeamFilesRoutes({ files: teamFilesHost.files, actor: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), admin: auth.scopes.includes("admin") } : null, personName: (person) => teamHost.personName(person), botName: (botId) => store.bot(botId)?.name })); ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes, createRemoteTeammateRoutes({ teammates: remoteTeammates }));
 
 const RUNTIME_KEEP_MS = 30 * 24 * 60 * 60_000;
-let runtimePrunedAt = 0;
-let botBoxReady = false;
+let runtimePrunedAt = 0, botBoxReady = false;
 handoffTicks.start({ pace: () => enginesRead || parkedNodesToReconcile.size > 0 ? "busy" : coordinator.pace(), tick: () => {
-  // Recovered reports must see the engine's resume capability before deciding to keep its stored session, and a
-  // bot-owned spawn before the box decision would run unboxed with the server's own credentials.
+  // Recovered reports must see the engine's resume capability and the resolved bot box; an earlier spawn would run unboxed.
   if (enginesRead || !botBoxReady) return;
   try {
     if (Date.now() - runtimePrunedAt >= 24 * 60 * 60_000) {
@@ -15069,16 +15065,10 @@ const bound = await bootServer({
   // A supervised child must stay on the port its parent polls; an unpinned server walks to a free port.
   pinned: process.env.OMB_PORT_PINNED === "1" || DESKTOP_MANAGED,
   assignPort: (candidate) => { PORT = candidate; },
-  onBoundState: (state) => {
-    SESSION_COOKIE = state.sessionCookie;
-    workspaceAccess = state.workspaceAccess;
-    workspaceAccessTimer = state.workspaceAccessTimer;
-    liveIngressStatus = state.webhookIngressStatus;
-  },
+  onBoundState: (state) => void ({ sessionCookie: SESSION_COOKIE, workspaceAccess, workspaceAccessTimer, webhookIngressStatus: liveIngressStatus } = state),
   onListening: async () => {
   // On a Cloud home every bot turn runs in the bot box: it starts on the bound port, before any engine this callback brings up.
-  await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT });
-  botBoxReady = true;
+  await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT }); botBoxReady = true;
   companyRuntimeReady(); cloudHealth?.speed.ready(); signInTrace?.recover(); void tailnetShare.start(process.env);
   launchListening();
   personWaits.boot(); handoffRequests.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); startCloudTeamRoster({ cloudHome: CLOUD_HOME, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, ownKey: () => composio.connectionMode(cfg) === "self-hosted", apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });

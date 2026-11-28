@@ -60,6 +60,9 @@ export interface ServerBoot {
   workspaceAccessTimer: NodeJS.Timeout | null;
 }
 
+/** /api/webhooks reads this until the listener publishes the real status on bind. */
+export const startingIngressStatus: ServerBoot["webhookIngressStatus"] = () => ({ available: false, baseUrl: "", error: "the server is still starting" });
+
 export async function bootServer(options: {
   server: Server;
   host: string;
