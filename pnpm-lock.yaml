@@ -158,8 +158,8 @@ importers:
         specifier: 7.4.18
         version: 7.4.18
       undici:
-        specifier: 8.11.2
-        version: 8.11.2
+        specifier: 8.13.1
+        version: 8.13.1
       vega:
         specifier: 6.4.0
         version: 6.4.0
@@ -222,8 +222,8 @@ importers:
         specifier: ^4.7.0
         version: 4.7.0(vite@7.3.8(@types/node@26.2.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.16.9)(yaml@2.9.0))
       electron:
-        specifier: ^43.5.0
-        version: 43.7.9
+        specifier: ^43.8.13
+        version: 43.8.13
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
@@ -3463,8 +3463,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@43.7.9:
-    resolution: {integrity: sha512-wZkQ/R9F5Bv8dM5vX6vWboNo5ZCBC/IYQV195dtG9JvFAlNbebzlkWWSE5esgpCVy3rVYQ/g09GeknJwvQnS9A==}
+  electron@43.8.13:
+    resolution: {integrity: sha512-IvtRDVsbEAOJtXw0TtGqVoHQ/2DVpEmgtQL0iJvERdm4TcwbaXVbuhpXifvaPDO+9ZdJO3NMS2OsZ7bzP5d+kQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -5340,8 +5340,8 @@ packages:
     resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.11.2:
-    resolution: {integrity: sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==}
+  undici@8.13.1:
+    resolution: {integrity: sha512-Kt7EaPjh0s93lJH/PmW3d5rhkcpUa6fS3jqZ7+YGxNd9L7Xy/i827xe4C2uhhq+pJebM4tQOl5AgHmW11G5Skg==}
     engines: {node: '>=22.19.0'}
 
   unenv@2.0.0-rc.24:
@@ -8530,7 +8530,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@43.7.9:
+  electron@43.8.13:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
@@ -10963,7 +10963,7 @@ snapshots:
 
   undici@7.29.0: {}
 
-  undici@8.11.2: {}
+  undici@8.13.1: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
