@@ -116,7 +116,14 @@ export function brokerHeaderUrl(port: number, grant: string): string {
 export function upstreamUrl(upstream: string, path: string, query: string): URL | null {
   let url: URL;
   try { url = new URL(upstream); } catch { return null; }
-  if (path) url.pathname = `${url.pathname.replace(/\/+$/, "")}${path}`;
+  const base = url.pathname.replace(/\/+$/, "");
+  if (path) {
+    url.pathname = `${base}${path}`;
+    // Security: assigning a pathname resolves `.` and `..` (and their `%2e` spellings), so without this a client
+    // path climbs out of the grant's own prefix and reaches a sibling endpoint on the same host, carrying the
+    // grant's credential. A grant names one upstream, not a host.
+    if (url.pathname !== base && !url.pathname.startsWith(`${base}/`)) return null;
+  }
   if (query.length > 1) url.search = url.search ? `${url.search}&${query.slice(1)}` : query;
   return url;
 }

@@ -161,5 +161,12 @@ describe("the upstream address", () => {
     expect(upstreamUrl("https://api.example", "/v1/messages", "")?.href).toBe("https://api.example/v1/messages");
     expect(upstreamUrl("https://hq.example/mcp?key=abc", "", "?session=2")?.href).toBe("https://hq.example/mcp?key=abc&session=2");
     expect(upstreamUrl("not a url", "", "")).toBeNull();
+    // A client path may not climb out of the grant's own prefix; the URL parser resolves both spellings of `..`.
+    expect(upstreamUrl("https://api.example/v1", "/../../organization/admins", "")).toBeNull();
+    expect(upstreamUrl("https://api.example/v1", "/%2e%2e/%2e%2e/organization/admins", "")).toBeNull();
+    expect(upstreamUrl("https://api.example/v1", "/models", "")?.href).toBe("https://api.example/v1/models");
+    expect(upstreamUrl("https://api.example/v1", "/", "")?.href).toBe("https://api.example/v1/");
+    // A grant that names only a host still reaches that host's paths.
+    expect(upstreamUrl("https://api.example", "/anything", "")?.href).toBe("https://api.example/anything");
   });
 });
