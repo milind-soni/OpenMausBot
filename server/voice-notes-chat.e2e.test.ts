@@ -5,6 +5,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 import { lastNonReceipt } from "../src/lib/receipts.ts";
 
 const MP3 = Buffer.from("ID3 fake mp3 for the chat voice note fixture");
@@ -62,6 +63,11 @@ async function withChatVoice(test: (f: {
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body) as ChatRequest;
+    if (isTitleCall(request)) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Voice notes" } }] }));
+      return;
+    }
     requests.push(request);
     // A side job (the conversation summary) offers no tools.
     const answer = request.tools?.length ? script(request, lastUser(request)) : say("Earlier the person asked for voice notes.");
