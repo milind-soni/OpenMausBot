@@ -111,7 +111,10 @@ export function describeVoice(cfg: AppConfig) {
     provider,
     baseUrl: cfg.tts?.baseUrl ?? "",
     model: provider === "gemini" ? (cfg.tts?.model || gemini.DEFAULT_GEMINI_MODEL) : provider === "chatterbox" ? (cfg.tts?.model ?? "") : "",
-    ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
+    ...(provider === "fish" ? {
+      fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL,
+      ...(cfg.tts?.fishSynthesis ? { fishSynthesis: cfg.tts.fishSynthesis } : {}),
+    } : {}),
     ...(included ? { included: true as const } : {}),
     ...(cfg.tts?.everyReply ? { everyReply: true as const } : {}),
     ...(cfg.tts?.hearWith === "elevenlabs" ? { hearWith: "elevenlabs" as const } : {}),
@@ -231,7 +234,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return fish.synthesize(text, voice, key, cfg.tts?.fishModel, signal);
+    return fish.synthesize(text, voice, key, cfg.tts?.fishModel, signal, cfg.tts?.fishSynthesis);
   }
   const credential = elevenLabs(cfg);
   if (!credential) throw new NoVoiceConfigured("key");
