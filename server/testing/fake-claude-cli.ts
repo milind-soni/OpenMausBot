@@ -986,6 +986,13 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
   }
+  if (mode === "signal-after-delta") {
+    const delta = { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } };
+    process.stdout.write(`${JSON.stringify({ type: "stream_event", event: delta })}\n`, () => {
+      process.kill(process.pid, "SIGTERM");
+    });
+    return;
+  }
   // FAKE_CLAUDE_TRANSIENTS launches fail transiently (exit 5), counted in the FAKE_CLAUDE_STATE file;
   // FAKE_CLAUDE_PARTIAL_FAILS makes the first one emit a text delta before failing; FAKE_CLAUDE_ANSWERED_FAILS makes it
   // finish one model call (a tool use) before failing.
