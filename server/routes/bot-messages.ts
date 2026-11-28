@@ -11,6 +11,7 @@ import { parseFollowUp } from "../../shared/follow-up.ts";
 import { personWait } from "../../shared/person-wait.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
+import { copiedQuestionAnswer } from "../host/ask-cards.ts";
 import { dismissQuestionCard } from "../card-dismissal.ts";
 import { AppMessageRate, appContextBlock, prepareAppMessage } from "../chat-apps.ts";
 import { prepareWidgetPress, reopenCancelledPress } from "../chat-widgets.ts";
@@ -627,6 +628,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     if (m && method === "POST") {
       const body = await readBody(req);
       const selected = requestedTaskBot(m[1], body.threadId);
+      if (String(body.requestId).startsWith("handoff-copy:")) {
+        return route({ ...ctx, path: `/api/threads/${selected.threadId}/respond`, readBody: async () => body });
+      }
       const answering = answeredIn(selected.threadId, String(body.requestId));
       if (answering !== selected.threadId && !store.taskByThread(selected.id, answering)) {
         return route({ ...ctx, path: `/api/threads/${selected.threadId}/respond`, readBody: async () => body });
@@ -705,9 +709,11 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const behavior = requestBehavior(body.behavior);
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
-      const requestId = String(body.requestId);
-      const threadId = answeredIn(m[1], requestId);
-      const refusal = cardAnswerRefusal(auth, m[1], requestId, behavior) ?? (threadId === m[1] ? null : cardAnswerRefusal(auth, threadId, requestId, behavior));
+      const displayedId = String(body.requestId);
+      const copy = copiedQuestionAnswer(store, m[1], displayedId);
+      const requestId = copy?.requestId ?? displayedId;
+      const threadId = copy?.threadId ?? answeredIn(m[1], requestId);
+      const refusal = cardAnswerRefusal(auth, m[1], displayedId, behavior) ?? (threadId === m[1] ? null : cardAnswerRefusal(auth, threadId, requestId, behavior));
       if (refusal) return json(res, 403, refusalText(refusal));
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, threadId, requestId, behavior);

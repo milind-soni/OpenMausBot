@@ -22,7 +22,7 @@ const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 
 type Card = { requestId?: string; requestType?: string; options?: string[]; subtitle?: string; answered?: string; answeredText?: string; stopped?: boolean };
 type Row = { id: string; role: string; kind: string; at: number; text?: string; card?: Card; replyToId?: string; tool?: { name: string };
-  inbox?: { kind: string; from: { name: string }; origin?: { threadId: string } } };
+  inbox?: { kind: string; from: { name: string }; origin?: { threadId: string; messageId?: string } } };
 type Task = { threadId: string; title: string; inbox?: true; openedBy?: { botId: string } };
 type Bot = { id: string; name: string; threadId: string; busy?: boolean; activity?: string; tasks?: Task[] };
 type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; title: string; body: string; forPerson?: string } };
@@ -97,18 +97,18 @@ async function cardIn(since: number, match: (card: Card) => boolean): Promise<{ 
     return Boolean(found);
   }).catch(async (error: Error) => {
     const seen = await Promise.all((await handed()).map(async (task) => ({ task: task.title, rows: (await messages(task.threadId)).slice(-4).map((row) => [row.role, row.kind, row.text?.slice(0, 80), row.card?.answered]) })));
-    throw new Error(`${error.message}: ${JSON.stringify({ seen, scout: turns(scout.id).map((turn) => turn.planKey), ledger: turns(ledger.id).map((turn) => turn.planKey) })}`);
+    throw new Error(`${error.message}: ${JSON.stringify({ seen, scout: turns(scout.id).map((turn) => turn.planKey), ledger: turns(ledger.id).map((turn) => turn.planKey) })}\n${fx.logs().slice(-4_000)}`);
   });
   return found!;
 }
 
 beforeAll(async () => {
-  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-qc", name: "Acme", engine: ENGINE } });
+  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-qc", name: "Acme", engine: ENGINE, env: { OMB_BOT_BOX: "0" } } });
   team = fx.team!;
   writeFileSync(file("room-plan.json"), "{}");
   cleo = (await team.pair(CLEO)).token!;
   const create = async (body: Record<string, unknown>) => {
-    const created = await team.as(cleo, "POST", "/api/bots", body);
+    const created = await team.as(cleo, "POST", "/api/bots", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, ...body });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     return created.body.bot as Bot;
   };
@@ -225,5 +225,29 @@ it("closes the open question as stopped when Cleo stops Ledger's work, in its ch
   expect(stopped.status, JSON.stringify(stopped.body)).toBe(200);
   await until(async () => (await messages(work)).find((line) => line.id === row.id)?.card?.stopped === true);
   await until(async () => (await messages(inbox)).find((line) => line.card?.requestId === row.card!.requestId)?.card?.stopped === true);
+  await until(idle);
+}, hostTimeout(120_000));
+
+it("lets only the authorized session answer a handoff card from a chat outside the inbox", async () => {
+  const opened = await team.as(cleo, "POST", `/api/bots/${scout.id}/tasks`, { title: "Release review" });
+  expect(opened.status).toBe(201);
+  const source = opened.body.task.threadId as string;
+  script(scout.id, ...handOn("QC5"));
+  script(ledger.id, askWithCard("QC5"));
+  const since = Date.now();
+  await say(scout, source, "QC5-JOB: Have Ledger review the fix.");
+  const { work, row } = await cardIn(since, (card) => card.subtitle === QUESTION);
+  const copyIn = async (threadId: string) => (await messages(threadId)).find((line) => line.id === row.id || line.inbox?.origin?.messageId === row.id);
+  await until(async () => Boolean(await copyIn(source)) && Boolean(await copyIn(inbox)));
+  const bob = (await team.pair({ email: "bob@acme.test", role: "member" })).token!;
+  const copyId = (await copyIn(source))?.card?.requestId;
+  expect(copyId).toBe(`handoff-copy:${row.id}`);
+  const decision = { requestId: copyId, behavior: "answer", message: CHOICES[2] };
+  const refused = await team.as(bob, "POST", `/api/threads/${source}/respond`, decision);
+  expect([403, 404]).toContain(refused.status);
+  expect((await copyIn(source))?.card?.answered).toBeUndefined();
+  expect((await team.as(cleo, "POST", `/api/threads/${source}/respond`, decision)).body).toMatchObject({ outcome: "answered" });
+  await until(async () => (await messages(work)).some((line) => line.text === `QC5-B: Done with: ${CHOICES[2]}`));
+  for (const threadId of [source, inbox, work]) expect((await copyIn(threadId))?.card).toMatchObject({ answered: "answer", answeredText: CHOICES[2], answeredBy: { kind: "session" } });
   await until(idle);
 }, hostTimeout(120_000));

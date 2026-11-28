@@ -28,6 +28,8 @@ person's. Expected:
   Scout is resumed once with the question and told not to repeat it; Cleo's reply on the copy reaches Ledger's next
   turn as `The person answered: "…"`.
 - Stopping Ledger's thread closes an open question as stopped, in the thread and in the inbox.
+- When Cleo starts the work in a separate chat with Scout, Ledger's question appears in that chat as well as in the inbox.
+  Cleo can answer it from the originating chat and see the answer on all three cards. A different team member cannot answer it.
 
 ## Who answers: Full access and Ask for approval
 
@@ -55,13 +57,12 @@ Expected:
 pnpm exec vitest run server/teammate-follow-ups.e2e.test.ts
 ```
 
-One server of the person's own (no Team Cloud, so no inbox copies) with the scripted fake engine: Clive, a Chief of
-Staff, hands Mira work. Expected:
+On a standalone server with the scripted fake engine, Clive, a Chief of Staff, hands Mira work. Expected:
 
 - On "Ask for approval", Mira's `NEEDS INPUT:` question resumes Clive with it. Clive's reply to her thread in a later turn,
   without `answers`, answers it: Mira's next turn reads `@Clive answered: "…"`, her card says Clive answered, no second
   job starts, and her one result resumes Clive.
-- The card Mira's ask tool waits on is answered the same way by Clive's later reply; her turn carries on with it.
+- At Full access, Mira's `ask_user` question stays open in her work thread and appears both in the originating chat and under Needs you in the Inbox. Clive's attempt to answer it is refused. An answer from the person in the originating chat reaches the waiting tool and settles both cards.
 - A correction Clive sends while Mira works on what he handed her reaches her running turn (receipt `injected`, a line
   from Clive in her thread) and her one result carries it.
 - `thread` set to the id of one of the threads Clive opened on Mira sends his follow-up there, and its result comes back to

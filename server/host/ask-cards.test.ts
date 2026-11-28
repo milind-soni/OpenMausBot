@@ -6,7 +6,7 @@ import { privateHandBack } from "./acting-person.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, CARD_SETTLE_MS, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
+import { copiedQuestionAnswer, askToolName, CARD_SETTLE_MS, createAskCards, settleRequestCard, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -40,6 +40,7 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
     groupTaskByThread: () => undefined,
     patchGroup: () => null,
     groupByThread: (threadId: string) => (threadId === "room" ? { id: "room" } : undefined),
+    onChange: () => () => {},
   };
   const nodes = new Map<string, HandoffView>();
   const answered: Array<{ id: string; text: string }> = [];
@@ -52,6 +53,7 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   const deps: AskCardsDeps = {
     store: store as unknown as AskCardsDeps["store"],
     node: (id) => nodes.get(id),
+    mayCopyQuestion: (source) => !(options.privateThreads ?? []).includes(source.threadId),
     runningIn: (threadId) => [...nodes.values()].filter((node) => node.threadId === threadId && node.status === "running"),
     delegatorOf: (threadId) => (threadId === "work" ? { threadId: "inbox", botId: "scout" } : undefined),
     notify: (notification) => { if (notification) notified.push(notification); },
@@ -220,6 +222,45 @@ describe("at Full access a teammate's question goes to its requester", () => {
     w.cards.park(w.node(), "Which invoice?\nDefault: the October one");
     expect(w.rows("work")[0]!.card).toMatchObject({ subtitle: "Which invoice?", options: ["the October one"] });
     expect(w.notified[0]!.body).toBe("Which invoice?");
+  });
+});
+
+describe("a handoff tool question for the person", () => {
+  it("routes copies of the same provider request id back to separate workers", () => {
+    const w = world();
+    for (const threadId of ["work-a", "work-b"]) {
+      const card = { title: "Question", subtitle: "Continue?", options: [], requestId: "request-1", handoffQuestion: { from: threadId, copyTo: "root" } };
+      const source = w.store.appendMessage(threadId, { role: "bot", kind: "options", card });
+      const requestId = `handoff-copy:${source.id}`;
+      w.store.appendMessage("root", { role: "bot", kind: "options", card: { ...card, requestId },
+        inbox: { kind: "ask", from: { botId: "ledger", name: "Ledger" }, origin: { botId: "ledger", threadId, title: "Work", messageId: source.id } } });
+      expect(copiedQuestionAnswer(w.store, "root", requestId)).toEqual({ threadId, requestId: "request-1" });
+    }
+  });
+
+  it("targets the root conversation of a nested hand-off only when it may receive the question", () => {
+    const w = world({ privateThreads: ["private-work"] });
+    const origin = { kind: "user" as const, request: "Prepare a footer" };
+    w.node({ id: "mid", threadId: "middle", status: "waiting", origin });
+    w.node({ id: "last", parentId: "mid", status: "running", origin });
+    w.node({ id: "private", parentId: "mid", threadId: "private-work", status: "running", origin });
+    expect(w.cards.handoffQuestion("work", "ledger", "ask_user")).toEqual({ from: "work", copyTo: "inbox" });
+    expect(w.cards.handoffQuestion("private-work", "ledger", "AskUserQuestion")).toEqual({ from: "private-work" });
+    expect(w.cards.handoffQuestion("middle", "ledger", "ask_user")).toBeUndefined();
+  });
+
+  it.each([["cancelled", "stopped", { answered: "unavailable", stopped: true }], ["failed", "expired", { expired: true }]] as const)("keeps the question after provider timeout and closes when its work is %s (%s)", (status, outcome, settled) => {
+    const w = world();
+    const node = w.node({ origin: { kind: "user", request: "Prepare a footer" } });
+    const card = { title: "Your bot has a question", subtitle: QUESTION, options: [], requestType: "question" as const,
+      requestId: "req-human", handoffQuestion: { from: "work", copyTo: "inbox" } };
+    const row = w.store.appendMessage("work", { role: "bot", kind: "options", card });
+    settleRequestCard(w.deps.store, { type: "request.resolved", threadId: "work", requestId: card.requestId,
+      behavior: "deny", source: "timeout" } as Parameters<typeof settleRequestCard>[1], row.id);
+    w.cards.closed({ ...node, status: "failed", outcome: "interrupted" });
+    expect(w.rows("work")[0]?.card).toEqual(card);
+    w.cards.closed({ ...node, status, outcome });
+    expect(w.rows("work")[0]?.card).toMatchObject(settled);
   });
 });
 

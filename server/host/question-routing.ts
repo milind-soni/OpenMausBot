@@ -1,10 +1,8 @@
-// Who answers a bot's question. At Full access a question asked with an ask tool in work handed on that the
-// person started is not put to them: the bot takes its default, or hands a real choice to its requester.
-// Otherwise a question waits for the person, and an answer counts wherever it is given, also when their Chief or another
-// bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the
-// thread that work runs in goes into that work: it answers the question the work waits on, or reaches its running turn.
-// A Chief may also answer, for the person, a question a teammate it manages puts to them in a thread the Chief did not open.
+// Who answers a bot's question. A hand-off's explicit tool question waits for the person who can answer it.
+// For other questions, what the requester sends to the hand-off thread can answer a parked question or reach its running turn.
+// A Chief may also answer a question a teammate it manages puts to the person in a thread the Chief did not open.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import { liveCardKind } from "../../shared/live-approval.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { escapeNotes } from "../peer-provenance.ts";
@@ -57,9 +55,7 @@ interface Waiting {
 export function createQuestionRouting(deps: QuestionRoutingDeps) {
   const { store } = deps;
 
-  /** At Full access a question asked with an ask tool in work handed on, which the person started, is answered at once
-   * with this instead of a card; undefined shows the card. What only the person can give still reaches them, and so
-   * does every question in work an outside event started or in work that runs in their private chat. */
+  /** Full-access default for a hand-off question without an explicit tool request for the person. */
   function notAsked(input: { botId: string; threadId: string; level: ApprovalMode; question: string }): string | undefined {
     if (input.level !== "full" || personOnly(input.question)) return undefined;
     const node = deps.active().find((n) => n.threadId === input.threadId && n.botId === input.botId && n.status === "running" && n.parentId !== undefined);
@@ -78,7 +74,8 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
       .map((node) => ({ threadId: node.threadId, question: withDefault(node.question ?? "").question, node }));
     const live = store.tasks(target.id).flatMap((task) => {
       if (!deps.hasLive(task.threadId)) return [];
-      const card = store.messagesFor(task.threadId).findLast((row) => !row.inbox && answerableInWords(row.card) && deps.live(task.threadId, row.card!.requestId!));
+      const card = store.messagesFor(task.threadId).findLast((row) => !row.inbox &&
+        (answerableInWords(row.card) || (row.card?.handoffQuestion && liveCardKind(row.card) === "question")) && deps.live(task.threadId, row.card!.requestId!));
       if (!card) return [];
       const node = deps.active().find((n) => n.threadId === task.threadId && n.botId === target.id && n.status === "running");
       return [{ threadId: task.threadId, question: card.card!.subtitle || card.card!.title, card, ...(node ? { node } : {}) }];
@@ -111,7 +108,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
     const refused = () => input.answers === undefined ? undefined : peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed", instructionOnly: true,
       detail: `nothing of ${target.name}'s waits on an answer as ${input.answers}: it was answered or its work ended. Send it without answers if it still needs doing` });
     // A question in words only the person can answer; a wait on a card (a sign-in) is still settled from elsewhere.
-    if (pick && personOnly(pick.question) && !pick.node?.cards?.length) {
+    if (pick && (pick.card?.card?.handoffQuestion || (personOnly(pick.question) && !pick.node?.cards?.length))) {
       return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
         detail: `only the person can answer "${pick.question}": it waits on them where it was asked, and a teammate's answer doesn't settle it. Tell them where it is if they ask` });
     }
@@ -158,7 +155,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
     if (deps.unattended(botId, threadId)) return undefined;
     const row = store.messagesFor(threadId).findLast((one) => !one.inbox && answerableInWords(one.card) && deps.live(threadId, one.card!.requestId!));
     const question = row?.card ? row.card.subtitle || row.card.title : "";
-    return row && !personOnly(question) ? { row, question } : undefined;
+    return row && !row.card?.handoffQuestion && !personOnly(question) ? { row, question } : undefined;
   }
 
   /** What the Chief's turns list: the questions `teammates` (those it manages) wait on the person for, in threads the Chief

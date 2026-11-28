@@ -1,16 +1,16 @@
 // A bot asks the person with a card in its own conversation: one it asks with its question tool, or the one a NEEDS
 // INPUT line leaves, in work handed on, in a room or in its own chat. The person answers it there, by tap or in words, or
-// from the copy in their inbox; the conversation that handed the work on hears that it waits, unless that conversation is
-// the person's inbox, which has the card itself. At Full access a teammate's question goes to its requester instead: its
-// card says who decides and what was picked, and blocks nothing. A card whose work ended, or that a newer question
-// replaced, closes, so nothing stale waits on the person.
+// from the copy in their inbox. Explicit tool questions can also appear in the conversation that started the hand-off.
+// At Full access a teammate's typed decision can go to its requester, with the decision recorded on its card.
 import { formatQuestionAnswers, isPersistentQuestionCard, shouldSettleRequestCard } from "../../shared/ask-question.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { noticeTool, type ChatNoticeKey } from "../chat-notices.ts";
+import { openCardRows } from "../message-db.ts";
 import type { RuntimeEvent } from "../contracts.ts";
+import type { DecisionVia } from "../decision-log.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -31,10 +31,30 @@ const SPENT_SEND_MS = 60_000;
 export const CARD_SETTLE_MS = 1_500;
 type Typed = { status: number; message?: Message; error?: string } | null;
 
+export function copiedQuestionAnswer(store: Pick<Store, "messagesFor">, threadId: string, requestId: string) {
+  if (!requestId.startsWith("handoff-copy:")) return undefined;
+  const copy = store.messagesFor(threadId).find(row => row.card?.requestId === requestId && row.inbox?.kind === "ask");
+  const origin = copy?.inbox?.origin;
+  if (!origin || copy?.card?.handoffQuestion?.copyTo !== threadId || origin.threadId === threadId) return undefined;
+  const original = store.messagesFor(origin.threadId).find(row => row.id === origin.messageId);
+  return original?.card?.requestId ? { threadId: origin.threadId, requestId: original.card.requestId } : undefined;
+}
+
+export interface CardResponseInput {
+  auth: RequestAuth;
+  threadId: string;
+  requestId: string;
+  behavior: "allow" | "deny" | "answer";
+  message?: string;
+  callId?: string;
+  via?: DecisionVia;
+}
+
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
-    | "groupTaskByThread" | "patchGroup" | "groupByThread">;
+    | "groupTaskByThread" | "patchGroup" | "groupByThread" | "markGroupThreadUnread" | "onChange">;
   node(id: string): HandoffView | undefined;
+  mayCopyQuestion(source: HandoffView, target: HandoffView): boolean;
   runningIn(threadId: string): HandoffView[];
   /** The conversation that handed this one its work, while that work is live. */
   delegatorOf(threadId: string): { threadId: string; botId?: string } | undefined;
@@ -110,9 +130,58 @@ export function createAskCards(deps: AskCardsDeps) {
   const now = deps.now ?? Date.now;
   const waitingOnPersonChips = new Map<string, { threadId: string; messageId: string; name: string; kind: string }>();
 
+  function handoffQuestion(threadId: string, botId: string, tool: string | undefined): OptionCardData["handoffQuestion"] {
+    if (tool !== "ask_user" && tool !== "AskUserQuestion") return undefined;
+    const work = deps.runningIn(threadId).find((node) => node.parentId && node.botId === botId);
+    if (!work) return undefined;
+    const root = deps.node(work.rootId);
+    const copyTo = root && work.origin?.kind === "user" && root.threadId !== threadId && deps.mayCopyQuestion(work, root)
+      ? root.threadId : undefined;
+    return { from: threadId, ...(copyTo ? { copyTo } : {}) };
+  }
+
+  function questionSource(threadId: string, requestId: string): string {
+    const copy = store.messagesFor(threadId).find((row) => row.inbox?.kind === "ask" && row.card?.requestId === requestId
+      && row.card.handoffQuestion?.copyTo === threadId);
+    return copy?.card?.handoffQuestion?.from ?? threadId;
+  }
+
+  store.onChange((change) => {
+    if (change.type === "thread.deleted") {
+      for (const row of openCardRows(change.threadId)) {
+        const card = store.messagesFor(row.threadId).find((message) => message.id === row.id)?.card;
+        if (card) store.patchMessage(row.threadId, row.id, { card: { ...card, answered: "unavailable", dismissed: true } });
+      }
+    } else if (change.type === "message.patch" && !change.message.inbox) {
+      const card = change.message.card;
+      const route = card?.handoffQuestion;
+      if (!route?.copyTo || route.from !== change.threadId) return;
+      const copy = store.messagesFor(route.copyTo).find((row) => row.inbox?.origin?.messageId === change.message.id);
+      if (copy?.card && card) store.patchMessage(route.copyTo, copy.id, { card: { ...card, requestId: copy.card.requestId } });
+    }
+  });
+
   function showWaitingOnPersonChip(threadId: string, requestId: string, asker: BotRecord, kind: "approval" | "answer") {
+    const original = kind === "answer" ? store.messagesFor(threadId).find((row) => !row.inbox && row.card?.requestId === requestId) : undefined;
+    const copyTo = original?.card?.handoffQuestion?.copyTo;
+    if (copyTo && original?.card) {
+      if (deps.copiedInto(copyTo, asker.id, threadId)) return;
+      const from = { botId: asker.id, name: asker.name, color: asker.color };
+      const group = store.groupByThread(threadId);
+      const title = group?.name ?? store.taskByThread(asker.id, threadId)?.title ?? asker.name;
+      store.appendMessage(copyTo, { role: "bot", kind: "options", text: original.card.subtitle, card: { ...original.card, requestId: `handoff-copy:${original.id}` }, from,
+        inbox: { kind: "ask", from, origin: { botId: asker.id, threadId, title, messageId: original.id, ...(group ? { groupId: group.id } : {}) } } });
+      const root = store.groupByThread(copyTo);
+      if (root) store.markGroupThreadUnread(root.id, copyTo, true);
+      else {
+        const source = deps.runningIn(threadId).find((node) => node.botId === asker.id && node.parentId);
+        const owner = source && deps.node(source.rootId)?.botId;
+        if (owner) store.patchTask(owner, copyTo, { unread: true });
+      }
+      return;
+    }
     const delegator = delegatorOf(threadId);
-    if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId)) return;
+    if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId) || deps.keptPrivate(threadId, delegator.threadId)) return;
     const chip = store.appendMessage(delegator.threadId, { role: "bot", kind: "activity",
       from: { botId: asker.id, name: asker.name, color: asker.color },
       tool: { name: `Waiting on your ${kind} in @${asker.name}`, nameCode: kind === "approval" ? "chat.notice.waitingApprovalElsewhere" : "chat.notice.waitingAnswerElsewhere", nameParams: { name: asker.name } },
@@ -305,6 +374,7 @@ export function createAskCards(deps: AskCardsDeps) {
       if (!card?.requestId || !(card.requestId.startsWith(`${OPEN_QUESTION}${node.id}-`) || (message.at >= node.createdAt && ownQuestionCard(message)))) continue;
       const deciding = card.answeredBy?.kind === "bot" && card.answeredText === undefined;
       if ((!deciding && liveCardKind(card) === null) || deps.live(node.threadId, card.requestId)) continue;
+      if (card.handoffQuestion && node.status !== "completed" && node.outcome !== "stopped" && node.outcome !== "expired") continue;
       const { answeredBy: _decider, ...rest } = card;
       store.patchMessage(node.threadId, message.id, { card: node.outcome === "expired" ? { ...rest, expired: true }
         : { ...rest, answered: "unavailable", dismissed: true, ...(node.outcome === "stopped" ? { stopped: true } : {}) } });
@@ -391,5 +461,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips, showWaitingOnCardChip, settleWaitingOnCardChip, reopenWaitingOnCardChip };
+  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, handoffQuestion, questionSource, showWaitingOnPersonChip, settleWaitingOnPersonChips, showWaitingOnCardChip, settleWaitingOnCardChip, reopenWaitingOnCardChip };
 }

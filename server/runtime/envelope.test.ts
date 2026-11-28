@@ -447,9 +447,8 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(envelope).toContain("Your level for this is Full access, passed down from the Chief: nothing it allows needs confirmation. At this level do not stop to ask Milind: "
       + "use what you know, a connected app, the web, a signed-in browser, then the computer; take the sensible default for any choice left, carry on, and say in one plain line what you chose. "
       + "If you truly cannot, end with `NEEDS INPUT:`, the question and `Default:` your pick, and @Chief decides. "
-      + "Ask Milind only what only they can do (sign in, pay, a secret, their own account), after the rest: request_sign_in, request_credential or `NEEDS INPUT:`.");
-    expect(envelope).not.toContain("mcp__ogb__ask_user");
-    expect(envelope).not.toContain("a decision only they can make");
+      + "Ask Milind only for what they alone can do: request_sign_in, request_credential or `NEEDS INPUT:`, or mcp__ogb__ask_user for their own decision.");
+    expect(composeEnvelope(full, names)).not.toContain("mcp__ogb__ask_user");
     expect(opening(envelope).length, "no longer than the ask line it replaces").toBeLessThanOrEqual(opening(composeEnvelope(base, { ...names, askTool: "mcp__ogb__ask_user" })).length + 40);
   });
 
