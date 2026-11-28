@@ -33,6 +33,9 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
+  // Per-turn rewind snapshots (checkpoints.ts): shadow git repositories of this machine's workspace folders. They can grow
+  // past the backup limit on their own, and they describe folders a restored workspace does not have.
+  "checkpoints",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   // Slack messages a Cloud took from the Admin (team-slack.ts): this machine's own, of no use anywhere else.
@@ -67,7 +70,7 @@ const EXCLUDED = new Set([
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
   "Saved credentials, provider and MCP connections, managed provider login homes and browser login profiles are not transferred. Destination connections are preserved; reconnect on a new device.",
-  "Downloaded tools and caches (they can be installed again), and recorded browser step screenshots (export them from a conversation to keep them).",
+  "Downloaded tools and caches (they can be installed again), per-turn rewind history, and recorded browser step screenshots (export them from a conversation to keep them).",
   "Installed dependency folders (node_modules, Python virtual environments), Python bytecode caches, browser profile folders, symbolic links inside conversation work folders, and links in bot folders to nothing or to outside this backup; reinstall or recreate them in the project.",
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
