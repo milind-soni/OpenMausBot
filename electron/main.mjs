@@ -1179,7 +1179,14 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     isListening: listening.heard,
     listeningGraceMs: SERVER_LISTENING_GRACE_MS,
   });
-  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
+  // The spawn-time post races the server child's listener registration (the child attaches its
+  // private-message listener only after its module has finished loading). Re-post the capability
+  // once the server reports ready; applying it is idempotent, and a token is required before the
+  // desktop window can sign in locally.
+  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) {
+    syncDesktopMutationToken(proc);
+    return { proc };
+  }
   slog(bootFailureMessage(port, identity));
   const stopped = await stopUtilityServer(proc);
   if (!stopped) {
