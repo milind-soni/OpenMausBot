@@ -60,7 +60,9 @@ where they belong instead of adding new places.
   (Skill Burger, thread tabs, room feed). It's there so
   Simple mode can turn off one feature at a time without switching to
   Advanced. A switch goes there only when its off state is clean: the feature
-  is hidden whole, and nothing the person made is lost.
+  is hidden whole, and nothing the person made is lost. Advanced mode's
+  **Settings → Appearance → Layout** also offers the selected conversation
+  style. It defaults to the plain grey fill.
 - **No new asks.** No new permission asks, approval cards, confirm dialogs,
   nags or waits that interrupt the person, and no default below Full access.
   A bot gets on with the work; a change that needs undoing gets **Undo**.
@@ -273,7 +275,9 @@ element's job and never a pixel value:
   take their surface class, which already balances all three. One exception:
   a bot's bubble is a tint finished with a faint top-lit sheen and a 0.5px
   inset line of ink at 6% (`BOT_BUBBLE_FINISH`), on light grounds only; a
-  dark ground keeps the flat tint.
+  dark ground keeps the flat tint. With the Blue conversation style enabled,
+  the selected sidebar row can combine an accent tint and inset edge with
+  an avatar ring. A selected pinned tile uses the tint.
 - **Rich content in a reply stays in the bubble.** Tables, code and quotes are
   drawn alike: no fill of their own, a 1px hairline and a faint tint. One
   reply is one bubble.

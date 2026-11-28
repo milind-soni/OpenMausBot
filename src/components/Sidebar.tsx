@@ -40,7 +40,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
 import { HelperThreadGroup, isArchived, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow, useRevealedThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { setSidebarDensity, useSidebarDensity, usePinnedCircles, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { setSidebarDensity, useSidebarDensity, usePinnedCircles, useSidebarSelectionAccent, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import {
   ATTENTION_SECTION_ID,
   BOT_CHATS_SECTION_ID,
@@ -91,7 +91,7 @@ import { attentionHasRunningWork, attentionJump, crossBotAttentionThreads, hasCr
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
-import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
+import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, sidebarSelectedSurface, rowSurface } from "./SidebarRowMarkers";
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
@@ -186,12 +186,12 @@ export const GroupListItem = memo(function GroupListItem({ group, viewerEmail, d
         "relative flex w-full items-center rounded-md text-left", SIMPLE_ROW_FOCUS,
         density === "icons" ? (railTile ? "h-[54px] justify-center" : "justify-center px-1 py-1.5") : simpleRow
           ? cn("gap-2.5 rounded-xl py-2 pr-2 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9 md:h-[54px] md:py-0", !group.dm && hasThreadList ? "pl-6" : "pl-2") : "gap-2 py-1.5 pl-6 pr-9",
-        selected && !expanded ? rowSelectedSurface : "hover:bg-ink/[0.06]",
+        selected && !expanded ? sidebarSelectedSurface : "hover:bg-ink/[0.06]",
       )}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
-      {group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}
+      <div data-sidebar-selection-avatar={selected && !expanded ? "" : undefined} className="shrink-0">{group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}</div>
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
           <span className="truncate text-[14px] font-medium leading-5 text-ink">{group.name}</span>
@@ -723,7 +723,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       : simpleRow ? "gap-2.5 rounded-xl p-2 md:h-[54px] md:py-0"
         : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    rowSelected ? rowSelectedSurface : "hover:bg-ink/[0.06]",
+    rowSelected ? sidebarSelectedSurface : "hover:bg-ink/[0.06]",
     simpleRow && rowSurface(rowSelected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
@@ -731,7 +731,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall), placeMark = rowPlaceMark(bot, working, props.placeHere);
   const body = (
     <>
-      <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
+      <span data-sidebar-selection-avatar={selected ? "" : undefined} className={cn("relative flex shrink-0", simpleRow && "-m-[3px]")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
@@ -962,6 +962,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [plusOpen, setPlusOpen] = useState(false);
   const plusMotion = useMenuMotion(plusOpen);
   const advanced = useAdvancedMode();
+  const selectionAccent = useSidebarSelectionAccent();
   const attentionPinned = useAttentionPinned();
   const inboxSupport = useInboxSupport();
   const [newRoom, setNewRoom] = useState(false);
@@ -1211,7 +1212,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
 
   return (
     <aside
-      ref={sidebarRef} data-look="sidebar" data-sidebar-root={!phone || open ? "" : undefined}
+      ref={sidebarRef} data-look="sidebar" data-sidebar-root={!phone || open ? "" : undefined} data-sidebar-selection={selectionAccent}
       tabIndex={-1}
       aria-label={t("sidebar.aria")}
       data-native-view-overlay

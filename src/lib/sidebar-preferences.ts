@@ -9,6 +9,7 @@ export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "to
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
 export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
+export const SIDEBAR_SELECTION_ACCENT_KEY = "openmausbot.sidebarSelectionAccent";
 export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
 export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
@@ -165,6 +166,65 @@ export function setSidebarToolsLayout(layout: SidebarToolsLayout): void {
 
 export function useSidebarToolsLayout(): SidebarToolsLayout {
   return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
+}
+
+export type SidebarSelectionAccent = "charcoal" | "blue";
+
+export function parseSidebarSelectionAccent(value: string | null): SidebarSelectionAccent {
+  return value === "blue" ? "blue" : "charcoal";
+}
+
+let selectionAccentSessionChoice: SidebarSelectionAccent | undefined;
+const selectionAccentListeners = new Set<() => void>();
+
+function currentSelectionAccent(): SidebarSelectionAccent {
+  if (selectionAccentSessionChoice !== undefined) return selectionAccentSessionChoice;
+  try {
+    return parseSidebarSelectionAccent(globalThis.localStorage?.getItem(SIDEBAR_SELECTION_ACCENT_KEY) ?? null);
+  } catch {
+    return "charcoal";
+  }
+}
+
+function notifySelectionAccent() {
+  for (const listener of selectionAccentListeners) listener();
+}
+
+function onSelectionAccentStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_SELECTION_ACCENT_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  selectionAccentSessionChoice = undefined;
+  notifySelectionAccent();
+}
+
+function subscribeSelectionAccent(listener: () => void): () => void {
+  selectionAccentListeners.add(listener);
+  if (selectionAccentListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onSelectionAccentStorage);
+  }
+  return () => {
+    selectionAccentListeners.delete(listener);
+    if (selectionAccentListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onSelectionAccentStorage);
+    }
+  };
+}
+
+export function setSidebarSelectionAccent(accent: SidebarSelectionAccent): void {
+  selectionAccentSessionChoice = accent;
+  try {
+    globalThis.localStorage?.setItem(SIDEBAR_SELECTION_ACCENT_KEY, accent);
+  } catch {
+  }
+  notifySelectionAccent();
+}
+
+export function useSidebarSelectionAccent(): SidebarSelectionAccent {
+  return useSyncExternalStore(subscribeSelectionAccent, currentSelectionAccent, () => "charcoal");
 }
 
 /** The narrowest the open sidebar gets. */

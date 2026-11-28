@@ -12,7 +12,7 @@ import { isWorking } from "./SidebarThreadRow";
 import { showAllConversations } from "./bot-panel/Conversations";
 import { reducedMotion } from "./MenuMotion";
 import { UndoToast, useUndoToast } from "./UndoToast";
-import { MainThreadMark } from "./SidebarRowMarkers";
+import { MainThreadMark, sidebarSelectedSurface } from "./SidebarRowMarkers";
 
 const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 const ROW = "group/label relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg ps-2.5 pe-2 text-start text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
@@ -161,7 +161,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
             onClick={() => { if (renaming !== row.task.threadId) open(row.task.threadId); }}
             onDoubleClick={() => startRename(row)} onFocus={() => setFocusAt(index)} style={stagger(index)}
             className={cn(ROW, gone ? FOLDING : "animate-msg-in cursor-default [animation-fill-mode:backwards] motion-reduce:animate-none",
-              row.current ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink",
+              row.current ? cn(sidebarSelectedSurface, "font-medium text-ink") : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink",
               row.status === "waiting" && !row.current && "text-warning")}>
             {renaming === row.task.threadId ? (
               <input autoFocus dir="auto" value={draft} maxLength={80} aria-label={t("task.renameAria")}
