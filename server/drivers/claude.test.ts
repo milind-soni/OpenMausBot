@@ -4149,6 +4149,16 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(error.message).toContain("simulated crash");
   });
 
+  it.skipIf(process.platform === "win32")("reports a CLI signal after streaming without resending the turn", async () => {
+    await create("signal-after-delta");
+    const turn = await instance.adapter.sendTurn({ threadId: "t-signaled", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId);
+
+    expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
+    expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: "claude exited SIGTERM before result" }));
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  });
+
   it("auto-retries transient exits, then completes with exactly one final message", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "2";
     process.env.FAKE_CLAUDE_STATE = join(scratch, "launches");

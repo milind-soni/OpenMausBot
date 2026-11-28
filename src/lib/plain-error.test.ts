@@ -28,6 +28,7 @@ describe("plainErrorLine", () => {
     ["Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON", "Something went wrong. Try again."],
     ["claude exited 3 before result: fake-claude: simulated crash before result", "Something went wrong. Try again."],
     ["claude exited null before result", "Something went wrong. Try again."],
+    ["claude exited SIGTERM before result", "Something went wrong. Try again."],
     ["codex exited null (signal SIGKILL) before turn/completed", "Something went wrong. Try again."],
     ["DeepSeek Harness exited 3 before the prompt result: panicked at src/main.rs", "Something went wrong. Try again."],
     ["Antigravity ACP exited SIGTERM.", "Something went wrong. Try again."],

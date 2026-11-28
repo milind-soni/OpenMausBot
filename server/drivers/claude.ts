@@ -1577,7 +1577,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       let closeFinalized = false;
-      const finalizeClose = async (code: number | null) => {
+      const finalizeClose = async (code: number | null, signal: NodeJS.Signals | null) => {
         if (closeFinalized) return;
         // The root can close while its MCP helpers run: reap them before releasing the turn.
         if (!(await killCliTree(child, 0))) {
@@ -1596,7 +1596,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           if (session.turn.continuationGrace) {
             settleResult(held);
           } else {
-            emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}` });
+            emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: `claude exited ${code ?? signal} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}` });
             settleResult({ ...held, ok: false, stopReason: "exit_before_result" });
           }
         } else if (session.turn && !session.turn.settled) {
@@ -1605,8 +1605,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const refusedAutocompact = session.passedAutocompact && !session.sawInit && /unknown option '--autocompact'/.test(session.stderr);
           if (refusedAutocompact) { if (session.cliVersion !== null) autocompactRefusedBy.add(session.cliVersion); if (session.cliVersion === cliHelpVersion) cliHasAutocompact = false; }
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
-          const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
-          const verdict = classifyError({ exitCode: code, stderr: message });
+          const message = `claude exited ${code ?? signal} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
+          const verdict = classifyError({ exitCode: code, stderr: session.stderr });
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
           if (!retry.cancelled && !stoppedForRoom(threadId, session.child.pid) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
@@ -1705,8 +1705,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         removePrivateTempDir(session.systemPromptPath);
         if (sessions.get(threadId) === session) sessions.delete(threadId);
       };
-      child.on("close", (code) => {
-        session.finishClose = () => finalizeClose(code);
+      child.on("close", (code, signal) => {
+        session.finishClose = () => finalizeClose(code, signal);
         void session.finishClose().finally(markClosed);
       });
 
