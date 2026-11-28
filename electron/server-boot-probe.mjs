@@ -30,7 +30,31 @@ export function bootFailureMessage(port, identity) {
   if (identity.outcome === "exited") return `child on port ${port} exited before answering /api/health`;
   if (identity.outcome === "foreign-owner") return `port ${port} answered health checks from another process`;
   if (identity.outcome === "ready") return `child on port ${port} answered after it stopped being the current server`;
+  if (identity.outcome === "owner-auth-unavailable") return `child on port ${port} could not confirm desktop authorization`;
   return `child on port ${port} did not answer /api/health within ${Math.round((identity.waitedMs ?? 0) / 1000)}s`;
+}
+
+export function confirmDesktopAuthorization(proc, { token, companionToken, timeoutMs = 5_000 }) {
+  return new Promise((resolve) => {
+    const finish = (accepted) => {
+      clearTimeout(timer);
+      proc.off("message", onMessage);
+      proc.off("exit", onExit);
+      resolve(accepted);
+    };
+    const onMessage = (message) => {
+      if (message?.type === "openmausbot:desktop-mutation-token-accepted") finish(true);
+    };
+    const onExit = () => finish(false);
+    const timer = setTimeout(onExit, timeoutMs);
+    proc.on("message", onMessage);
+    proc.once("exit", onExit);
+    try {
+      proc.postMessage({ type: "openmausbot:desktop-mutation-token", token, companionToken });
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

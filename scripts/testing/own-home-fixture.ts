@@ -110,7 +110,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const desktopBase = `http://127.0.0.1:${desktopPort}`;
   const startDesktop = async () => {
     const child = await start("desktop", { OMB_DESKTOP_PARENT: "1", OMB_ENVIRONMENT_LABEL: "Work laptop" }, desktopPort, ["--import", parentPort], true);
-    child.send({ type: "openmausbot:desktop-mutation-token", token: capability });
+    child.send({ type: "openmausbot:desktop-mutation-token", token: capability, companionToken: randomBytes(32).toString("base64url") });
     return child;
   };
   let desktop = await startDesktop();

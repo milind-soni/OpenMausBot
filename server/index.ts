@@ -524,6 +524,7 @@ import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } f
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { pairingLinkBase, signInMailTarget } from "./pairing-base.ts"; import { lanUrl, listenHost } from "./lan-address.ts"; import { createTailnetShare } from "./tailnet-listener.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts"; import { createSignInTrace } from "./sign-in-trace.ts";
+import { desktopMutationCapabilities } from "./desktop-mutation-capabilities.ts";
 import {
   clearSessionCookie,
   isLoopbackHost,
@@ -1404,6 +1405,8 @@ type UtilityParentPort = {
 // Only Electron's utility process supplies parentPort, private to the desktop main process; plain Node leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort; const linkLimits = createLinkLimits({ cloud: () => Boolean(CLOUD_HOME) || botLink.link.role() === "acceptor", node: (id) => coordinator.node(id), confinable: (bot) => registry.get(store.bot(bot.id)?.modelSelection.instanceId ?? "")?.adapter.capabilities.guestTurns === "confined" });
 type DesktopPrivateMessage = BrowserCleanupWireRequest | import("./login-handoff.ts").LoginHandoffResult | {
+  type: "openmausbot:desktop-mutation-token-accepted";
+} | {
   type: "openmausbot:browser-control";
   botId: string;
   held: true;
@@ -1441,15 +1444,12 @@ function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
 }
 function applyDesktopMutationTokenMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-  const message = raw as Record<string, unknown>;
-  if (message.type !== "openmausbot:desktop-mutation-token") return false;
-  if (typeof message.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(message.token)) {
-    throw new Error("invalid desktop mutation capability");
-  }
-  desktopMutationToken = message.token;
-  if (typeof message.companionToken === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.companionToken)) {
-    companionMutationToken = message.companionToken;
-  }
+  if ((raw as Record<string, unknown>).type !== "openmausbot:desktop-mutation-token") return false;
+  const capabilities = desktopMutationCapabilities(raw);
+  if (!capabilities) throw new Error("invalid desktop mutation capabilities");
+  desktopMutationToken = capabilities.token;
+  companionMutationToken = capabilities.companionToken;
+  postDesktopPrivateMessage({ type: "openmausbot:desktop-mutation-token-accepted" });
   return true;
 }
 const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator({

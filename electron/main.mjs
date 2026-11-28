@@ -25,7 +25,7 @@ import {
 import { migrateWorkspaceConfigFile, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs"; import { desktopLaunchAnalytics } from "./launch-analytics.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
-import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
+import { bootFailureMessage, confirmDesktopAuthorization, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
@@ -1073,18 +1073,6 @@ async function runCompanyBackup(kind, input, scheduled = null) {
   }
 }
 
-function syncDesktopMutationToken(proc) {
-  try {
-    proc.postMessage({
-      type: "openmausbot:desktop-mutation-token",
-      token: desktopMutationToken,
-      companionToken: companionMutationToken,
-    });
-  } catch (error) {
-    slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);
-  }
-}
-
 const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
   saveWorkspaceCredential(target, value),
 );
@@ -1159,7 +1147,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`); launchAnalytics.stage("server_spawned"); launchRecord.mark("serverSpawned");
     if (!serverSupervisor.isCurrent(proc)) return;
-    syncDesktopMutationToken(proc); void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
+    void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
     syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child)); browserPanes.attach(proc);
   });
   let exited = false;
@@ -1171,7 +1159,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     slog(`exited code=${code}`);
   });
   serverSupervisor.watch(proc);
-  const identity = await pollServerIdentity({
+  let identity = await pollServerIdentity({
     port,
     pid: () => proc.pid,
     bootTimeoutMs: SERVER_BOOT_TIMEOUT_MS,
@@ -1179,7 +1167,11 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     isListening: listening.heard, listened: listening.announced,
     listeningGraceMs: SERVER_LISTENING_GRACE_MS,
   });
-  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
+  if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc) && !desktopShutdownStarted) {
+    const authorized = await confirmDesktopAuthorization(proc, { token: desktopMutationToken, companionToken: companionMutationToken });
+    if (authorized && serverSupervisor.isCurrent(proc) && !desktopShutdownStarted) return { proc };
+    if (!authorized) identity = { outcome: "owner-auth-unavailable" };
+  }
   slog(bootFailureMessage(port, identity));
   const stopped = await stopUtilityServer(proc);
   if (!stopped) {

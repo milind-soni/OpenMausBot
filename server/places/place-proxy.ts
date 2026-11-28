@@ -16,6 +16,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { ServerResponse } from "node:http";
 
 import { intoPlace, isPlaceId, outOfPlace, ownId, PLACE_FILE_PREFIX, PLACE_KEY } from "../../shared/place-ids.ts";
+import { desktopMutationCapabilities } from "../desktop-mutation-capabilities.ts";
 import { fromOwnPage } from "../request-auth.ts";
 import { userError, type UserErrorKey } from "../user-errors.ts";
 import { PASS, type RouteContext, type RouteHandler } from "../routes/table.ts";
@@ -447,7 +448,8 @@ export function listenPlacePort(port: Port | undefined, proxy: PlaceProxy = plac
     const message = event.data;
     const session = parsePlaceSession(message);
     if (session !== undefined) { proxy.setSession(session); return; }
-    if (record(message) && message.type === "openmausbot:desktop-mutation-token" && typeof message.token === "string") proxy.setOwnerToken(message.token);
+    const capabilities = desktopMutationCapabilities(message);
+    if (capabilities) proxy.setOwnerToken(capabilities.token);
   });
 }
 listenPlacePort((process as NodeJS.Process & { parentPort?: Port }).parentPort);
