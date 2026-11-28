@@ -4,7 +4,7 @@ import { engineDisplayName, isClaudeAccount, SIGN_IN_FAMILY_LABEL, signInFamily,
 import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { InstanceProviderMark } from "./ProviderIcons";
+import { InstanceProviderMark, PresetProviderMark } from "./ProviderIcons";
 import { hasSavedApiKey, needsCli, needsSignIn } from "./EngineSetup";
 import { MENU_META, MENU_ROW } from "./menu-recipe";
 import { Select } from "./Select";
@@ -128,13 +128,15 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
 
 const RAIL_LABEL = "pb-0.5 text-center text-[11px] leading-[14px] text-ink-tertiary";
 
-export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys }: {
+export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys, onSetUpGlm, glmSetup }: {
   instances: InstanceInfo[];
   selectedInstance?: InstanceInfo;
   claudeInstance?: InstanceInfo;
   openaiInstance?: InstanceInfo;
   onSelect: (instance: InstanceInfo) => void;
   onAddApiKeys?: () => void;
+  onSetUpGlm?: () => void;
+  glmSetup?: boolean;
 }) {
   const { subscription, api, custom: local } = railProviders(instances, selectedInstance, claudeInstance, openaiInstance);
   const railButton = ({ instance, target, selected, label }: RailProvider) => {
@@ -168,8 +170,15 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
     <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r-[0.5px] border-ink/10 p-2">
       {subscription.length > 0 && <div className={cn(RAIL_LABEL, "pt-0.5")}>{t("model.rail.cloud")}</div>}
       {subscription.map(railButton)}
-      {(api.length > 0 || onAddApiKeys) && <div className={cn(RAIL_LABEL, subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</div>}
+      {(api.length > 0 || onAddApiKeys || onSetUpGlm) && <div className={cn(RAIL_LABEL, subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</div>}
       {api.map(railButton)}
+      {onSetUpGlm && (
+        <button type="button" data-model-glm-setup onClick={onSetUpGlm} aria-pressed={glmSetup}
+          aria-label={t("apiInstances.glmSetup")} title={t("apiInstances.glmSetup")}
+          className={cn("flex size-9 shrink-0 items-center justify-center rounded-[8px] text-ink", glmSetup ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]")}>
+          <PresetProviderMark preset="zai" size={18} />
+        </button>
+      )}
       {onAddApiKeys && (
         <button
           type="button"

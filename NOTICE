@@ -69,7 +69,7 @@ includes third-party components under their own licenses, listed with the
 library.
 
 Selected provider icon paths are from Simple Icons, used under CC0 1.0.
-The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
+The Cohere and Z.ai provider icon paths are from Lobe Icons, Copyright 2023 LobeHub,
 used under the MIT License.
 
 The Cursor provider mark (src/components/CursorMark.tsx) adapts the Cursor

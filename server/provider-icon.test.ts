@@ -25,6 +25,8 @@ describe("a server's mark comes from its host", () => {
     ["https://api.cohere.com/compatibility/v1", "cohere"],
     ["https://api.cohere.ai/compatibility/v1", "cohere"],
     ["https://openrouter.ai/api/v1", "openrouter"],
+    ["https://api.z.ai/api/paas/v4", "zai"],
+    ["https://open.bigmodel.cn/api/paas/v4", "zai"],
     ["https://api.anthropic.com/v1", "anthropic"],
     ["https://api.llama.com/compat/v1", "meta"],
   ])("%s shows %s", (url, preset) => {

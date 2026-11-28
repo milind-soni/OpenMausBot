@@ -8,7 +8,7 @@ import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
-import { InstanceProviderMark } from "./ProviderIcons";
+import { InstanceProviderMark, PresetProviderMark } from "./ProviderIcons";
 import { MENU_GUTTER, MENU_ICON, MENU_LABEL, MENU_LINE, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_TRAILING, SIMPLE_MENU_META, SIMPLE_MENU_ROW } from "./menu-recipe";
 import { effortLabel } from "./ModelPicker";
 
@@ -26,6 +26,7 @@ export interface SimpleMenuActions {
   onCheckAgain: (instance: InstanceInfo) => void;
   /** Opens the provider settings; left out where they live on another computer. */
   onManage?: () => void;
+  onSetUpGlm?: () => void;
   onResetVariant?: () => void;
 }
 
@@ -325,19 +326,26 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
         </div>
       </div>
 
-      {(props.thinking || props.onResetVariant || props.onManage) && (
+      {(props.thinking || props.onResetVariant || props.onManage || props.onSetUpGlm) && (
         <div data-simple-effort-band className="flex shrink-0 flex-col gap-0.5 p-1.5 pt-0">
           <div role="separator" className={MENU_SEPARATOR} />
           {props.thinking && (
             <>
               <Thinking thinking={props.thinking} labelId={`${idPrefix}-thinking`} />
-              {(props.onResetVariant || props.onManage) && <div role="separator" className={MENU_SEPARATOR} />}
+              {(props.onResetVariant || props.onManage || props.onSetUpGlm) && <div role="separator" className={MENU_SEPARATOR} />}
             </>
           )}
           {props.onResetVariant && (
             <button type="button" data-menu-row data-simple-variant-default onClick={props.onResetVariant} className={MENU_ROW}>
               <Gutter />
               <span className="min-w-0 flex-1 truncate">{t("model.variant.session")}</span>
+            </button>
+          )}
+          {props.onSetUpGlm && (
+            <button type="button" data-menu-row data-simple-glm-setup onClick={props.onSetUpGlm} className={MENU_ROW}>
+              <Gutter><PresetProviderMark preset="zai" size={16} /></Gutter>
+              <span className="min-w-0 flex-1 truncate">{t("apiInstances.glmSetup")}</span>
+              <Forward />
             </button>
           )}
           {props.onManage && (
