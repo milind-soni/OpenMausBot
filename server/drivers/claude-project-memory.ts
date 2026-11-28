@@ -60,6 +60,7 @@ export function claudeProjectMemory(cwd: string, home: string): ClaudeProjectMem
     if (dirname(dir) === dir) break;
   }
   dirs.reverse();
+  if (dirs.some(dir => ["settings.json", "settings.local.json"].some(name => isFile(join(dir, ".claude", name)) && dir !== home))) return null;
   const projectOwn = (dir: string): boolean => dir === cwd && dir !== home;
   const claudeNames = (dir: string): string[] => projectOwn(dir) ? ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"] : ["CLAUDE.md", "CLAUDE.local.md"];
   const agentsNames = (dir: string): string[] => projectOwn(dir) ? ["AGENTS.md", ".claude/AGENTS.md"] : ["AGENTS.md"];

@@ -87,6 +87,15 @@ describe("claudeProjectMemory", () => {
     expect(claudeProjectMemory(homeDir, homeDir)?.excludes).toEqual([join(homeDir, "CLAUDE.md")]);
   });
 
+  it("leaves project exclusions to Claude Code, including settings above the working directory", () => {
+    const parent = folder(), cwd = join(parent, "child");
+    mkdirSync(cwd);
+    mkdirSync(join(parent, ".claude"));
+    writeFileSync(join(parent, ".claude", "settings.json"), JSON.stringify({ claudeMdExcludes: ["**/CLAUDE.md"] }));
+    writeFileSync(join(cwd, "CLAUDE.md"), "Excluded instructions.");
+    expect(claudeProjectMemory(cwd, home())).toBeNull();
+  });
+
   it("returns null when the tree holds no memory", () => {
     expect(claudeProjectMemory(folder(), home())).toBeNull();
   });
