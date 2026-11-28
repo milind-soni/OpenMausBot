@@ -9750,6 +9750,7 @@
   "activity.tool.team.closeThread": "Close thread",
   "activity.tool.team.renameThread": "Rename thread",
   "activity.tool.team.setMainThread": "Set main thread",
+  "activity.tool.team.chatFolders": "Chat folders",
   "activity.tool.team.coordinateBots": "Coordinate bots",
   "activity.tool.team.createBot": "Create bot",
   "activity.tool.team.createRoom": "Create room",

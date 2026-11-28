@@ -4323,6 +4323,7 @@
   "imageGen.complexity.medium": "Mittel",
   "imageGen.complexity.high": "Hoch",
   "activity.tool.team.editImage": "Bild bearbeiten",
+  "activity.tool.team.chatFolders": "Chat-Ordner",
   "voice.deepseek.sharedKey": "DeepSeek verwendet den vorhandenen DeepSeek-Schlüssel dieser Installation.",
   "voice.deepseek.description": "Liest Antworten und Sprachnachrichten mit der DeepSeek-Stimme Stella oder Tide vor. Mit DeepSeek hören dich auch Diktat und abwechselndes Sprechen über die DeepSeek-Spracherkennung, bis zu etwa zwei Minuten pro Aufnahme. Nutzt deinen DeepSeek-API-Schlüssel und wird von DeepSeek abgerechnet.",
   "voice.deepseek.stella": "Stella (weiblich)",

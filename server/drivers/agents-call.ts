@@ -21,7 +21,7 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.t
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callSetMainThreadTool, SET_MAIN_THREAD_TOOL } from "./agents-main-thread-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callSetMainThreadTool, SET_MAIN_THREAD_TOOL } from "./agents-main-thread-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts"; import { callChatFoldersTool, CHAT_FOLDERS_TOOL } from "./agents-chat-folders-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts"; import { BOARD_TOOL_NAMES, callBoardTool } from "./agents-board-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -412,7 +412,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
   if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
-  if (name === SET_MAIN_THREAD_TOOL) return callSetMainThreadTool(args, context);
+  if (name === SET_MAIN_THREAD_TOOL) return callSetMainThreadTool(args, context); if (name === CHAT_FOLDERS_TOOL) return callChatFoldersTool(args, context);
   if (WORKFLOW_TOOL_NAMES.has(name)) return callWorkflowTool(name, args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {

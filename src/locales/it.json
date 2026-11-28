@@ -9603,6 +9603,7 @@
   "activity.tool.team.closeThread": "Chiudi conversazione",
   "activity.tool.team.renameThread": "Rinomina conversazione",
   "activity.tool.team.setMainThread": "Imposta thread principale",
+  "activity.tool.team.chatFolders": "Cartelle chat",
   "activity.tool.team.coordinateBots": "Coordina bot",
   "activity.tool.team.createBot": "Crea bot",
   "activity.tool.team.createRoom": "Crea chat di gruppo",

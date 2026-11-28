@@ -9684,6 +9684,7 @@
   "activity.tool.team.closeThread": "关闭对话",
   "activity.tool.team.renameThread": "重命名对话",
   "activity.tool.team.setMainThread": "设为主对话",
+  "activity.tool.team.chatFolders": "对话文件夹",
   "activity.tool.team.coordinateBots": "协调机器人",
   "activity.tool.team.createBot": "创建机器人",
   "activity.tool.team.createRoom": "创建房间",

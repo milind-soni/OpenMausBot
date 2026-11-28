@@ -381,6 +381,42 @@
       }
     },
     {
+      "name": "chat_folders",
+      "description": "Your own sidebar folders, only when the person asks: list them with their threads, create one, or move one of your threads into one.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "move"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "create: at most 80 characters."
+          },
+          "emoji": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "move: from list_threads; default: this thread."
+          },
+          "folder": {
+            "type": "string",
+            "description": "move: name or id; \"\" takes it out of its folder."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
       "name": "run_workflow",
       "description": "Run a saved Skill Burger exactly, without redoing it by hand: when the person writes /<its-name> or asks for what one does. Fill args from their request. It hands back only steps that need your judgement; do them, then call again with resume and response.",
       "inputSchema": {

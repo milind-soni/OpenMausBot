@@ -590,6 +590,34 @@ it("lets a bot rename only the thread it is working in", () => fixture(async f =
   expect(renamed.title).not.toBe(before);
 }), 45_000);
 
+it("lets a bot make a folder and move its own old thread into it, never a teammate's", () => fixture(async f => {
+  const botOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId);
+  const old = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Acme review" })).task.threadId;
+  f.plan[f.chief.id] = {
+    steps: [
+      { tool: "chat_folders", arguments: { action: "create", name: "Clients", emoji: "💼" } },
+      { tool: "chat_folders", arguments: { action: "move", thread_id: old, folder: "clients" } },
+      { tool: "chat_folders", arguments: { action: "move", thread_id: f.lead.activeTaskId, folder: "Clients" }, expectError: true },
+      { tool: "chat_folders", arguments: { action: "list" } },
+    ],
+    reply: "Acme review is in Clients now",
+  };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Make a Clients folder and put the Acme review chat in it.");
+  expect((await f.wait()).status).toBe("settled");
+  const steps = f.evidence().at(-1).evidence.filter((entry: any) => entry.step?.tool === "chat_folders");
+  expect(steps).toHaveLength(4);
+  expect(steps[0].response.result.content[0].text).toContain("Created the folder 💼 Clients");
+  expect(steps[1].response.result.content[0].text).toContain("Moved #Acme review into 💼 Clients");
+  expect(steps[2].response.result.isError).toBe(true);
+  expect(steps[3].response.result.content[0].text).toContain(`#Acme review (${old})`);
+  const chief = await botOf(f.chief.id);
+  const folder = chief.projects.find((one: any) => one.name === "Clients");
+  expect(folder).toMatchObject({ emoji: "💼" });
+  expect(chief.tasks.find((one: any) => one.threadId === old).projectId).toBe(folder.id);
+  expect((await botOf(f.lead.id)).tasks.find((one: any) => one.threadId === f.lead.activeTaskId).projectId).toBeUndefined();
+}), 45_000);
+
 it("lets a bot make one of its own threads its main thread, never a teammate's", () => fixture(async f => {
   const mainOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).mainThreadId;
   const leadMain = await mainOf(f.lead.id);
