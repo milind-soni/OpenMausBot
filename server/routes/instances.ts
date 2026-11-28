@@ -71,6 +71,17 @@ export interface InstanceRouteDeps {
   endpointModelsReadable?(config: { url: string; key: string; catalog?: unknown }): Promise<boolean>;
 }
 
+/** The engines as a member (a client-scope session) sees them: names, models and capabilities, never the signed-in
+ * account, CLI paths, sign-in commands or a server's address. */
+function memberInstances(described: unknown): unknown[] {
+  return (Array.isArray(described) ? described as Array<Record<string, any>> : []).map((instance) => ({
+    instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName, readOnly: true,
+    ...(instance.icon ? { icon: instance.icon } : {}), ...(instance.access ? { access: instance.access } : {}),
+    models: instance.models, ...(instance.capabilities ? { capabilities: instance.capabilities } : {}),
+    snapshot: { state: instance.snapshot?.state, ...(typeof instance.snapshot?.authenticated === "boolean" ? { authenticated: instance.snapshot.authenticated } : {}) },
+  }));
+}
+
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, providerAuthSessions, hostedModels, providerConfigBusy, providerInstancesChanging,
@@ -118,6 +129,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       return json(res, 200, { instances: hidden.map(([instanceId, entry]) => ({ instanceId, driverKind: entry.driver, displayName: entry.displayName ?? BUILT_IN_DRIVERS.find((driver) => driver.driverKind === entry.driver)?.metadata.displayName ?? instanceId })) });
     }
     if (method === "GET" && path === "/api/instances") {
+      // A member reads what picking a model and steering a turn need; a rescan and a fresh read stay the admin's.
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) return json(res, 200, { instances: memberInstances(await describeInstances()) });
       // Rescan PATH: Windows never pushes PATH changes into a live process, so a CLI installed since launch stays invisible.
       resetPathCache();
       if (url.searchParams.get("fresh") === "1") registry.forgetSnapshots();

@@ -66,6 +66,15 @@ describe("BoxRunner.wrap", () => {
     }
   });
 
+  it("enables Node's environment proxy for Command Code only on the isolated network", () => {
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
+    const request = { command: "command-code", args: ["acp"], engine: "commandCodeAgent", env: {} };
+    expect(runner.wrap(request).env).toMatchObject({
+      NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${BOX_EGRESS_PORT}`,
+    });
+    expect(runner.wrap({ ...request, net: "shared" }).env.NODE_USE_ENV_PROXY).toBeUndefined();
+  });
+
   it("a shared-network box gets no proxy and no bridge", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const wrapped = runner.wrap({ command: "/opt/chrome", args: ["--headless"], env: { PATH: "/usr/bin" }, net: "shared" });

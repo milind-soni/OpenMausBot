@@ -274,3 +274,60 @@ describe("intakeFiles", () => {
     expect(notices).toEqual(["A message takes up to 10 images, 40 MB in all. 11.png wasn't attached."]);
   });
 });
+
+describe("intakeFiles on the desktop app's own server: files over the upload limits go by their place", () => {
+  const big = (name: string, type: string, size: number) => ({ ...file(name, type, size), arrayBuffer: async () => new ArrayBuffer(0) });
+
+  it("attaches an image over the image limit by its place, keeping its name, without uploading it", async () => {
+    const uploadImage = vi.fn(upload);
+    const out = await intakeFiles([big("Original photo.png", "image/png", IMAGE_MAX_BYTES + 1), file("small.png", "image/png")], {
+      allowImages: true, getPath: onDisk, localPath: onDisk, uploadImage,
+    });
+    expect(out.attachments).toEqual([
+      expect.objectContaining({ kind: "file", name: "Original photo.png", path: "/Users/me/Original photo.png", size: IMAGE_MAX_BYTES + 1 }),
+      expect.objectContaining({ kind: "image", name: "small.png" }),
+    ]);
+    expect(uploadImage.mock.calls.map(([f]) => f.name)).toEqual(["small.png"]);
+    expect(out.problems).toEqual([]);
+  });
+
+  it("attaches the images past the message's count and bytes by their place instead of leaving them out", async () => {
+    const uploadImage = vi.fn(upload);
+    const out = await intakeFiles(Array.from({ length: 12 }, (_, index) => file(`${index + 1}.jpg`, "image/jpeg")), {
+      allowImages: true, getPath: onDisk, localPath: onDisk, uploadImage, imageSlots: TURN_IMAGE_MAX_COUNT,
+    });
+    expect(uploadImage).toHaveBeenCalledTimes(TURN_IMAGE_MAX_COUNT);
+    expect(out.attachments.filter((a) => a.kind === "file").map((a) => "path" in a ? a.path : "")).toEqual(["/Users/me/11.jpg", "/Users/me/12.jpg"]);
+    expect(out.attachments).toHaveLength(12);
+    expect(out.notice).toBeNull();
+  });
+
+  it("attaches a document over the file limit by its place", async () => {
+    const uploadFile = vi.fn(async () => null);
+    const out = await intakeFiles([big("Scans.pdf", "application/pdf", FILE_MAX_BYTES + 1)], {
+      allowImages: true, getPath: onDisk, localPath: onDisk, uploadImage: upload, uploadFile,
+    });
+    expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", name: "Scans.pdf", path: "/Users/me/Scans.pdf" })]);
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(out.problems).toEqual([]);
+  });
+
+  it("keeps today's limits where the file has no place on the bot's computer (phone, browser, a paired window)", async () => {
+    const out = await intakeFiles([big("huge.png", "image/png", IMAGE_MAX_BYTES + 1), file("1.png", "image/png"), file("2.png", "image/png")], {
+      allowImages: true, getPath: onDisk, localPath: () => "", imageSlots: 1,
+      uploadImage: async (f) => {
+        if (f.size > IMAGE_MAX_BYTES) throw new Error(`${f.name} exceeds 10 MB`);
+        return upload(f);
+      },
+    });
+    expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["1.png"]);
+    expect(out.notice).toBe("A message takes up to 10 images, 40 MB in all. 2.png wasn't attached. huge.png: huge.png exceeds 10 MB");
+  });
+
+  it("still uploads files within the limits", async () => {
+    const localPath = vi.fn(onDisk);
+    const out = await intakeFiles([file("shot.png", "image/png")], { allowImages: true, getPath: onDisk, localPath, uploadImage: upload });
+    expect(out.attachments).toEqual([expect.objectContaining({ kind: "image", path: "/api/attachments/shot.png" })]);
+    expect(localPath).not.toHaveBeenCalled();
+  });
+});

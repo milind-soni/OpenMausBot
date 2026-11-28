@@ -238,5 +238,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     return { claimed: true, state: "undone" };
   }
 
-  return { stage, resolve, undo };
+  const turn = (botId: string, name: string, on: boolean, kind: SwitchableSkill["kind"] | undefined) => apply(botId, name, on ? "enable" : "disable", kind);
+
+  return { stage, resolve, undo, switchableSkill, turn };
 }

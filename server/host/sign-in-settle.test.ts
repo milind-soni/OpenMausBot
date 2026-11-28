@@ -74,8 +74,16 @@ describe("a sign-in settled without the person pressing Done", () => {
     w.add({ kind: "activity", tool: { name: "browser_open", ok: true, input: JSON.stringify({ url: "https://www.notion.so/workspace" }) } });
     w.add(card("github.com"));
     w.add({ kind: "activity", tool: { name: "browser_open", ok: false, input: JSON.stringify({ url: "https://github.com/login" }) } });
-    w.settle.verified("dachs", "work", 0);
+    w.settle.verified("dachs", "work");
     expect(w.rows().filter((row) => row.signIn).map((row) => [row.signIn!.site, row.signIn!.done ?? false])).toEqual([["notion.so", true], ["github.com", false]]);
+  });
+
+  it("is done once the bot goes on with that site in a later turn: the card the person never answered clears too", () => {
+    const w = world();
+    w.add(card());
+    w.add({ kind: "activity", at: 2_000_000, tool: { name: "browser_open", ok: true, input: JSON.stringify({ url: "https://www.notion.so/workspace" }) } });
+    w.settle.verified("dachs", "work");
+    expect(w.rows().filter((row) => row.signIn).map((row) => [row.signIn!.site, row.signIn!.done ?? false])).toEqual([["notion.so", true]]);
   });
 });
 
@@ -90,7 +98,7 @@ describe("the computer a sign-in card lent the person", () => {
     if (path === "answered elsewhere") w.settle.answeredElsewhere({ id: "as_1", threadId: "work", botId: "dachs", cards: ["m1"] } as HandoffView);
     if (path === "verified") {
       w.add({ kind: "activity", tool: { name: "browser_open", ok: true, input: JSON.stringify({ url: "https://www.notion.so/workspace" }) } });
-      w.settle.verified("dachs", "work", 0);
+      w.settle.verified("dachs", "work");
     }
     return w.handedBackKeys.includes(key);
   };
