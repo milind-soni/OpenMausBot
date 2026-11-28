@@ -31,7 +31,7 @@ import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
-import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
+import { windowBackground, windowChromeOptions } from "./window-chrome.mjs"; import { applyAppIcon, installAppIconHandlers, savedAppIcon } from "./app-icon.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
@@ -134,7 +134,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // vite binds IPv4; a bare "localhost" can resolve to ::1.
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
-const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+const DEFAULT_APP_ICON = path.join(__dirname, "resources/app-icon.png"); let APP_ICON = DEFAULT_APP_ICON; // the person's saved picture replaces this at launch
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
@@ -2198,7 +2198,7 @@ ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (ev
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });
   return result.canceled ? null : (result.filePaths[0] ?? null);
-}));
+})); installAppIconHandlers({ ipcMain, localOnly, dialog, BrowserWindow, app, nativeImage, defaultPath: DEFAULT_APP_ICON, t: nativeT, apply: (iconPath) => { APP_ICON = iconPath; applyAppIcon(iconPath, { platform: process.platform, app, nativeImage, windows: appWindows(), trays: [desktopTray, linuxTray], activity: lendingActivity, log: slog }); } });
 
 // Secrets are never read, and the report is redacted again on the way out.
 ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnostics", async (event) => {
@@ -2344,7 +2344,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
 }));
 
 const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech, windowsSpeech: nativeActions.windowsSpeech,
-  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
+  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: DEFAULT_APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
 function managedRemoteAccessRefusal() {
@@ -2784,7 +2784,7 @@ setCuaStateListener((connection) => {
   });
 });
 
-app.whenReady().then(async () => { launchRecord.mark("ready");
+app.whenReady().then(async () => { launchRecord.mark("ready"); APP_ICON = savedAppIcon(app, DEFAULT_APP_ICON); lendingActivity.setIcon(APP_ICON);
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),

@@ -127,6 +127,15 @@ const __APP_VERSION__: string;
   }
   /** Use this computer as an always-on home, as main reads it now. `available`: a packaged app, where Open at login works.
    * `awake`: held awake on power, let sleep on battery, or off. `updates`: how an update arrives with nobody at the computer. */
+  interface AppIconState {
+    /** A saved picture is in use, rather than the app's own. */
+    custom: boolean;
+    /** The chosen file's name, as the person picked it. */
+    name?: string;
+    /** A 64 px data URL for the settings preview. */
+    preview?: string;
+  }
+
   interface AlwaysOnHomeState {
     available: boolean;
     on: boolean;
@@ -149,6 +158,12 @@ const __APP_VERSION__: string;
       /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
        * whose page carries that server's version. Absent in desktop builds before it. */
       app?: { version: string; ownPage: boolean };
+      /** This computer's own page: a picture the person picked for the app's Dock, window and tray icon. */
+      appIcon?: {
+        state(): Promise<AppIconState>;
+        choose(): Promise<{ outcome: "saved"; state: AppIconState } | { outcome: "canceled" } | { outcome: "error"; problem: string }>;
+        reset(): Promise<{ outcome: "reset"; state: AppIconState }>;
+      };
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       accounts?: import("../../electron/cloud-account.mjs").AccountsBridge;

@@ -30,6 +30,8 @@ export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow,
     isHidden() { return hidden; },
     windowShown(win) { hidden = false; win.setSkipTaskbar(false); },
     relabel() { if (!tray.isDestroyed()) label(); },
+    /** The app's icon changed: the tray shows the new picture at its own size. */
+    setIcon(iconPath) { if (!tray.isDestroyed()) tray.setImage(nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 })); },
     /**
      * Linux gives StatusNotifierItem to the first tray only; a second one falls back to GtkStatusIcon, which GNOME and
      * KDE on Wayland never show. So the lending indicator borrows this icon while it has something to say, and its
