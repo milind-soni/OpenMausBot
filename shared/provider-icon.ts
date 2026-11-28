@@ -1,6 +1,6 @@
 export const PROVIDER_ICON_PRESETS = [
   "openai", "anthropic", "google", "azure", "aws", "xai", "deepseek",
-  "meta", "mistral", "qwen", "moonshot", "cohere", "openrouter", "ollama",
+  "meta", "mistral", "qwen", "moonshot", "cohere", "openrouter", "ollama", "zai",
 ] as const;
 
 export type ProviderIconPreset = typeof PROVIDER_ICON_PRESETS[number];
@@ -28,6 +28,7 @@ export const PROVIDER_ICON_LABELS: Record<ProviderIconPreset, string> = {
   cohere: "Cohere",
   openrouter: "OpenRouter",
   ollama: "Ollama",
+  zai: "GLM (Z.ai)",
 };
 
 function decodedBase64Bytes(value: string): number {

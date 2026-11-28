@@ -30,6 +30,7 @@ const SERVER_HOSTS: Record<string, ProviderIconPreset> = {
   "generativelanguage.googleapis.com": "google", "aiplatform.googleapis.com": "google", "*-aiplatform.googleapis.com": "google",
   "api.x.ai": "xai",
   "api.deepseek.com": "deepseek",
+  "api.z.ai": "zai", "open.bigmodel.cn": "zai",
   "dashscope.aliyuncs.com": "qwen", "dashscope-*.aliyuncs.com": "qwen",
   "*.*.maas.aliyuncs.com": "qwen",
   "api.moonshot.ai": "moonshot", "api.moonshot.cn": "moonshot",

@@ -4,6 +4,7 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
+import { GLM_ENDPOINTS } from "../../shared/glm-provider";
 import { cn } from "@/lib/cn";
 import { KEY_FIELD } from "./keys/KeyRow";
 import { Select } from "./Select";
@@ -277,7 +278,7 @@ function useAddServer() {
   const { dispatch, refreshInstances } = useStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const add = (body: { displayName: string; url: string; key: string; catalog?: string }): Promise<boolean> => {
+  const add = (body: { displayName: string; url: string; key: string; catalog?: string }, onAdded?: (id: string) => void): Promise<boolean> => {
     setBusy(true);
     setError(null);
     return api("/api/instances/openai-compat", { method: "POST", body: JSON.stringify(body) }).then(
@@ -285,6 +286,7 @@ function useAddServer() {
         keySaved("custom_endpoint", "settings", "unverified");
         if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
         else await refreshInstances({ reportErrors: true });
+        if (typeof created.instanceId === "string") onAdded?.(created.instanceId);
         return true;
       },
       (cause: unknown) => {
@@ -376,6 +378,36 @@ export function hasGeminiServer(instances: readonly InstanceInfo[]): boolean {
       return false;
     }
   });
+}
+
+export const GLM_SETUP_ID = "glm-setup";
+
+export function GlmServer({ onAdded }: { onAdded: (id: string) => void }) {
+  const [region, setRegion] = useState<keyof typeof GLM_ENDPOINTS>("international");
+  const [key, setKey] = useState("");
+  const { busy, error, add } = useAddServer();
+  const endpoint = GLM_ENDPOINTS[region];
+
+  return <form data-glm-server="" className="flex flex-col gap-2 px-3 py-3" onSubmit={(event) => {
+    event.preventDefault();
+    if (busy || !key.trim()) return;
+    void add({ displayName: endpoint.name, url: endpoint.url, key: key.trim() }, onAdded).then((added) => { if (added) setKey(""); });
+  }}>
+    <h2 className="text-[14px] font-semibold text-ink">{t("apiInstances.glmSetup")}</h2>
+    <label className="flex flex-col gap-1 text-[13px] text-ink-secondary">
+      {t("apiInstances.glmRegion")}
+      <Select value={region} onChange={(event) => setRegion(event.target.value === "china" ? "china" : "international")} disabled={busy}>
+        <option value="international">{t("apiInstances.glmInternational")}</option>
+        <option value="china">{t("apiInstances.glmChina")}</option>
+      </Select>
+    </label>
+    <label className="flex flex-col gap-1 text-[13px] text-ink-secondary">
+      {t("apiInstances.key")}
+      <input type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" disabled={busy} className={INPUT} />
+    </label>
+    <button type="submit" disabled={busy || !key.trim()} className="ui-button self-end">{t(busy ? "apiInstances.adding" : "apiInstances.add")}</button>
+    {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+  </form>;
 }
 
 /** Google AI Studio in the Providers list: a Gemini API key, added as an OpenAI-compatible server at Google's address. */

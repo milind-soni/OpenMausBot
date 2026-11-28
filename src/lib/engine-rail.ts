@@ -1,13 +1,19 @@
 import type { InstanceInfo } from "@/state/store";
 import { otherSignInOfSameSubscription } from "../../shared/limit-backup";
+import { isGlmOrigin } from "../../shared/glm-provider";
 import { t } from "@/lib/i18n";
 
 export { engineDisplayName } from "@/lib/engine-name";
 
+export function isGlmInstance(instance?: InstanceInfo): boolean {
+  return instance?.driverKind === "openai-compat" && isGlmOrigin(instance.url ?? "");
+}
+
 export function configuredModelInstances(instances: readonly InstanceInfo[], selectedInstanceId?: string): InstanceInfo[] {
   return instances.filter((instance) =>
     instance.instanceId === selectedInstanceId
-      || (instance.snapshot.state === "available" && (instance.models.options.length > 0 || instance.snapshot.chatgptPlan === true)));
+      || (instance.snapshot.state === "available" && (instance.models.options.length > 0 || instance.snapshot.chatgptPlan === true
+        || (isGlmInstance(instance) && instance.snapshot.authenticated === true))));
 }
 
 export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | undefined): boolean {

@@ -3,6 +3,7 @@
 import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
 import { onWorkspaceServer, operatorEnvKey } from "../credential-env.ts";
 import { isLoopback } from "../provider-key-check.ts";
+import { isGlmOrigin } from "../../shared/glm-provider.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
@@ -223,7 +224,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
       ? "No API key — open Settings → AI → Providers."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
-    const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) ? NO_MODELS : DEFAULT_MODELS;
+    const glm = isGlmOrigin(config.url);
+    const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) || glm ? NO_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
@@ -346,7 +348,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
             label: openRouter ? freeLabel(label, row) : label,
             ...(contextWindow ? { contextWindow } : {}),
             ...(takesEffort(id, row) ? { variants: EFFORT_CHOICES } : {}),
-            ...(config.catalog === "openai" ? {} : { custom: true }),
+            ...(config.catalog === "openai" || glm ? {} : { custom: true }),
           });
         }
         if (!options.length) return;
@@ -391,6 +393,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
 
     // The first list says which models can call tools, and is what the engine list shows right after adding Ollama.
     if (loading && isOllamaServer(config)) await Promise.race([loading, new Promise((done) => { setTimeout(done, OLLAMA_FIRST_LIST_MS).unref(); })]);
+    let firstGlmList: Promise<unknown> | null = glm && loading ? loading.finally(() => { firstGlmList = null; }) : null;
 
     const runtime = createOpenAIChatRuntime({
       input,
@@ -404,7 +407,11 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       models: () => reasoningCatalog(catalog, reasoningFor),
       prepareTurn: (turn, signal) => loading && (turn.variant || isOllamaServer(config)) ? waitForCatalog(loading, signal) : undefined,
       selectedReasoning: (model, variant) => Boolean(variant && fact(model)?.thinking?.choices.includes(variant)),
-      refreshModels: fetchModels,
+      refreshModels: async () => { if (firstGlmList) {
+          await firstGlmList;
+          if (catalog !== seeded) return;
+        }
+        await fetchModels(); },
       imageInput: (model) => fact(model)?.vision ?? true,
       ...(gemini ? { videoBytes: GEMINI_VIDEO_BYTES } : {}),
       toolUse: (model) => fact(model)?.tools ?? true,

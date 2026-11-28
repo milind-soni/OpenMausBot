@@ -1,4 +1,4 @@
-import { engineDisplayName } from "@/lib/engine-rail";
+import { GlmServer, GLM_SETUP_ID } from "./OpenAiCompatServers";
 import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -6,7 +6,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, R
 import { currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { offeredEffortLevels, type EffortLevel } from "../../shared/wire";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
-import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
+import { configuredModelInstances, engineDisplayName, isClaudeAccount, isCustomOnly, isGlmInstance, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu, variantSuffix } from "@/lib/simple-model-menu";
 import { choiceIsSelected, modelChoices, modelSelectionForPick, takesTypedModels, withTypedModels, type ModelChoice } from "@/lib/model-choices";
 export { modelSelectionForPick } from "@/lib/model-choices";
@@ -30,7 +30,6 @@ import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, 
 import { BusyModelMenu } from "./ModelPickerBusyMenu";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useAiSwitch } from "@/lib/ai-switch";
@@ -41,7 +40,6 @@ import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
-
 
 export function effortLabel(level: EffortLevel): string {
   return t(`model.effort.${level}` as Parameters<typeof t>[0]);
@@ -306,12 +304,12 @@ export function ModelPicker({
   const showActiveAccount = (multipleClaudeAccounts && isClaudeAccount(active)) || Boolean(active?.snapshot.chatgptPlan) || (active?.driverKind === "codex" && /^chatgpt(?:-|$)/.test(active.instanceId));
   const claudeRailInstance = claudeAccounts.find((instance) => instance.instanceId === lastClaudeIdRef.current)
     ?? claudeAccounts.find((instance) => instance.instanceId === selection.instanceId) ?? claudeAccounts[0];
-  const railInstance =
-    pickerInstances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? pickerInstances[0];
+  const glmSetup = railId === GLM_SETUP_ID;
+  const railInstance = glmSetup ? undefined : pickerInstances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? pickerInstances[0];
   const displayedInstanceId = railInstance?.instanceId;
   // A plan account discovers its allowed models only after sign-in: an empty catalog must still lead to cloud sign-in,
   // never local models.
-  const hasOfficialModels = Boolean(railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
+  const hasOfficialModels = Boolean(isGlmInstance(railInstance) || railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
   const customOnly = isCustomOnly(railInstance);
   const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly: customOnly && !hasOfficialModels,
     reading: open && (loadingInstances || refreshingId !== null),
@@ -368,7 +366,7 @@ export function ModelPicker({
     const selectedIsCustom = instance?.models.options.some(
       (option) => option.id === selection.model && option.custom,
     );
-    setPane(selectedIsCustom || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(selectedIsCustom || (official.length === 0 && !instance?.snapshot.chatgptPlan && !isGlmInstance(instance)) ? "custom" : "main");
     resetList();
   };
 
@@ -405,7 +403,7 @@ export function ModelPicker({
     if (signInFamily(instance) === "openai") lastOpenaiIdRef.current = instance.instanceId;
     setRailId(instance.instanceId);
     const official = instance.models.options.filter((option) => !option.custom);
-    setPane(official.length === 0 && !instance.snapshot.chatgptPlan ? "custom" : "main");
+    setPane(official.length === 0 && !instance.snapshot.chatgptPlan && !isGlmInstance(instance) ? "custom" : "main");
     resetList();
   };
 
@@ -522,7 +520,8 @@ export function ModelPicker({
     </div>
   );
   const remote = window.ogb?.remoteClient?.active === true;
-
+  const canSetUpGlm = !remote && ownerOrAdmin === true && (state.instances.length === 0 || state.instances.some((instance) => !instance.readOnly));
+  const setUpGlm = () => { setRailId(GLM_SETUP_ID); setFullView(true); if (simpleView) setScope("bot"); };
   const levels = offeredEffortLevels(active, selection.model);
   const writeEffort = (effort: EffortLevel | undefined) => {
     const { effort: _effort, ...model } = selection;
@@ -675,8 +674,8 @@ export function ModelPicker({
         <FollowBotModelRow name={profile.name} model={botModelName} follows={follows} onPick={pickBotModel} />
       )}
       <div className="flex min-h-0 min-w-0 flex-1">
-        {pickerInstances.length > 0 && <ModelEngineRail instances={pickerInstances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} openaiInstance={openaiRailInstance} onSelect={selectRail}
-          onAddApiKeys={remote ? undefined : openApiKeys} />}
+        {(pickerInstances.length > 0 || canSetUpGlm) && <ModelEngineRail instances={pickerInstances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} openaiInstance={openaiRailInstance} onSelect={selectRail}
+          onAddApiKeys={remote ? undefined : openApiKeys} glmSetup={glmSetup} onSetUpGlm={canSetUpGlm ? setUpGlm : undefined} />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           {threadId && simpleUpdatesBotDefault && (
@@ -695,7 +694,7 @@ export function ModelPicker({
               </p>
             </div>
           )}
-          {railInstance ? (
+          {glmSetup && canSetUpGlm ? <GlmServer onAdded={(id) => { setRailId(id); setPane("main"); resetList(); }} /> : railInstance ? (
             <>
               <div className="shrink-0 px-3.5 pb-2 pt-3">
                 <div className="flex items-center justify-between gap-3">
@@ -819,7 +818,7 @@ export function ModelPicker({
                         {shownOfficial.map(renderRow)}
                         {shownOfficial.length === 0 && (
                           <div className="px-2 py-5 text-center text-[13px] leading-[18px] text-ink-secondary">
-                            {t("model.noMatch", { query: query.trim() })}
+                            {isGlmInstance(railInstance) && !official.length ? t("apiInstances.glmNoModels") : t("model.noMatch", { query: query.trim() })}
                           </div>
                         )}
                         {!query && !showAll && official.length > compactOfficial.length && (
@@ -964,7 +963,7 @@ export function ModelPicker({
           }}
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
-          onManage={remote ? undefined : openEngines}
+          onManage={remote ? undefined : openEngines} onSetUpGlm={canSetUpGlm ? setUpGlm : undefined}
           onResetVariant={resetVariant}
         />
       ) : fullPane}

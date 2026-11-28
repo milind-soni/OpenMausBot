@@ -5,6 +5,7 @@ import { signInReasonOf } from "../../shared/sign-in-outcome.ts";
 import { modelManifest } from "../model-manifest/manifest.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
+import { isGlmOrigin } from "../../shared/glm-provider.ts";
 import {
   assertSeparateClaudeAccount,
   configuredAccountDirectory,
@@ -215,6 +216,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         const added = addEndpoint(instances, parsed.data);
         if ("error" in added) return json(res, 400, { error: added.error });
         await persistProviderInstance(added.instanceId, instances);
+        if (isGlmOrigin(parsed.data.url)) await registry.refreshModels(added.instanceId).catch(() => false);
         return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
       } finally { providerConfigBusy.set(false); }
     }

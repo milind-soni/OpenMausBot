@@ -199,8 +199,13 @@ for current addresses, model availability and region requirements.
 
 ### Example: GLM through Z.ai or Zhipu BigModel
 
-Use the `openai-compat` instance above with a general API key from your
-chosen service. Set `config.url` to its OpenAI-compatible base URL:
+In the model picker, choose **Set up GLM**. In Advanced mode, find its mark
+under **API keys**. Select the region where you obtained your API key and add the key. Models listed by
+that service appear under the new provider. If the list is unavailable, you can
+enter exact model IDs in **API Keys → Other (OpenAI-compatible)**.
+
+For configuration files, use the `openai-compat` instance above with a general
+API key from your chosen service. Set `config.url` to its OpenAI-compatible base URL:
 
 | Service | Base URL |
 |---|---|

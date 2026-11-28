@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { OpenAICompatDriver } from "../drivers/openai-compat.ts";
 
 import type { AppConfig } from "../config.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
@@ -20,6 +21,7 @@ const SECRET = "sk-test-0123456789";
 async function serve(options: {
   hosted?: boolean; botInstance?: string; botBusy?: boolean; auth?: RequestAuth;
   readable?: (config: { url: string; key: string }) => Promise<boolean>;
+  models?: (instanceId: string, config: unknown, refresh: boolean) => Promise<unknown>;
 } = {}) {
   const cfg = { instances: { openaiCompat: { driver: "openai-compat" }, claude: { driver: "claudeAgent" } } } as unknown as AppConfig;
   const persisted: InstanceConfigMap[] = [];
@@ -36,9 +38,10 @@ async function serve(options: {
     hostedModels: Boolean(options.hosted),
     providerConfigBusy: { get: () => busy, set: (value: boolean) => { busy = value; } },
     providerInstancesChanging: new Set<string>(),
-    describeInstances: async () => Object.entries(cfg.instances ?? {}).map(([instanceId, entry]) => ({
+    describeInstances: async () => Promise.all(Object.entries(cfg.instances ?? {}).map(async ([instanceId, entry]) => ({
       instanceId, driverKind: entry.driver, displayName: entry.displayName ?? entry.driver,
-    })),
+      ...(options.models && entry.config ? { models: await options.models(instanceId, entry.config, refreshed.includes(instanceId)) } : {}),
+    }))),
     persistProviderInstance: async (_id: string, instances: InstanceConfigMap) => {
       cfg.instances = instances;
       persisted.push(structuredClone(instances));
@@ -93,6 +96,36 @@ describe("added OpenAI-compatible servers", () => {
     expect(listed.text).not.toContain(SECRET);
     expect(listed.body.instances.find((row: any) => row.instanceId === id)).toMatchObject({ displayName: "Zhipu", url: "https://open.bigmodel.cn/api/paas/v4" });
     expect(listed.body.instances.find((row: any) => row.instanceId === "openaiCompat")).not.toHaveProperty("url");
+  });
+
+  it("returns discovered GLM models from the add route without echoing the key", async () => {
+    const url = "https://api.z.ai/api/paas/v4";
+    const nativeFetch = globalThis.fetch;
+    const discover = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (String(input) === `${url}/models`) return Response.json({ data: [{ id: "glm-5.3" }, { id: "glm-4.6" }] });
+      return nativeFetch(input, init);
+    });
+    vi.stubGlobal("fetch", discover);
+    try {
+      const { call, refreshed } = await serve({ models: async (instanceId, config, refresh) => {
+        const instance = await OpenAICompatDriver.create({ instanceId, displayName: "GLM (Z.ai)", enabled: true,
+          config: OpenAICompatDriver.decodeConfig(config), environment: {} });
+        try {
+          if (refresh) await instance.refreshModels?.();
+          return instance.models;
+        } finally { await instance.dispose(); }
+      } });
+      const created = await call("POST", "/api/instances/openai-compat", { displayName: "GLM (Z.ai)", url, key: SECRET });
+      expect(created.status, created.text).toBe(201);
+      expect(refreshed).toEqual([created.body.instanceId]);
+      expect(created.body.instances.find((instance: { instanceId: string }) => instance.instanceId === created.body.instanceId)).toMatchObject({
+        url, models: { default: "glm-5.3", options: [{ id: "glm-5.3" }, { id: "glm-4.6" }] },
+      });
+      expect(discover).toHaveBeenCalledWith(`${url}/models`, expect.objectContaining({ headers: { authorization: `Bearer ${SECRET}` } }));
+      expect(created.text).not.toContain(SECRET);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("refuses base URLs carrying credentials or query strings, and keys that are URLs", async () => {
