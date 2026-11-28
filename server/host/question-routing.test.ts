@@ -271,6 +271,15 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
     expect([...idle.answeredLive, ...theirs.answeredLive, ...w.answeredLive]).toEqual([]);
   });
 
+  it("leaves a hand-off tool question to the person even when a different Chief may read the thread", async () => {
+    const w = world({ live: ["req-p"] });
+    const row = asks(w, "chat");
+    w.store.patchMessage("chat", row.id, { card: { ...row.card!, handoffQuestion: { from: "chat" } } });
+    expect(await answer(w, "chat")).toBeUndefined();
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS])).toEqual([]);
+    expect(w.answeredLive).toEqual([]);
+  });
+
   it("leaves with the person, and does not list, a question in work an outside event started", async () => {
     const w = world({ live: ["req-p"], unattended: ["chat"] });
     asks(w, "chat");

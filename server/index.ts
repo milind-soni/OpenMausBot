@@ -1045,13 +1045,13 @@ function cloudCardRefusal(auth: RequestAuth & { kind: "session" }): string | nul
   return auth.scopes.includes("admin") ? null : USER_ERROR["serverError.card.cloudOwnerOnly"];
 }
 
-/** Decides only whose answer to an existing card counts; it adds no card, gate or prompt. */
 function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null {
   if (auth.kind === "loopback") {
-    return auth.trust === "service" && behavior !== "deny"
-      ? "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in."
-      : null;
+    if (auth.trust !== "service") return null;
+    if (store.messagesFor(threadId).some((row) => row.card?.requestId === requestId && row.card.handoffQuestion)) return "A local service cannot settle this request. Respond in OpenMausBot while signed in.";
+    return behavior === "deny" ? null : "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in.";
   }
+  if (visibleTo(viewerFor(auth)).hides(threadId)) return "This conversation is unavailable.";
   const reviewed = auth.scopes.includes("admin") ? undefined : store.messagesFor(threadId).find(message => message.card?.requestId === requestId && (message.card.teamMemoryRequest || message.card.outsideWrite))?.card;
   if (reviewed) return reviewed.outsideWrite ? "Only a workspace admin can save what came in from outside." : "Only a workspace admin can review shared team memory.";
   // A Cloud guest may read along but never answer: its words would reach the owner's turn and a lent Mac.
@@ -3833,8 +3833,8 @@ function followupAtBoot(threadId: string): "dispatched" | "pending" | undefined 
 const followupEndedRoots = new Map<string, string | undefined>(); let pokeBoard = (): void => {}; // the board's dispatcher, once it is made below
 
 const askCards = createAskCards({ store, node: (id) => coordinator.node(id), runningIn: (threadId) => coordinator.runningIn(threadId), delegatorOf, notify, answerCard: respondToCard, answerNode: (id, text) => coordinator.answerNode(id, text),
-  answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
-  copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)), keptPrivate: (threadId, parentThreadId) => keptPrivate({ child: teamHost.privateTo(threadId), parent: teamHost.privateTo(parentThreadId) }) });
+  answeredIn: (threadId, requestId) => answeredCardThread(threadId, requestId), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
+  copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)), keptPrivate: (threadId, parentThreadId) => keptPrivate({ child: teamHost.privateTo(threadId), parent: teamHost.privateTo(parentThreadId) }), mayCopyQuestion: (work, root) => { if (cloudGuestDriven(work.threadId) || cloudGuestDriven(root.threadId) || (root.groupId ? roomRootProblem(root) : roomHandoffProblem(root))) return false; if (!CLOUD_TEAM) return !sharedMembership(); const owner = teamHost.ownerOf(work.threadId); if (!owner || owner !== teamHost.ownerOf(root.threadId)) return false; const person = teamOwners.people?.list().find(({ email }) => personKey({ id: "", email }) === owner); return Boolean(person && visibleTo(person.role === "member" ? { kind: "member", email: person.email } : { kind: "all", email: person.email }).thread(work.threadId)); } });
 const questionRouting = createQuestionRouting({ store, handedInUnproven, active: () => coordinator.active(), node: (id) => coordinator.node(id), parkedFor: (botId) => coordinator.parkedFor(botId), answerNode: (id, text, by) => coordinator.answerNode(id, text, by), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`), hasLive: (threadId) => { for (const key of askMessageByRequest.keys()) if (key.startsWith(`${threadId}:`)) return true; return false; },
   unattended: (botId, threadId) => teammatePrompts.unattendedWork(botId, threadId),
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
@@ -4824,7 +4824,7 @@ async function answerRequest(
 }
 
 type CardRespondResult = { ok: true } | { ok: false; status: number; error: string };
-
+const answeredCardThread = (threadId: string, requestId: string) => automationReports.answeredIn(teamMessages.inbox.answeredIn(askCards.questionSource(threadId, requestId), requestId), requestId);
 async function respondToCard(input: {
   auth: RequestAuth;
   threadId: string;
@@ -4834,7 +4834,7 @@ async function respondToCard(input: {
   callId?: string;
   via?: DecisionVia;
 }): Promise<CardRespondResult> {
-  const { auth, requestId, behavior, message, callId, via } = input, threadId = automationReports.answeredIn(teamMessages.inbox.answeredIn(input.threadId, requestId), requestId);
+  const { auth, requestId, behavior, message, callId, via } = input, threadId = answeredCardThread(input.threadId, requestId);
   // A call outlives the request that started it: the session must still be valid.
   if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
     return { ok: false, status: 401, error: "The session that started this call has ended." };
@@ -6446,7 +6446,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const effectiveApprovalMode = !asker || guestDriven ? "ask" : linkHeld ? linkHeld.level(ownApprovalMode(asker), event.tool)
         : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
           : ownApprovalMode(asker);
-      const notAsked = !permission && asker && event.requestId ? questionRouting.notAsked({ botId: asker.id, threadId: event.threadId, level: effectiveApprovalMode, question: event.summary }) : undefined;
+      const handoffQuestion = !permission && asker && event.requestId && event.origin !== "output" ? askCards.handoffQuestion(event.threadId, asker.id, event.tool) : undefined; const notAsked = !permission && !handoffQuestion && asker && event.requestId ? questionRouting.notAsked({ botId: asker.id, threadId: event.threadId, level: effectiveApprovalMode, question: event.summary }) : undefined;
       if (notAsked !== undefined && asker && event.requestId) { void answerRequest(event.threadId, event.providerInstanceId ?? asker.modelSelection.instanceId, event.requestId, "answer", notAsked); pushMessage({ role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(event.threadId), "server.questions.notAsked", { question: event.summary.slice(0, 160) }), ok: true } }); break; }
       // Shell descriptors are distinct from computer/MCP permissions: a local desktop must not disable an exact shell grant.
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven && !linkHeld
@@ -6545,7 +6545,7 @@ bus.subscribe((event: RuntimeEvent) => {
               : permission
                 ? "Approval needed"
                 : "Your bot has a question",
-          ...runtimeRequestCardFields(event, {
+          ...(handoffQuestion ? { handoffQuestion } : {}), ...runtimeRequestCardFields(event, {
             permission, guestDriven, commandAllowlist: command ?? undefined, allowKey: toolAllowKey ?? undefined,
             held: recordHeldReason(event.threadId, event.requestId, approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined)),
             heldCode: approvalHeldNote(heldContext),
@@ -11936,7 +11936,7 @@ ROUTES.push(createBotMessageRoutes({
   turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup, resolveAndSendMcp,
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-  cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), pressRecords: proactive.brief.pressRecords, serverPress: (bot, threadId, messageId, action, auth) => meetingsHost.serverPress(bot, threadId, messageId, action, auth) ?? proactive.brief.serverPress(bot, threadId, messageId, action, auth),
+  cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: answeredCardThread, pressRecords: proactive.brief.pressRecords, serverPress: (bot, threadId, messageId, action, auth) => meetingsHost.serverPress(bot, threadId, messageId, action, auth) ?? proactive.brief.serverPress(bot, threadId, messageId, action, auth),
   goals: oneOnOneGoals, inboxReply: teamMessages.replyIn, typedCardAnswer: askCards.typed, ...(CLOUD_TEAM ? { teamAiOwnerName: () => teamAiOwner(teamOwners.people?.list() ?? [], teamHost.personName)?.name ?? "" } : {}),
   relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
     { emoji, name: person.name ?? person.email, at: Date.now() }),

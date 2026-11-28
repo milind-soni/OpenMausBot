@@ -132,12 +132,11 @@ it("Q1 takes Clive's later reply to Mira's thread as the answer to the question 
   expect((await f.messages(f.job)).filter((message: any) => message.tool?.name === "Answered Mira's question")).toHaveLength(1);
 }), hostTimeout(90_000));
 
-it("Q2 takes Clive's reply to Mira's thread as the answer to the card her ask tool waits on, and her turn carries on with it", () => scenario(async (f) => {
-  await f.askMeFirst();
+it("Q2 keeps a Full-access handoff question for the person and accepts their answer in the originating conversation", () => scenario(async (f) => {
   const question = "Should the fix cover only the footer text?";
   f.script(f.clive.id,
     { key: "C0", match: ["Q2-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Q2-BRIEF: apply the fix to the pricing page." } }], reply: "C0: Mira is on it." },
-    { key: "C-REPLY", match: ["Q2-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Only the footer text" } }], reply: "C-REPLY: passed on." },
+    { key: "C-REPLY", match: ["Q2-SAG"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Only the footer text" }, expectError: true }], reply: "C-REPLY: refused." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA], reply: "Q2-FINAL: the fix is in." });
   f.script(f.mira.id, { key: "M1", match: ["Q2-BRIEF"], timeoutMs: 90_000,
     steps: [{ server: "ogb", tool: "ask_user", arguments: { question, choices: ["Only the footer text", "The footer and the welcome text"] }, capture: { answer: "([\\s\\S]+)" } }],
@@ -145,17 +144,24 @@ it("Q2 takes Clive's reply to Mira's thread as the answer to the card her ask to
   await f.say(f.clive.id, f.job, "Q2-JOB: have Mira apply the fix.");
   await expect.poll(() => f.children()[0]?.status, { timeout: 30_000 }).toBe("running");
   const work = f.children()[0].assignee.destination.threadId as string;
-  await expect.poll(async () => (await f.messages(work)).some((message: any) => message.card?.subtitle === question && !message.card.answered), { timeout: 30_000 }).toBe(true);
+  const questionIn = async (threadId: string) => (await f.messages(threadId)).find((row: any) => row.card?.subtitle === question)?.card;
+  await expect.poll(() => questionIn(work), { timeout: 15_000 }).toMatchObject({ requestType: "question" });
+  const { requestId } = await questionIn(work);
+  expect(await questionIn(f.job)).toMatchObject({ requestId, options: ["Only the footer text", "The footer and the welcome text"] });
+  expect((await f.api("GET", "/api/inbox")).body.rows.filter((row: any) => row.card?.requestId === requestId)).toEqual([
+    expect.objectContaining({ tab: "needs-you", origin: expect.objectContaining({ threadId: work }) }),
+  ]);
 
   await f.say(f.clive.id, f.job, "Q2-SAG: tell Mira only the footer text.");
-  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C0", "C-REPLY"]);
-  expect(f.given("C-REPLY"), "Clive's next turn hears what Mira asks").toContain("stopped on its question in that teammate's thread");
-  expect(f.given("C-REPLY")).toContain(question);
-  await expect.poll(async () => (await f.messages(work)).some((message: any) => message.role === "bot" && String(message.text).startsWith("Q2-RESULT")), { timeout: 30_000 }).toBe(true);
-  expect((await f.messages(work)).find((message: any) => String(message.text).startsWith("Q2-RESULT")).text).toContain("Only the footer text");
-  const [sent] = f.replies("C-REPLY");
-  expect(sent.receipts).toEqual([expect.objectContaining({ outcome: "injected", threadId: work, detail: expect.stringContaining(`answered its question "${question}"`) })]);
-  expect((await f.messages(work)).find((message: any) => message.card?.subtitle === question).card).toMatchObject({ answered: "answer", answeredBy: { kind: "bot", name: "Clive" } });
+  await expect.poll(() => f.replies("C-REPLY")[0], { timeout: 30_000 }).toContain("only the person can answer");
+  expect((await questionIn(work)).answered).toBeUndefined();
+  expect((await questionIn(f.job)).answered).toBeUndefined();
+  const answer = "The footer and the welcome text";
+  expect(await f.api("POST", `/api/threads/${f.job}/respond`, { requestId, behavior: "answer", message: answer })).toMatchObject({ status: 200, body: { outcome: "answered" } });
+  await expect.poll(() => f.said(work, `Q2-RESULT: done with ${answer}`), { timeout: 30_000 }).toBe(1);
+  const answered = { answered: "answer", answeredText: answer, answeredBy: { kind: "loopback" } };
+  expect(await questionIn(work)).toMatchObject(answered);
+  expect(await questionIn(f.job)).toMatchObject(answered);
   await expect.poll(async () => await f.said(f.job, "Q2-FINAL"), { timeout: 30_000 }).toBe(1);
   expect(f.children(), "the reply started no second job").toHaveLength(1);
   expect(f.children()[0]).toMatchObject({ status: "completed", executions: 1 });

@@ -646,9 +646,9 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   options: string[];
   /** Distinguishes a provider question from an approval after its live run ends. */
   requestType?: "permission" | "question";
+  /** A hand-off tool question for the person, with the threads sharing its card. */
+  handoffQuestion?: { from: string; copyTo?: string };
   answered?: string;
-  /** What was actually answered, when the answer is words rather than a
-   * verdict. */
   answeredText?: string;
   dismissed?: boolean;
   /** Who settled the card, when a person or service answered it. */

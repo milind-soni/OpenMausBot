@@ -600,6 +600,16 @@ describe("start-up reads on their indexes", () => {
     insertMessage("results", { ...msg("copy", "", { at: 20, role: "bot" }), kind: "options", card, automation: { routineId: "r", runId: "run-1", needsYou: true, copyOf: "asked" } } as Message);
     expect(openCardRows().map((row) => [row.threadId, row.id, row.copyOf])).toEqual([["run", "asked", null], ["results", "copy", "asked"]]);
   });
+
+  it("finds an open handoff copy after its source is deleted without adding a second Inbox row", () => {
+    const handoffQuestion = { from: "work", copyTo: "start" };
+    const card = { title: "Question", subtitle: "Which page?", options: [], requestId: "req", requestType: "question" as const, handoffQuestion };
+    insertMessage("work", { ...msg("original", ""), role: "bot", kind: "options", card });
+    insertMessage("start", { ...msg("copy", ""), role: "bot", kind: "options", card, inbox: { kind: "ask", from: { name: "Mira" } } });
+    expect(openCardRows().map((row) => row.id)).toEqual(["original"]);
+    deleteThread("work");
+    expect(openCardRows("work").map((row) => row.id)).toEqual(["copy"]);
+  });
 });
 
 describe("describeMissingFts5", () => {
