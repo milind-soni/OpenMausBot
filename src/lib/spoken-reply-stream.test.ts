@@ -3,10 +3,10 @@ import { redactSecretsInText } from "../../shared/redact";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { LiveCallState, LiveCallStatus } from "../../shared/wire";
 import type { ReplySpeechSink, SpokenReplyOwner } from "./spoken-reply-stream";
-import { SpokenReplyStream } from "./spoken-reply-stream";
+import { speechOwner, SpokenReplyStream } from "./spoken-reply-stream";
 
 interface FakeHandle {
-  opts: { botId?: string; voiceId?: string; messageId?: string };
+  opts: { botId?: string; voiceId?: string; messageId?: string; playbackRate?: number };
   pushes: string[];
   inputs: string[];
   identified: (string | undefined)[];
@@ -65,6 +65,21 @@ const settle = async (): Promise<void> => {
 };
 
 describe("SpokenReplyStream", () => {
+  it("uses a bot playback speed over the workspace speed and passes it to streaming speech", async () => {
+    const state = {
+      bots: [{ id: "bot", threadId: "t", speakReplies: true, voicePlaybackRate: 1.75 }],
+      liveCall: null,
+    };
+    const resolved = speechOwner(state, "t", 1.25)!;
+    expect(resolved.playbackRate).toBe(1.75);
+    expect(speechOwner({ bots: [{ id: "bot", threadId: "t", speakReplies: true }], liveCall: null }, "t", 1.25)?.playbackRate).toBe(1.25);
+
+    const { sink, handles } = fakeSpeech();
+    new SpokenReplyStream(sink).onRuntimeEvent(delta("One two. Three "), resolved);
+    await settle();
+    expect(handles[0]!.opts.playbackRate).toBe(1.75);
+  });
+
   it("pushes the first closed block before the completed message frame arrives", async () => {
     const { sink, handles } = fakeSpeech();
     const stream = new SpokenReplyStream(sink);

@@ -323,8 +323,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   speakReplies?: boolean;
   /** How replies are shaped. Absent = "default". */
   replyStyle?: ReplyStyle;
-  /** This bot's own voice id, so a room of bots doesn't sound like one person. */
-  voice?: string;
+  /** This bot's own voice id, so a room of bots doesn't sound like one person. */ voice?: string; /** Playback speed; absent follows the installation's setting. */ voicePlaybackRate?: number;
   /** This bot's own Live call voice, a GPT-Live or Gemini Live voice id; absent, or not the call provider's, uses the app's. */ liveVoice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */

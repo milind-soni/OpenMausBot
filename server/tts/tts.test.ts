@@ -747,6 +747,7 @@ describe("included voice", () => {
     const { describeVoice } = await voice();
     const described = describeVoice(cfg({ voice: "v-1" }));
     expect(described).toEqual({ configured: true, ready: true, voice: "v-1", provider: "elevenlabs", baseUrl: "", model: "", included: true });
+    expect(describeVoice(cfg({ voice: "v-1", playbackRate: 1.5 }))).toHaveProperty("playbackRate", 1.5);
     expect(JSON.stringify(described)).not.toContain(INCLUDED);
     expect(describeVoice(cfg({ key: "sk-own", voice: "v-1" }))).not.toHaveProperty("included");
     expect(describeVoice(cfg({ provider: "fish", voice: "v-1" }))).toMatchObject({ configured: false });

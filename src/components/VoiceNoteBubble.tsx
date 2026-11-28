@@ -25,9 +25,11 @@ function clock(seconds: number): string {
 
 export function VoiceNoteBubble({
   attachment,
+  playbackRate = 1,
   className,
 }: {
   attachment: VoiceNoteAttachment;
+  playbackRate?: number;
   className?: string;
 }) {
   const url = attachmentAudioUrl(attachment.path);
@@ -44,6 +46,7 @@ export function VoiceNoteBubble({
   const transcript = attachment.text?.trim() ?? "";
   const onLiveCall = isLiveCallRunning(useLiveMedia().phase);
 
+  useEffect(() => { if (audioRef.current) { audioRef.current.playbackRate = playbackRate; audioRef.current.preservesPitch = true; } }, [playbackRate]);
   useEffect(() => () => releaseRef.current?.(), []);
 
   if (!url) return null;

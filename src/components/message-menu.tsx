@@ -55,6 +55,7 @@ export function useBotMessageMenu({
   threadId,
   messageId,
   voiceId,
+  playbackRate,
   tts,
   localVoice,
   canSpeak,
@@ -69,6 +70,7 @@ export function useBotMessageMenu({
   threadId?: string;
   messageId: string;
   voiceId?: string;
+  playbackRate?: number;
   tts: ConfigStatus["tts"];
   localVoice: boolean;
   canSpeak: boolean;
@@ -77,7 +79,7 @@ export function useBotMessageMenu({
   onRegenerate?: () => void;
   pin?: PinAction;
 }): MessageMenuItem[] {
-  const speak = useSpeakAction({ text, botId, messageId, voiceId, tts, localVoice });
+  const speak = useSpeakAction({ text, botId, messageId, voiceId, playbackRate, tts, localVoice });
   const teamMemory = useTeamMemoryItem(text, messageId, botId, threadId);
   const items: MessageMenuItem[] = [];
   // Once a voice is set up, Read this aloud is its own button in the hover bar; the menu keeps only the setup hint.

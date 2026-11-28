@@ -25,24 +25,26 @@ import type { LiveCallState } from "../../shared/wire";
 export interface SpokenReplyOwner {
   botId: string;
   voiceId?: string;
+  playbackRate?: number;
 }
 
 interface SpeechGateState {
-  bots: readonly { id: string; threadId: string; voice?: string; speakReplies?: boolean; tasks?: readonly { threadId: string }[] }[];
+  bots: readonly { id: string; threadId: string; voice?: string; voicePlaybackRate?: number; speakReplies?: boolean; tasks?: readonly { threadId: string }[] }[];
   liveCall: LiveCallState | null;
 }
 
 /** The speak gates: the thread's bot speaks its replies, and no call (in-app or live) holds the speaker. */
-export function speechOwner(state: SpeechGateState, threadId: string): SpokenReplyOwner | null {
+export function speechOwner(state: SpeechGateState, threadId: string, playbackRate?: number): SpokenReplyOwner | null {
   const owner = state.bots.find((b) => b.threadId === threadId || b.tasks?.some((task) => task.threadId === threadId));
   const live = state.liveCall;
   if (!owner?.speakReplies || currentCall() !== null || (live && live.status !== "ended" && live.botId === owner.id)) return null;
-  return { botId: owner.id, voiceId: owner.voice };
+  const rate = owner.voicePlaybackRate ?? playbackRate;
+  return { botId: owner.id, voiceId: owner.voice, ...(rate !== undefined ? { playbackRate: rate } : {}) };
 }
 
 /** The Speaker surface this stream drives. */
 export interface ReplySpeechSink {
-  begin(opts: { botId?: string; voiceId?: string; messageId?: string }): SpeechStream;
+  begin(opts: { botId?: string; voiceId?: string; messageId?: string; playbackRate?: number }): SpeechStream;
 }
 
 function speakableStreamText(buffer: string): string {
@@ -131,7 +133,7 @@ export class SpokenReplyStream {
       threadId,
       botId: owner.botId,
       turnId,
-      stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId, messageId }),
+      stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId, messageId, playbackRate: owner.playbackRate }),
       buffer: "",
       authoritativeCut: 0,
       spoken: [],
@@ -159,7 +161,7 @@ export class SpokenReplyStream {
       botId: owner.botId,
       turnId,
       // begin stops whatever was speaking: a new turn's audio supersedes it.
-      stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId }),
+      stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId, playbackRate: owner.playbackRate }),
       buffer: delta,
       authoritativeCut: 0,
       spoken: [],

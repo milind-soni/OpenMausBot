@@ -118,6 +118,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
     botId: speakerBot?.id,
     messageId: m.id,
     voiceId: speakerBot?.voice,
+    playbackRate: speakerBot?.voicePlaybackRate ?? tts?.playbackRate ?? 1,
     tts,
     localVoice,
     canSpeak: true,
@@ -134,7 +135,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
       {canReact && m.from && <ReactAction threadId={threadId} message={m} />}
       {botText && <CopyButton text={botText} className={messageActionClass} />}
       {botText && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
-      {botText && (speaking || speakReady(tts, speakerBot?.voice, localVoice)) && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={tts} localVoice={localVoice} className={cn(messageActionClass, speaking && "text-accent")} />}
+      {botText && (speaking || speakReady(tts, speakerBot?.voice, localVoice)) && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} playbackRate={speakerBot?.voicePlaybackRate ?? tts?.playbackRate ?? 1} tts={tts} localVoice={localVoice} className={cn(messageActionClass, speaking && "text-accent")} />}
     </MessageActions>
   );
   return (
@@ -215,7 +216,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
               {(m.attachments ?? []).some((attachment) => attachment.kind === "audio") && (
                 <div className={cn("flex flex-col", (m.text || (m.attachments ?? []).some((attachment) => attachment.kind === "image")) && "mb-2")}>
                   {m.attachments!.filter((attachment): attachment is VoiceNoteAttachment => attachment.kind === "audio").map((note) => (
-                    <VoiceNoteBubble key={note.path} attachment={note} />
+                    <VoiceNoteBubble key={note.path} attachment={note} playbackRate={speakerBot?.voicePlaybackRate ?? tts?.playbackRate ?? 1} />
                   ))}
                 </div>
               )}

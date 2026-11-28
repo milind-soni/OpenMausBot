@@ -14,6 +14,7 @@ import {
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
 import { REPLY_STYLES } from "../shared/reply-style.ts";
 import { BOT_BODY_IDS, botBodySchema } from "../shared/bot-body.ts";
+import { VOICE_PLAYBACK_RATES, type VoicePlaybackRate } from "../shared/voice-playback.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -35,6 +36,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "mascotBodyColor",
   "mascotMaterial",
   "voice",
+  "voicePlaybackRate",
   "speakReplies",
   "replyStyle",
 ] as const;
@@ -79,6 +81,7 @@ export const profilePatchSchema = z.object({
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
     .optional(),
+  voicePlaybackRate: z.union([z.number().refine((value): value is VoicePlaybackRate => VOICE_PLAYBACK_RATES.includes(value as VoicePlaybackRate)), z.null()]).optional(),
   speakReplies: z.boolean({ error: "speakReplies must be true or false" }).optional(),
   replyStyle: z.enum(REPLY_STYLES, { error: "replyStyle must be default or conversational" }).optional(),
 });
@@ -103,6 +106,7 @@ export type BotProfilePatch = Partial<
     | "mascotBodyColor"
     | "mascotMaterial"
     | "voice"
+    | "voicePlaybackRate"
     | "speakReplies"
     | "replyStyle"
   >
@@ -142,8 +146,9 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }
 
-  const { avatarUrl, ...fields } = parsed.data;
+  const { avatarUrl, voicePlaybackRate, ...fields } = parsed.data;
   const patch: BotProfilePatch = fields;
   if (avatarUrl !== undefined) patch.avatarUrl = avatarUrl || undefined;
+  if (voicePlaybackRate !== undefined) patch.voicePlaybackRate = voicePlaybackRate ?? undefined;
   return { ok: true, patch };
 }

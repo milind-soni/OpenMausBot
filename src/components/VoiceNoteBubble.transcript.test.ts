@@ -16,13 +16,26 @@ const note = {
   text: "Deploy is green, every check passed.",
 };
 
-function render() {
+function render(playbackRate = 1) {
   const container = document.createElement("div"), root = createRoot(container);
-  flushSync(() => root.render(createElement(VoiceNoteBubble, { attachment: note })));
+  flushSync(() => root.render(createElement(VoiceNoteBubble, { attachment: note, playbackRate })));
   return { container, root };
 }
 
 describe("the voice note's transcript disclosure", () => {
+  it("applies playback speed and keeps pitch when the setting changes", () => {
+    const { container, root } = render(1.5);
+    try {
+      const audio = container.querySelector("audio")!;
+      expect(audio.playbackRate).toBe(1.5);
+      expect(audio.preservesPitch).toBe(true);
+      flushSync(() => root.render(createElement(VoiceNoteBubble, { attachment: note, playbackRate: 1.75 })));
+      expect(audio.playbackRate).toBe(1.75);
+    } finally {
+      root.unmount();
+    }
+  });
+
   it("opens on a tap and closes on the next, never showing the words until asked", () => {
     const { container, root } = render();
     try {
