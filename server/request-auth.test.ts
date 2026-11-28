@@ -294,6 +294,16 @@ describe("resolveRequestAuth", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("keeps an owner-only page to the owner's own admin session: an anonymous or client-only request is refused", () => {
+    const path = `/api/published-pages/${"a".repeat(32)}/`;
+    expect(requiredScope("GET", path)).toBe("admin");
+    expect(resolve({ host: "bots.example.com" }, path)).toMatchObject({ auth: null, status: 403 });
+    const client = sessions.issue({ label: "phone", scopes: ["client"] });
+    expect(resolve({ host: "bots.example.com", authorization: `Bearer ${client.token}` }, path)).toMatchObject({ auth: null, status: 403 });
+    const owner = sessions.issue({ label: "owner", scopes: ["admin", "client"] });
+    expect(resolve({ host: "bots.example.com", authorization: `Bearer ${owner.token}` }, path).auth).toMatchObject({ kind: "session", scopes: ["admin", "client"] });
+  });
+
   it("treats a request the companion carries for a web session as remote: only its own session counts", () => {
     // The companion's real headers (companion/src/session-route.ts), however the device dressed the request.
     const carried = (headers: Record<string, string>) =>

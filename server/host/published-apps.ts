@@ -132,7 +132,7 @@ export function createPublishedApps(deps: PublishedAppsDeps) {
     const names = new Map(deps.bots().map((bot) => [bot.id, bot.name]));
     return deps.pages().map((page) => ({
       app: { id: `page-${page.pageId}`, source: "page" as const, title: page.title || page.pageId, url: page.url, bot: { id: page.botId, name: names.get(page.botId) ?? "" },
-        publishedAt: page.updatedAt, access: "link" as const },
+        publishedAt: page.updatedAt, access: page.visibility === "owner" ? "owner" as const : "link" as const },
       threads: () => page.cards.map((card) => card.threadId).reverse(),
       needsThread: true,
       remove: async () => ((await deps.unpublishPage(page.pageId)).status === 200 ? null : "failed"),

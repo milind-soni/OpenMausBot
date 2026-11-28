@@ -1,3 +1,4 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import type { ChatApps } from "../chat-apps.ts";
@@ -5,8 +6,10 @@ import { createPagesInternalRoutes, createPublishedPageRoutes } from "../routes/
 import type { Store } from "../store.ts";
 import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./access.ts";
 import { createPagesClient } from "./client.ts";
+import { PublishedPageFiles } from "./owner-files.ts";
+import { createOwnerPageLinks } from "./owner-links.ts";
 import { createPagePublisher } from "./publisher.ts";
-import { PublishedPagesStore } from "./store.ts";
+import { PagesStore } from "./store.ts";
 
 /** How often live published pages' folders are checked for changes. */
 const LIVE_EVERY_MS = 15_000;
@@ -19,6 +22,10 @@ export function createPublishedPages(options: {
   cloudHome: { adminOrigin: string; machineId: string; bootstrapSecret: string } | null;
   /** True for `openmausbot serve`: no desktop app hands over a MausBot sign-in and there is no Cloud home. */
   selfHosted?: boolean;
+  /** The address this server answers at, which an owner-only page's link names; a path alone when omitted. */
+  pageOrigin?: () => string | null;
+  /** True while a paired session is still signed in: an owner-only page's open copy stops answering when it ends. */
+  sessionLive?: (sessionId: string) => boolean;
   patch: (threadId: string, messageId: string, text: string, card: PublishedPageCard) => void;
   /** Live pages stop when their bot can no longer read the folder, and wait while the workspace is backed up or moved. */
   liveRoots?(botId: string, threadId: string): readonly string[] | null;
@@ -29,7 +36,9 @@ export function createPublishedPages(options: {
     store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor" | "patchMessage">;
   };
 }) {
-  const store = new PublishedPagesStore(join(options.dataDir, "published-pages.json"));
+  const store = new PagesStore(options.dataDir);
+  const files = new PublishedPageFiles(join(options.dataDir, "owner-pages"));
+  const links = createOwnerPageLinks({ files, ownerPage: (pageId) => store.get(pageId)?.visibility === "owner" });
   const client = createPagesClient({ access: () => pagesAccess(options.cloudHome), notOffered: () => pagesNotOffered(options.cloudHome),
     selfHosted: options.selfHosted === true,
     ...(options.fetch ? { fetch: options.fetch } : {}) });
@@ -40,7 +49,7 @@ export function createPublishedPages(options: {
     if (pageRow(threadId, messageId)) apps!.store.patchMessage(threadId, messageId, { publishedPage: card });
     else options.patch(threadId, messageId, text, card);
   };
-  const publisher = createPagePublisher({ client, store, patch, liveRoots: options.liveRoots, paused: options.paused });
+  const publisher = createPagePublisher({ client, store, files, patch, liveRoots: options.liveRoots, paused: options.paused, pageOrigin: options.pageOrigin });
   // Live pages whose folders changed are published again; each at most once a minute (the publisher's own limit).
   const liveTimer = setInterval(() => { void publisher.refreshLive(); }, LIVE_EVERY_MS);
   liveTimer.unref?.();
@@ -55,7 +64,11 @@ export function createPublishedPages(options: {
       (pageRow(threadId, messageId) && apps.store.patchMessage(threadId, messageId, { publishedPage }) ? messageId : null),
   } : undefined;
   return {
-    store, publisher, internal: createPagesInternalRoutes(publisher), routes: createPublishedPageRoutes(publisher, appPages), receive: applyIncludedPagesMessage,
+    store, files, publisher, internal: createPagesInternalRoutes(publisher),
+    routes: createPublishedPageRoutes(publisher, appPages, {
+      folder: links.folder, ownerOnly: (pageId) => store.get(pageId)?.visibility === "owner", ...(options.sessionLive ? { sessionLive: options.sessionLive } : {}) }),
+    serveFile: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => links.serve(req, res, path, method),
+    receive: applyIncludedPagesMessage,
     /** publish_page's card as the page itself, inline; null when it can't be shown so (the caller posts the link). */
     show: (args: Parameters<ChatApps["showPublishedPage"]>[0]) => apps?.chat.showPublishedPage(args) ?? null,
   };

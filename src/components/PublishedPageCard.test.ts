@@ -98,6 +98,16 @@ describe("a published page's card", () => {
     }
   });
 
+  it("marks an owner-only page as only you, with no page usage", () => {
+    const { container, root } = render(page({ ...live.publishedPage!, visibility: "owner", usage: undefined }));
+    try {
+      expect(container.textContent).toContain("Bake sale");
+      expect(container.querySelector("[data-page-owner-only]")?.textContent).toBe("Only you");
+      expect(container.textContent).not.toContain("of 5 pages");
+      expect(buttons(container).map((button) => button.textContent)).toEqual(["Copy link", "Open", "Unpublish"]);
+    } finally { root.unmount(); }
+  });
+
   it("says when the page was unpublished, with no buttons", () => {
     const { container, root } = render(page({ state: "unpublished", title: "Bake sale", pageId: "abcdefghijklmnopqrstuvwxyz", url: URL, usage: { pages: 2, limit: 5 } }));
     try {

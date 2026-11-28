@@ -11,7 +11,9 @@ import { guestWorkspaceToHost } from "../bot-attachment.ts";
 import { VM_WORKSPACE_GUEST } from "../container-computer.ts";
 import type { json as sendJson } from "../harness/http.ts";
 import type { PageBundle } from "../pages/bundle.ts";
+import type { OwnerPageViewer } from "../pages/owner-links.ts";
 import type { PagePublisher } from "../pages/publisher.ts";
+import { ownerOrAdmin } from "../request-auth.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -37,10 +39,12 @@ export interface PagesInternalContext {
 
 const PUBLISH = "/api/internal/pages/publish", UNPUBLISH = "/api/internal/pages/unpublish";
 const UNPUBLISH_ROUTE = /^\/api\/published-pages\/([a-z0-9]{20,63})\/unpublish$/;
+const OWNER_PAGE_ROUTE = /^\/api\/published-pages\/([a-z0-9]{20,63})(\/.*)?$/;
 const APP_PUBLISH_ROUTE = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/app\/publish$/;
-const appPublishBody = z.object({ rev: z.number().int().min(0).max(1_000_000).optional() }).strict();
+const visibility = z.enum(["public", "owner"]).optional();
+const appPublishBody = z.object({ rev: z.number().int().min(0).max(1_000_000).optional(), visibility }).strict();
 const pageId = z.string().max(63).optional();
-const publishBody = z.object({ path: z.string().max(4096), title: z.string().max(1000), page_id: pageId, live: z.boolean().optional() });
+const publishBody = z.object({ path: z.string().max(4096), title: z.string().max(1000), page_id: pageId, live: z.boolean().optional(), visibility });
 const unpublishBody = z.object({ page_id: pageId, path: z.string().max(4096).optional() });
 
 /** A path inside the bot's Local VM workspace means the same file on this computer. */
@@ -57,9 +61,10 @@ export function createPagesInternalRoutes(publisher: PagePublisher) {
     let outcome;
     if (ctx.path === PUBLISH) {
       const body = publishBody.safeParse(raw ?? {});
-      if (!body.success) return void ctx.json(ctx.res, 400, { error: "publish_page takes path, title and optionally page_id (text) and live (true or false)." });
+      if (!body.success) return void ctx.json(ctx.res, 400, { error: "publish_page takes path, title and optionally page_id (text), live (true or false) and visibility (public or owner)." });
       outcome = await publisher.publish({ botId: ctx.botId, threadId: ctx.threadId, path: hostPath(body.data.path, vmWorkspace), title: body.data.title,
         ...(body.data.page_id ? { pageId: body.data.page_id } : {}), ...(body.data.live !== undefined ? { live: body.data.live } : {}),
+        ...(body.data.visibility ? { visibility: body.data.visibility } : {}),
         roots: folders, post: ctx.post, call });
     } else {
       const body = unpublishBody.safeParse(raw ?? {});
@@ -84,14 +89,43 @@ export interface AppPages {
 /** A chat page keeps one link however often it is published again: a folder page shares its folder's with publish_page. */
 export const appPageSource = (threadId: string, messageId: string) => `app:${threadId}/${messageId}`;
 
-/** POST /api/published-pages/<pageId>/unpublish: the card's Unpublish. POST .../messages/<id>/app/publish: a page card's
- * Share. Both admin-scope routes, so only the owner's own app. */
-export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPages): RouteHandler {
-  return async ({ req, res, path, method, json, readBody }) => {
+export interface OwnerPages {
+  /** The token folder the page loads from for this viewer (pages/owner-links.ts). */
+  folder(pageId: string, viewer: OwnerPageViewer): string;
+  /** True for a page this server keeps for the owner alone (`owner-pages.json`); never for a public page. */
+  ownerOnly(pageId: string): boolean;
+  /** True while the session that opened the page is still signed in; absent trusts the token's own lifetime. */
+  sessionLive?(sessionId: string): boolean;
+}
+
+/** GET /api/published-pages/<pageId>/: an owner-only page's stable link, which moves a viewer the owner's own sign-in
+ * vouches for to the token folder the sandboxed page loads from. Anonymous requests never reach it: the sign-in gate
+ * answers first. POST /api/published-pages/<pageId>/unpublish: the card's Unpublish. POST .../messages/<id>/app/publish: a
+ * page card's Share. All admin-scope routes, so only the owner's own app. */
+export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPages, ownerPages?: OwnerPages): RouteHandler {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     const match = UNPUBLISH_ROUTE.exec(path);
     if (match && method === "POST") {
       const outcome = await publisher.unpublish({ pageId: match[1] });
       return void json(res, outcome.status, outcome.status === 200 ? { ok: true, card: outcome.card } : { error: outcome.text });
+    }
+    if ((method === "GET" || method === "HEAD") && ownerPages) {
+      const page = OWNER_PAGE_ROUTE.exec(path);
+      if (page && ownerPages.ownerOnly(page[1]!)) {
+        // Security: a member, a guest and a service-trust bot shell read this as a page that does not exist.
+        if (!ownerOrAdmin(auth)) return void json(res, 404, { error: "Not found." });
+        if (page[2] === undefined) {
+          res.writeHead(308, { location: `${path}/${url.search}`, "cache-control": "private, no-store" });
+          res.end();
+          return;
+        }
+        // Its sandbox sends no cookie with the page's own files, so it loads from a token folder minted for this viewer.
+        const viewer: OwnerPageViewer = { key: auth.kind === "session" ? `session:${auth.session.id}` : auth.kind,
+          allowed: () => auth.kind !== "session" || (ownerPages.sessionLive?.(auth.session.id) ?? true) };
+        res.writeHead(303, { location: `${ownerPages.folder(page[1]!, viewer)}${page[2].slice(1)}${url.search}`, "cache-control": "private, no-store" });
+        res.end();
+        return;
+      }
     }
     const page = apps ? APP_PUBLISH_ROUTE.exec(path) : null;
     if (!apps || !page || method !== "POST") return PASS;
@@ -99,13 +133,13 @@ export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPa
     const bot = apps.botOf(threadId);
     if (!bot) return void json(res, 404, userError("serverError.page.roomOrClosed"));
     const body = appPublishBody.safeParse(await readBody(req, 4_096) ?? {});
-    if (!body.success) return void json(res, 400, { error: "Publish takes an optional rev, the version to publish." });
+    if (!body.success) return void json(res, 400, { error: "Publish takes an optional rev, the version to publish, and visibility, public or owner." });
     const built = apps.page(threadId, messageId, body.data.rev);
     if (!built.ok) return void json(res, built.status, refusalBody(built));
     const pageId = apps.published(threadId, messageId);
     const outcome = await publisher.publishFiles({
       botId: bot.id, threadId, source: built.folder ?? appPageSource(threadId, messageId), title: built.title, files: built.files,
-      ...(pageId ? { pageId } : {}),
+      ...(pageId ? { pageId } : {}), ...(body.data.visibility ? { visibility: body.data.visibility } : {}),
       post: (_text, card) => (card.state === "live" ? apps.show(threadId, messageId, card) : null),
     });
     json(res, outcome.status, outcome.status === 200 ? { ok: true, card: outcome.card } : { error: outcome.text, ...(outcome.card ? { card: outcome.card } : {}) });

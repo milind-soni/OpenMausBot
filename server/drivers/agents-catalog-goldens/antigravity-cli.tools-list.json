@@ -492,6 +492,13 @@
           },
           "live": {
             "type": "boolean"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "owner"
+            ]
           }
         },
         "required": [

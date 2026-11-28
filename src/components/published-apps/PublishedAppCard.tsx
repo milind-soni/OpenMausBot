@@ -10,7 +10,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { SiteThumb } from "./SiteThumb";
 
 const ACCESS: Record<PublishedApp["access"], LocaleKey | null> = {
-  public: "publishedApps.access.public", "netlify-team": "publishedApps.access.netlifyTeam", link: "publishedApps.access.link", unknown: null,
+  public: "publishedApps.access.public", "netlify-team": "publishedApps.access.netlifyTeam", link: "publishedApps.access.link", owner: "publishedApps.access.owner", unknown: null,
 };
 
 const SOURCE: Record<PublishedApp["source"], LocaleKey> = {

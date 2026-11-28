@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowUpRight, Check, Copy, Globe, Loader2, X } from "lucide-react";
+import { ArrowUpRight, Check, Copy, Globe, Loader2, Lock, X } from "lucide-react";
 import type { PublishedPageCard as Card } from "../../shared/published-page";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
 import { cn } from "@/lib/cn";
@@ -36,12 +36,13 @@ export function PublishedPageCard({ message }: { message: Message }) {
     catch { setFailed(true); }
     finally { setBusy(false); }
   };
-  const usage = usageLine(card);
+  const usage = usageLine(card), owner = card.visibility === "owner";
   return (
     <div data-published-page={card.pageId ?? "limit"} className="w-full max-w-md overflow-hidden rounded-xl border border-hairline/40 bg-panel px-3 py-2.5 text-sm">
       <div className="flex min-w-0 items-center gap-2">
-        <Globe size={16} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
+        {owner ? <Lock size={16} className="shrink-0 text-ink-tertiary" aria-hidden="true" /> : <Globe size={16} className="shrink-0 text-ink-tertiary" aria-hidden="true" />}
         <span dir="auto" className="min-w-0 truncate font-medium text-ink" title={card.title}>{card.title}</span>
+        {owner && <span data-page-owner-only className="shrink-0 rounded-full bg-ink/[0.06] px-2 py-px text-xs text-ink-secondary">{t("chat.page.ownerOnly")}</span>}
         {usage && <span className="ms-auto shrink-0 text-xs text-ink-tertiary">{usage}</span>}
       </div>
       {card.state === "live" && card.url && <>

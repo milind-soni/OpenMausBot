@@ -1,5 +1,9 @@
-/** A page a bot published to a public link, as its chat card shows it (WireMessage.publishedPage). The message's `text`
- * says the same in words, with the link, for every client that does not draw the card. */
+/** Who may open a published page: anyone with its link, or only the owner's own signed-in devices. Absent on a page
+ * published before this setting existed means public. */
+export type PublishedPageVisibility = "public" | "owner";
+
+/** A page a bot published to a link, as its chat card shows it (WireMessage.publishedPage). The message's `text` says the
+ * same in words, with the link, for every client that does not draw the card. */
 export interface PublishedPageCard {
   /** live: the link works, or may work when `uncertain` is true. unpublished: its owner took it down. limit: the plan's
    * pages are used up, so nothing was published; `message` says so and `upgrade` offers a bigger plan. */
@@ -9,6 +13,8 @@ export interface PublishedPageCard {
   title: string;
   pageId?: string;
   url?: string;
+  /** Absent means public. `owner`: the page is kept on this server and only the owner's signed-in devices can open it. */
+  visibility?: PublishedPageVisibility;
   /** This account's pages and its plan's limit after this publish, as "3 of 5 pages". */
   usage?: { pages: number; limit: number };
   message?: string;

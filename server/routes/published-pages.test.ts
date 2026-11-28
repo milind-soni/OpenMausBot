@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { PagePublisher } from "../pages/publisher.ts";
-import { createPagesInternalRoutes, createPublishedPageRoutes, type PagesInternalContext } from "./published-pages.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import { createPagesInternalRoutes, createPublishedPageRoutes, type OwnerPages, type PagesInternalContext } from "./published-pages.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 function fakePublisher() {
@@ -88,5 +89,53 @@ describe("the card's Unpublish", () => {
     expect(publisher.unpublish).toHaveBeenCalledWith({ pageId: "abcdefghijklmnopqrstuvwxyz" });
     expect((await call(handler, "/api/published-pages/abcdefghijklmnopqrstuvwxyz/unpublish", "GET")).out).toBe(PASS);
     expect((await call(handler, "/api/published-pages/short/unpublish")).out).toBe(PASS);
+  });
+});
+
+describe("an owner-only page's stable link", () => {
+  const PAGE = "abcdefghijklmnopqrstuvwxyz";
+  const HOME: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+  // The route reads only the kind and scopes through ownerOrAdmin; a real session record is the gate's business.
+  const OWNER = { kind: "session", scopes: ["admin", "client"], via: "bearer", session: { id: "s1" } } as unknown as RequestAuth;
+  const MEMBER = { kind: "session", scopes: ["client"], via: "bearer", session: { id: "s2" } } as unknown as RequestAuth;
+
+  function ownerPage(only = true, sessionLive?: (id: string) => boolean): OwnerPages {
+    return { ownerOnly: () => only, sessionLive, folder: (pageId, viewer) => `/api/owner-page-files/${pageId}-${viewer.key}/` };
+  }
+
+  function serve(ownerPages: OwnerPages | undefined, target = `/api/published-pages/${PAGE}/`, method = "GET", auth: RequestAuth = OWNER) {
+    const sent: { status?: number; body?: any; headers?: Record<string, string>; written?: unknown; out?: typeof PASS | void } = {};
+    const res = {
+      headersSent: false, writableEnded: false,
+      writeHead: (status: number, headers: Record<string, string>) => { sent.status = status; sent.headers = headers; },
+      end: (body?: unknown) => { sent.written = body; },
+    };
+    const url = new URL(target, "https://cloud.example.test");
+    return createPublishedPageRoutes(fakePublisher(), undefined, ownerPages)({ req: {} as never, res: res as never,
+      url, path: url.pathname, method, auth,
+      json: ((_res: unknown, status: number, body: unknown) => { sent.status = status; sent.body = body; }) as never,
+      readBody: async () => ({}) } as RouteContext).then((out) => Object.assign(sent, { out }));
+  }
+
+  it("moves the owner to the token folder the page loads from, at any file of it, keeping the query string", async () => {
+    expect(await serve(ownerPage())).toMatchObject({ status: 303, headers: { location: `/api/owner-page-files/${PAGE}-session:s1/`,
+      "cache-control": "private, no-store" } });
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}/data.csv`, "HEAD", HOME)).toMatchObject({ status: 303,
+      headers: { location: `/api/owner-page-files/${PAGE}-loopback/data.csv` } });
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}/data.csv?period=2026-11`, "GET", HOME)).toMatchObject({ status: 303,
+      headers: { location: `/api/owner-page-files/${PAGE}-loopback/data.csv?period=2026-11` } });
+  });
+
+  it("refuses a viewer who is not the owner, and any page that is not owner-only", async () => {
+    expect(await serve(ownerPage(), undefined, "GET", MEMBER)).toMatchObject({ status: 404, body: { error: "Not found." } });
+    expect(await serve(ownerPage(), undefined, "GET", { kind: "loopback", scopes: ["client"], trust: "service" })).toMatchObject({ status: 404 });
+    expect((await serve(ownerPage(false))).out).toBe(PASS);
+    expect((await serve(undefined)).out).toBe(PASS);
+  });
+
+  it("moves a page opened without its trailing slash to the folder its files are relative to, keeping the query string", async () => {
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}`)).toMatchObject({ status: 308, headers: { location: `/api/published-pages/${PAGE}/` } });
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}?period=2026-11`)).toMatchObject({ status: 308,
+      headers: { location: `/api/published-pages/${PAGE}/?period=2026-11` } });
   });
 });
