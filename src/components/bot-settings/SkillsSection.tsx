@@ -325,13 +325,21 @@ export function useSkillImport(botId: string, { refresh, setError }: Pick<Return
   const [importing, setImporting] = useState<"url" | "folder" | null>(null);
   const [imported, setImported] = useState<string[] | null>(null);
 
+  const selection = useRef(botId);
+  useEffect(() => {
+    selection.current = botId;
+    setImporting(null);
+    setImported(null);
+    setSource("");
+    return () => { selection.current = ""; };
+  }, [botId]);
   const submit = async (from: "url" | "folder") => {
     const trimmed = source.trim();
     if (importing || (from === "folder" ? !pick : !trimmed)) return;
     setImporting(from);
     try {
       const picked = from === "folder" ? await pick?.() : null;
-      if (from === "folder" && !picked) return;
+      if (selection.current !== botId || (from === "folder" && !picked)) return;
       setError("");
       setImported(null);
       if (picked && "error" in picked) throw new Error(picked.error);
@@ -341,6 +349,7 @@ export function useSkillImport(botId: string, { refresh, setError }: Pick<Return
         ...(picked ? { redirect: "error" } : {}),
         body: JSON.stringify(picked ? { files: picked.files } : { source: trimmed }),
       });
+      if (selection.current !== botId) return;
       const summaries = result.imported ?? [];
       setImported(skillImportLines(picked ? summaries.map((summary) => ({
         ...summary,
@@ -348,11 +357,11 @@ export function useSkillImport(botId: string, { refresh, setError }: Pick<Return
         skippedCount: picked.skippedCount + summary.skippedCount,
       })) : summaries));
       if (!picked) setSource("");
-      await refresh();
+      await refresh(() => selection.current !== botId);
     } catch (cause) {
-      setError(cause instanceof Error && cause.message ? cause.message : failure);
+      if (selection.current === botId) setError(cause instanceof Error && cause.message ? cause.message : failure);
     } finally {
-      setImporting(null);
+      if (selection.current === botId) setImporting(null);
     }
   };
 
