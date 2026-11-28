@@ -7022,7 +7022,7 @@ function drainQueuedSends() {
   }
 }
 function drainQueuedSendsNow() {
-  roomSpeakers.forgetStale();
+  if (roomSpeakers.forgetStale() > 0) drainQueuedChannelSends(); // a freed room may also hold channel messages
   automationReports.flush();
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended, head) =>
     new Promise<void>((resolve, reject) => {
@@ -15013,7 +15013,7 @@ const pruneDecisionLog = () => {
 };
 pruneDecisionLog();
 setInterval(pruneDecisionLog, 6 * 60 * 60_000).unref();
-setInterval(() => { if (roomSpeakers.forgetStale() > 0) drainQueuedSends(); }, 15_000).unref();
+setInterval(() => { if (roomSpeakers.forgetStale() > 0) { drainQueuedSends(); drainQueuedChannelSends(); } }, 15_000).unref();
 workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
 // With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
 const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
