@@ -116,9 +116,8 @@ describe("a bot's ungrouped threads", () => {
     expect(looseRows()).toHaveLength(10);
 
     await click("Show all 15 threads");
-    expect(looseRows()).toHaveLength(10);
-    expect(button("Show 3 more")).toBeTruthy();
-    await click("Show 3 more");
+    expect(looseRows()).toHaveLength(13);
+    expect(button("Show 3 more")).toBeUndefined();
     expect(host.querySelectorAll("[data-sidebar-thread-row]")).toHaveLength(15);
     expect(button("Show fewer threads")).toBeTruthy();
     await click("Show fewer threads");

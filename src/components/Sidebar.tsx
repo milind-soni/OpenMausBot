@@ -622,7 +622,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
       <span role="status" className="sr-only">{reorderStatus}</span>
       {readError && <p role="alert" className="px-2.5 py-1 text-[12px] text-danger">{readError}</p>}
       <span role="status" className="sr-only">{readStatus}</span>
-      <UngroupedThreadList key={String(showAll)} botId={bot.id} tasks={ungrouped} activeId={selected && !drafting ? bot.threadId : undefined} heading={projects.length > 0} expanded={bulk.active || Boolean(query.trim())} renderThread={renderThread} />
+      <UngroupedThreadList key={String(showAll)} botId={bot.id} tasks={ungrouped} activeId={selected && !drafting ? bot.threadId : undefined} heading={projects.length > 0} expanded={showAll || bulk.active || Boolean(query.trim())} renderThread={renderThread} />
       <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
         onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns, bot.mainThreadId).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
