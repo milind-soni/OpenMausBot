@@ -596,3 +596,33 @@ it("reports a routine that keeps failing the same way once, again when it is spa
     await close();
   }
 }, 240_000);
+
+it("lets a Chief hand work to a teammate after its own automatic retry", async () => {
+  const { api, control, dataDir, file, useCli, messages, close } = await launch();
+  try {
+    const chief = (await control(["new-bot", "--name", "Clive", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
+    const mate = (await control(["new-bot", "--name", "Ada", "--section", "Ops"])).bot;
+    const thread = chief.activeTaskId;
+    const fixed = join(dataDir, "chief-fixed");
+    await useCli(`thread === ${JSON.stringify(thread)} ? (existsSync(${JSON.stringify(fixed)}) ? "slow" : "exit-early") : "happy"`);
+    await control(["send", "--bot", chief.id, "--text", "Ask Ada to reconcile the invoices."]);
+    await expect.poll(async () => (await messages(thread)).some(m => /exit_before_result|error/i.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
+    writeFileSync(fixed, "");
+    let retry = "";
+    await expect.poll(() => {
+      const path = file(thread, "json");
+      if (!existsSync(path)) return false;
+      const seen = JSON.parse(readFileSync(path, "utf8"));
+      retry = seen.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      return JSON.stringify(seen.prompt).includes("started this again by itself");
+    }, { timeout: 55_000 }).toBe(true);
+    const handed = await api("POST", "/api/internal/coordinate-bots", { fromBotId: chief.id, fromThreadId: thread,
+      botIds: [mate.id], message: "Reconcile the invoices.", thread: "new", reply: "none" }, retry);
+    expect(handed.receipts[0].threadId).toBeTruthy();
+    writeFileSync(file(thread, "gate"), "finish");
+
+  } finally {
+    await close();
+  }
+}, 100_000);
