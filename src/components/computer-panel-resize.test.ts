@@ -15,8 +15,8 @@ let room = 0;
 let observers: { notify: () => void; target: HTMLElement; last: number }[] = [];
 let handlers: ReturnType<typeof useComputerPanelResize>;
 
-function Panel() {
-  handlers = useComputerPanelResize();
+function Panel({ widthKey }: { widthKey?: string }) {
+  handlers = useComputerPanelResize({ key: widthKey });
   const { panelWidth, maxWidth: max, separatorRef, onSeparatorKeyDown } = handlers;
   width = panelWidth;
   maxWidth = max;
@@ -153,6 +153,21 @@ describe("the computer panel's resize edge", () => {
     await act(async () => root.render(createElement(ChatAndPanel, { view: "settings" })));
     resizeWindow(3000);
     expect(maxWidth).toBe(3000 - CHAT_MIN_WIDTH);
+  });
+
+  it("brings back the width kept under a new key and keeps a later change under that key only", () => {
+    localStorage.setItem("first", "500");
+    localStorage.setItem("second", "800");
+    act(() => root.render(createElement(Panel, { widthKey: "first" })));
+    expect(width).toBe(500);
+    act(() => root.render(createElement(Panel, { widthKey: "second" })));
+    expect(width).toBe(800);
+    press("ArrowLeft");
+    expect(width).toBe(840);
+    expect(localStorage.getItem("second")).toBe("840");
+    expect(localStorage.getItem("first")).toBe("500");
+    act(() => root.render(createElement(Panel, { widthKey: "first" })));
+    expect(width).toBe(500);
   });
 
   it("clamps a stored width wider than the window instead of covering the chat", () => {

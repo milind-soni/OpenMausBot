@@ -9,7 +9,7 @@ export const CHAT_MIN_WIDTH = 360;
 const PANEL_DEFAULT_WIDTH = 400;
 const PANEL_RESIZE_STEP = 40;
 
-function readPanelWidth(key: string, fallback: number): number {
+export function readPanelWidth(key: string, fallback: number): number {
   try {
     const stored = Number(localStorage.getItem(key));
     if (Number.isFinite(stored) && stored >= PANEL_MIN_WIDTH) return stored;
@@ -27,11 +27,15 @@ function measureMaxWidth(panel: HTMLElement, chat: HTMLElement | null, chatMin =
 
 /** The computer panel's drag edge: a pointer drag or the arrow keys resize the
  * panel up to the room the chat leaves, and the width is remembered across opens
- * (under `key`, for a panel that keeps its own). `chatMin` is what the chat beside it keeps at least. */
+ * (under `key`, for a panel that keeps its own; a new `key` brings back the width kept under it). `chatMin` is what the
+ * chat beside it keeps at least. */
 export function useComputerPanelResize({ key = PANEL_WIDTH_KEY, defaultWidth = PANEL_DEFAULT_WIDTH, chatMin = CHAT_MIN_WIDTH }: { key?: string; defaultWidth?: number; chatMin?: number } = {}) {
   const chatMinRef = useRef(chatMin);
   chatMinRef.current = chatMin;
-  const [chosenWidth, setChosenWidth] = useState(() => readPanelWidth(key, defaultWidth));
+  const [chosen, setChosen] = useState(() => ({ key, width: readPanelWidth(key, defaultWidth) }));
+  if (chosen.key !== key) setChosen({ key, width: readPanelWidth(key, defaultWidth) });
+  const chosenWidth = chosen.width;
+  const setChosenWidth = (width: number) => setChosen({ key, width });
   const [maxWidth, setMaxWidth] = useState(PANEL_MAX_WIDTH);
   const panelWidth = Math.min(chosenWidth, maxWidth);
   const clamp = (width: number) => Math.min(maxWidth, Math.max(PANEL_MIN_WIDTH, width));
