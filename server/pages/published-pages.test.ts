@@ -47,10 +47,11 @@ function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; 
     ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
-  const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string; live?: boolean; visibility?: "public" | "owner" }) => pages.publisher.publish({
+  const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string; live?: boolean; visibility?: "public" | "owner";
+    call?: { assertActive?: () => void; signal?: AbortSignal } }) => pages.publisher.publish({
     botId: input.botId ?? "bot-1", threadId: input.threadId ?? "thread-1", path: input.path, title: input.title ?? "Bake sale",
     ...(input.pageId ? { pageId: input.pageId } : {}), ...(input.live !== undefined ? { live: input.live } : {}),
-    ...(input.visibility ? { visibility: input.visibility } : {}), roots: [work], post: post(input.threadId ?? "thread-1") });
+    ...(input.visibility ? { visibility: input.visibility } : {}), ...(input.call ? { call: input.call } : {}), roots: [work], post: post(input.threadId ?? "thread-1") });
   return { service, pages, work, data, cards, publish };
 }
 const ownerUrl = (pageId: string) => `https://cloud.example.test/api/published-pages/${pageId}/`;
@@ -343,6 +344,9 @@ describe("an owner-only published page", () => {
     // The card that showed the old public link now carries the owner-only one.
     expect(f.cards.map(({ card }) => [card.pageId, card.visibility])).toEqual([[publicRecord!.pageId, "owner"], [publicRecord!.pageId, "owner"]]);
     expect(f.cards[0]!.card).toMatchObject({ state: "live", visibility: "owner", url: ownerUrl(publicRecord!.pageId) });
+    // Unpublishing marks both cards, including the one from before the switch.
+    expect(await f.pages.publisher.unpublish({ pageId: publicRecord!.pageId })).toMatchObject({ status: 200 });
+    expect(f.cards.map(({ card }) => card.state)).toEqual(["unpublished", "unpublished"]);
   });
 
   it("publishes again to the pages Worker with a new link when an owner-only page becomes public", async () => {
@@ -360,6 +364,52 @@ describe("an owner-only published page", () => {
     expect(new PublishedPagesStore(join(f.data, "owner-pages.json")).list()).toEqual([]);
     expect(f.cards.map(({ card }) => [card.pageId, card.visibility])).toEqual([[remote, undefined], [remote, undefined]]);
     expect(f.cards[0]!.card).toMatchObject({ state: "live", url: `https://${remote}.mausbot.page/` });
+    // Unpublishing marks both cards, including the owner-only one from before the switch.
+    expect(await f.pages.publisher.unpublish({ pageId: remote! })).toMatchObject({ status: 200 });
+    expect(f.cards.map(({ card }) => card.state)).toEqual(["unpublished", "unpublished"]);
+  });
+
+  it("takes down a public copy this server has no record of when an explicit page id is made owner-only, and refuses when it can't", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    await f.publish({ path: "site" });
+    const [page] = [...f.service.pages.keys()];
+    f.pages.store.forget(page!);
+    writeSite(join(f.work, "draft"), { "index.html": "<h1>Draft</h1>" });
+    f.service.state.down = true;
+    const refused = await f.publish({ path: "draft", pageId: page, title: "Draft", visibility: "owner" });
+    expect(refused.status).toBe(503);
+    expect(refused.text).toContain("could not be made owner-only");
+    expect(f.pages.files.has(page!)).toBe(false);
+    expect(f.pages.store.get(page!)).toBeNull();
+    f.service.state.down = false;
+    const switched = await f.publish({ path: "draft", pageId: page, title: "Draft", visibility: "owner" });
+    expect(switched.status).toBe(200);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "delete"]);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.files.read(page!, "")?.toString()).toBe("<h1>Draft</h1>");
+    expect(f.pages.store.get(page!)).toMatchObject({ visibility: "owner", title: "Draft" });
+  });
+
+  it("changes nothing when the tool call has ended before an owner-only save or unpublish", async () => {
+    const f = setup();
+    writeSite(join(f.work, "report"));
+    expect((await f.publish({ path: "report", visibility: "owner" })).status).toBe(200);
+    const [record] = f.pages.store.list();
+    writeFileSync(join(f.work, "report", "late.txt"), "later");
+    const stop = new AbortController();
+    stop.abort();
+    expect(await f.publish({ path: "report", visibility: "owner", call: { signal: stop.signal } })).toMatchObject({ status: 503 });
+    expect(f.pages.files.read(record!.pageId, "late.txt")).toBeNull();
+    expect(f.cards).toHaveLength(1);
+    await expect(f.publish({ path: "report", visibility: "owner", call: { assertActive: () => { throw new Error("the turn ended"); } } }))
+      .rejects.toThrow("the turn ended");
+    expect(f.pages.files.read(record!.pageId, "late.txt")).toBeNull();
+    expect(await f.pages.publisher.unpublish({ pageId: record!.pageId, call: { signal: stop.signal } })).toMatchObject({ status: 503 });
+    expect(f.pages.files.has(record!.pageId)).toBe(true);
+    expect(f.pages.store.get(record!.pageId)).not.toBeNull();
+    expect(f.cards.map(({ card }) => card.state)).toEqual(["live"]);
   });
 
   it("republishes a live owner-only page from its folder without touching the pages Worker", async () => {

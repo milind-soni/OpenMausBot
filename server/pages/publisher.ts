@@ -57,6 +57,12 @@ const LIVE_BROKEN_MS = 10 * 60_000;
 
 const failureStatus: Record<PagesFailure["reason"], number> = { sign_in: 403, limit: 402, rate_limited: 429, gone: 410, refused: 400, unavailable: 503 };
 
+/** The call's turn has ended (Stop, or it settled): nothing local changes. A card's own buttons have no call and always run. */
+function stopped(call: PagesCall | undefined): PageOutcome | null {
+  call?.assertActive?.();
+  return call?.signal?.aborted ? { status: 503, text: "The request was stopped before the page changed. Ask again when you want it published." } : null;
+}
+
 export function createPagePublisher(deps: {
   client: PagesClient;
   store: PagesStore;
@@ -155,17 +161,20 @@ export function createPagePublisher(deps: {
     };
     if (visibility === "owner") {
       const pageId = target ?? ownerPageId(), url = ownerUrl(pageId);
+      const halted = stopped(input.call);
+      if (halted) return halted;
       try {
         deps.files.save(pageId, files);
       } catch {
         return { status: 500, text: "The page couldn't be saved on this server. Check that its data folder has room, then ask again." };
       }
       // A public page becomes owner-only only once its public copy is gone; until then the request is refused and the page
-      // stays as it was.
-      if (remembered && remembered.visibility !== "owner") {
+      // stays as it was. An explicit page id may name a public page another device published, which this server has no
+      // record of: its public copy is taken down too, or the request is refused.
+      if (remembered ? remembered.visibility !== "owner" : target !== undefined) {
         let taken: Awaited<ReturnType<PagesClient["unpublish"]>>;
         try {
-          taken = await client.unpublish(remembered.pageId, input.call);
+          taken = await client.unpublish(remembered?.pageId ?? target!, input.call);
         } catch (error) {
           deps.files.remove(pageId);
           throw error;
@@ -174,11 +183,12 @@ export function createPagePublisher(deps: {
           deps.files.remove(pageId);
           return { status: failureStatus[taken.reason], text: `The page could not be made owner-only: ${taken.message}` };
         }
-        store.forgetPublic(remembered.pageId);
+        if (remembered) store.forgetPublic(remembered.pageId);
       }
       const card: PublishedPageCard = { state: "live", title, pageId, url, visibility: "owner" };
       const messageId = input.post(cardText(card), card, bundle);
       store.published({ pageId, url, title, botId: remembered?.botId ?? input.botId, source: bundle.source,
+        ...(remembered && remembered.visibility !== "owner" ? { earlierCards: remembered.cards } : {}),
         card: messageId ? { threadId: input.threadId, messageId } : null, visibility: "owner", live, signature });
       if (remembered?.pageId !== pageId || remembered?.visibility !== "owner") patchOtherCards(card, messageId);
       const updated = Boolean(target) && remembered?.visibility === "owner";
@@ -231,6 +241,7 @@ export function createPagePublisher(deps: {
     const card: PublishedPageCard = { state: "live", title, pageId: result.pageId, url: result.url, usage: result.usage };
     const messageId = input.post(cardText(card), card, bundle);
     store.published({ pageId: result.pageId, url: result.url, title, botId: remembered?.botId ?? input.botId, source: bundle.source,
+      ...(remembered?.visibility === "owner" ? { earlierCards: remembered.cards } : {}),
       card: messageId ? { threadId: input.threadId, messageId } : null, live, signature });
     // The local copy of a page that was owner-only is gone now that the public page is live.
     if (remembered?.visibility === "owner" && target) {
@@ -253,6 +264,8 @@ export function createPagePublisher(deps: {
   async function unpublishNow(pageId: string, call: PagesCall | undefined): Promise<PageOutcome> {
     const record = store.get(pageId);
     if (record?.visibility === "owner" || (!record && deps.files.has(pageId))) {
+      const halted = stopped(call);
+      if (halted) return halted;
       deps.files.remove(pageId);
       const card = markUnpublished(pageId, null)
         ?? { state: "unpublished" as const, title: pageId, pageId, visibility: "owner" as const };

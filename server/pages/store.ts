@@ -66,12 +66,14 @@ export class PublishedPagesStore {
     return this.records;
   }
 
-  /** Records a publish (a new page or an update) and the card that shows it. `visibility` is "owner" only for the separate
-   * owner-only file; a public record carries no field, so a page from before the setting reads as public. */
+  /** Records a publish and the card that shows it. `visibility` is "owner" only for the separate owner-only file; a public
+   * record carries no field, so a page from before the setting reads as public. `earlierCards` carries the ones a
+   * visibility switch leaves behind in the record this one replaces, so they stay registered with the new record too. */
   published(input: { pageId: string; url: string; title: string; botId: string; source: string; card: { threadId: string; messageId: string } | null;
+    earlierCards?: PublishedPageRecord["cards"];
     live?: boolean; signature?: string | null; uncertain?: boolean; visibility?: PublishedPageVisibility }, now = Date.now()): PublishedPageRecord {
     const existing = this.get(input.pageId);
-    const cards = [...(existing?.cards ?? []), ...(input.card ? [input.card] : [])].slice(-MAX_CARDS);
+    const cards = [...(existing?.cards ?? []), ...(input.earlierCards ?? []), ...(input.card ? [input.card] : [])].slice(-MAX_CARDS);
     const record: PublishedPageRecord = { pageId: input.pageId, url: input.url, title: input.title, botId: input.botId, source: input.source, cards,
       createdAt: existing?.createdAt ?? now, updatedAt: now,
       ...(input.visibility === "owner" ? { visibility: "owner" as const } : {}),
