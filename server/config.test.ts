@@ -57,6 +57,11 @@ const reloaded = (patch: object, cfg: AppConfig = {}) =>
   changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
 
 describe("configuration boundaries", () => {
+  it("keeps the optional promotions preference in stored config and patches", () => {
+    expect(parseStoredConfig({ features: { promotions: false } }).features).toEqual({ promotions: false });
+    expect(parseConfigPatch({ features: { promotions: true } }).features).toEqual({ promotions: true });
+    expect(() => parseConfigPatch({ features: { promotions: "off" } })).toThrow();
+  });
   it("loads and takes a retired features.teamBoard without keeping it: the Team Board has no switch", () => {
     expect(parseStoredConfig({ features: { teamBoard: true, threadTabs: true } }).features).toEqual({ threadTabs: true });
     expect(parseConfigPatch({ features: { teamBoard: false } }).features).toEqual({});

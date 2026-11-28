@@ -12194,6 +12194,8 @@
   "settings.features.skillBurgerLine": "Save a bot's run as steps you can run again",
   "settings.features.threadTabs": "Thread tabs",
   "settings.features.threadTabsLine": "Show a bot's threads as tabs above the chat",
+  "settings.features.promotions": "Promotional messages",
+  "settings.features.promotionsLine": "Show upgrade offers and sponsored messages.",
   "settings.features.suggestedReplies": "Suggested replies",
   "settings.features.suggestedRepliesLine": "After a bot replies, suggest what you might say next. The bot's own AI writes it with its smallest model, which uses a little of your plan or API credit.",
   "composer.placeholder.newThread": "Start a thread in {name}",

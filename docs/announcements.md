@@ -34,6 +34,8 @@ analytics on, the app counts the card (see [Counting](#counting)).
 
 Older versions of the app know nothing of this file and never download it.
 
+In **Settings → Features**, turn off **Promotional messages** for a workspace to hide sponsored cards and built-in upgrade offers. Product news, tips, release notes and account notices remain available. Self-hosted workspaces can set `features.promotions` to `false` in `config.json`.
+
 ## Publishing a card
 
 1. Edit `announcements/announcements.json` on a branch: add a card to `cards` (the first card in the list that is for a

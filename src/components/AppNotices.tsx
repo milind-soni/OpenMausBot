@@ -22,6 +22,7 @@ import { togetherSlideShown, useTogetherNoticeDrawn, useTogetherNoticeDue } from
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { promotionsEnabled } from "@/lib/feature-flags";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { reportWhatsNew, togetherSlideDue, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewCarousel, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
@@ -78,6 +79,7 @@ const FIRST_MESSAGES_MS = 6_000;
 
 export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { quiet?: boolean; viewer?: WelcomeViewer | null; now?: () => number }) {
   const { state, dispatch } = useStore();
+  const promotions = promotionsEnabled(state.config);
   const remote = window.ogb?.remoteClient?.active === true;
   const local = localDesktopPage();
   const bridge = !remote && local ? window.ogb?.cloudAccount : undefined;
@@ -143,7 +145,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }, []);
   const view = bridge ? cloudPlanView(account) : null;
   const record = state.config?.onboarding;
-  const introAllowed = Boolean(bridge) && brandStatus().source !== "file" && organization !== true && !onboardingCloudOffered(record);
+  const introAllowed = promotions && Boolean(bridge) && brandStatus().source !== "file" && organization !== true && !onboardingCloudOffered(record);
   const stage = introStage(record, now());
   const trialDue = cloudTrialNotice(plan);
   const branded = brandStatus().source === "file", team = Boolean(state.config?.team);
@@ -156,7 +158,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const whatsNewHere = !branded && !whatsNewSeen;
   const plansDue = !whatsNewHere || !bridge || !desktop || organization === true ? false : !desktopState || organization === null ? null : desktopState.cloud;
   const whatsNewFor = plansDue === false ? null : whatsNewAudience(account);
-  const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done")
+  const wantOffer = promotions && Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done")
     || whatsNewFor === "none" || whatsNewFor === "own");
   const offerKey = wantOffer ? `${view?.kind}:${JSON.stringify(account?.offer ?? null)}` : null;
   useEffect(() => {
@@ -170,7 +172,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     if (whatsNewSeen && desktopState && !desktopState.seen.includes(WHATS_NEW_NOTICE)) void desktop?.seen(WHATS_NEW_NOTICE).catch(() => {});
   }, [whatsNewSeen, desktopState]);
   const offerRead = !bridge?.offer ? null : offerFor === offerKey ? offer : undefined;
-  const plans = plansDue === false ? "none" : plansDue === null ? "loading" : whatsNewView(account, offerRead);
+  const plans = !promotions || plansDue === false ? "none" : plansDue === null ? "loading" : whatsNewView(account, offerRead);
   const teamSold = plansDue === true && offerRead ? offerRead.plans.some(entry => entry.tier === "team") : undefined;
   const consentDue = consent.state?.available === true && consent.state.due && !consentDone;
   const consentBlocked = useOtherDialogOpen(consentDue) || liveCall;
@@ -184,13 +186,14 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const simpleBlocked = useOtherDialogOpen(simpleDue) || liveCall;
   // A sponsor's card is for whoever chooses a team's providers: its Owner and Admins, never its members.
   const sponsorsHere = SPONSOR_CARDS_FOR_TEAM_MEMBERS || !state.config?.team || viewer?.canSave === true;
-  const boatHere = sponsorsHere && boatOfferRuns(now()) && brandStatus().source !== "file";
+  const boatHere = promotions && sponsorsHere && boatOfferRuns(now()) && brandStatus().source !== "file";
   const teams = teamsAction({ team: state.config?.team, viewer, account, canAddCloud: Boolean(bridge) });
   // Owed while it has a slide for this person (or may, while that is read): the Teams popup and the sponsor's card it took
   // in wait for it, and count as seen with it.
   // A Cloud this person has: this page is one, or this desktop's sign-in has a plan of its own or a team's.
   const hasCloud = viewer?.cloudHome === true || whatsNewFor === "own" || whatsNewFor === "team";
-  const whatsNewState = !whatsNewHere ? "none" : togetherSlide === null ? "loading" : whatsNewCarousel({ plans, team: organization === true ? null : teams, teamSold,
+  const whatsNewTeam = organization === true || (!promotions && teams.kind === "start") ? null : teams;
+  const whatsNewState = !whatsNewHere ? "none" : togetherSlide === null ? "loading" : whatsNewCarousel({ plans, team: whatsNewTeam, teamSold,
     cloud: hasCloud, apps: { place: state.config?.cloudHome === true ? "cloud" : "computer", install: local && !remote && Boolean(window.ogb?.appInstall) },
     staging: account?.staging === true, together: togetherSlide });
   const whatsNew = typeof whatsNewState === "object" ? whatsNewState : null;
@@ -251,14 +254,14 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     facts: { nowMs: now(), version: appVersion(), platform: announcementPlatform(globalThis.navigator?.userAgent), surface, plan: announcementPlan(surface, view, team),
       people: usedBefore(state.bots) ? "existing" : "new", locale: activeLocale(), conditions: announcementConditions(state) },
     seen: seenRecord, branded, admin: viewer?.canSave !== false,
-    sponsors: !providersRestricted(state.config?.managedPolicy) && sponsorsHere,
+    sponsors: promotions && !providersRestricted(state.config?.managedPolicy) && sponsorsHere,
   });
   const announcement = picked && picked !== "wait" ? picked : null;
   // Teams: once for whom What's new has nothing, ahead of every other notice, on every page but a branded build's or an
   // organization's desktop; never in the launch a welcome or MausBot's card took, before a first reply, over a first run's
   // own screens or another dialog, during a live call or a move.
   const teamsSeen = noticeSeen(record, TEAMS_NOTICE) || Boolean(desktopState?.seen.includes(TEAMS_NOTICE));
-  const teamsHere = !branded && organization !== true && !teamsSeen && !whatsNewOwed;
+  const teamsHere = !branded && whatsNewTeam !== null && !teamsSeen && !whatsNewOwed;
   const teamsBlocked = useOtherDialogOpen(teamsHere, true) || liveCall;
   const teamsNow = !teamsHere || moving || afterWelcome === true ? false
     : organization === null || !viewer || (desktop && !desktopState) || afterWelcome === null || mausBotFirst || moving === null || teamsBlocked ? null : true;
@@ -283,9 +286,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [UPDATES_CONSENT_NOTICE]: consentNow,
     [TWO_PLACES_NOTICE]: twoFact,
-    [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
+    [PRODUCT_HUNT_NOTICE]: !promotions || !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null || firstChat === null ? null : !organization,
-    [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
+    [CLOUD_INTRO]: !promotions || moving ? false : moving === null ? null : introDue(),
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
       : Boolean(kind && !noticeSeen(record, CLOUD_NOTICE_CARD[kind].dismissed)),
@@ -293,7 +296,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [BOAT_OFFER_NOTICE]: !boatHere || moving || afterWelcome === true || !usedBefore(state.bots) || desktopState?.seen.includes(BOAT_OFFER_NOTICE) ? false
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
     [ANNOUNCEMENT_NOTICE]: announcementNow,
-    [STAR_NOTICE]: !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
+    [STAR_NOTICE]: !promotions || !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
   }, id => id === TEAMS_NOTICE ? teamsSeen : id === CLOUD_INTRO ? stage === "done" && !introOpen
     : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE ? noticeSeen(record, id) : false, launch, closed) : null;
 

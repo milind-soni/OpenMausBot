@@ -175,6 +175,30 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); setLocale("en"); });
 
+describe("promotional messages", () => {
+  it("skips the Cloud offer and shows a trial deadline when promotions are off", async () => {
+    returning();
+    f.state.config.features = { promotions: false };
+    storage.delete(BOAT_OFFER_NOTICE);
+    storage.delete(PRODUCT_HUNT_NOTICE);
+    expect(await launch()).toBe("");
+    expect(bridges.cloud.offer).not.toHaveBeenCalled();
+    snapshot = { status: "paid", tier: "pro", trial: trial("active"), notice: "active" };
+    expect(await relaunch()).toContain("Your free trial ends on");
+    expect(bridges.plan.noticeSeen).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the What's new slides about apps and publishing, with no plan pitches", async () => {
+    returning();
+    f.state.config.features = { promotions: false };
+    storage.delete(WHATS_NEW_NOTICE);
+    desk.saved = null;
+    offer = { ...TRIAL_OFFER, plans: [...plans, { tier: "team", label: "Team", amount: 9900, trialDays: 7 }] };
+    expect(slidesOf(await launch())).toEqual(["apps", "publish"]);
+    expect(bridges.cloud.offer).not.toHaveBeenCalled();
+  });
+});
+
 describe("the card after the update", () => {
   it("offers the free trial to someone signed out who has used the app before, in the Admin's numbers, with Start free trial and Show me how", async () => {
     returning();
@@ -1669,6 +1693,13 @@ describe("cards from the announcements file", () => {
     expect(await launch()).toContain("Title of for-desktop");
     f.brand = "file"; forgetAnnouncementCards(); storage.set(seenKey("for-desktop"), "1"); feed = [card("branded")];
     expect(await relaunch()).not.toContain("Title of branded");
+  });
+
+  it("skips sponsored cards but still shows product news when promotions are off", async () => {
+    f.state.config.features = { promotions: false };
+    feed = [card("sponsor", { kind: "sponsor" }), card("phone-app")];
+    expect(await launch()).toContain("Title of phone-app");
+    expect(events()).toEqual([{ id: "phone-app", kind: "product", action: "shown" }]);
   });
 
   describe("a sponsor's card", () => {

@@ -265,6 +265,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
   { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", synonyms: ["tabs", "threads"] },
   { id: "suggested-replies", page: "features", anchor: "features", labelKey: "settings.features.suggestedReplies", synonyms: ["suggestions", "autocomplete", "next reply", "tab"] },
+  { id: "promotions", page: "features", anchor: "features", labelKey: "settings.features.promotions", synonyms: ["ads", "offers", "upgrade messages", "sponsor"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },
