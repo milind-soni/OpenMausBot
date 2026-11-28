@@ -3,6 +3,7 @@ import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
 import { devsTagAt } from "../../shared/devs-mention";
+import { everyoneTagAt } from "../../shared/everyone-mention";
 import { blankCode } from "../../shared/skill-command";
 
 /** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
@@ -68,19 +69,18 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
     const rest = text.slice(at + 1);
     const peer = candidates.find(({ name }) => rest.slice(0, name.length).toLowerCase() === name.toLowerCase()
       && !isMentionNameContinuation(rest.slice(name.length)));
-    const all = everyone && rest.slice(0, 8).toLowerCase() === "everyone"
-      && !isMentionNameContinuation(rest.slice(8));
-    const you = !all && personNames.length ? personTagAt(rest, personNames, botNames) : undefined;
+    const all = everyone ? everyoneTagAt(rest, [...candidates.map(({ name }) => name), ...personNames]) : undefined;
+    const you = all === undefined && personNames.length ? personTagAt(rest, personNames, botNames) : undefined;
     if (you !== undefined) {
       ranges.push({ start: at, end: at + you + 1, you: true });
       at += you;
       continue;
     }
-    const length = all ? 8 : peer?.name.length ?? devsTagAt(rest, botNames);
+    const length = all ?? peer?.name.length ?? devsTagAt(rest, botNames);
     if (length === undefined) continue;
     // Only palette values enter CSS.
-    const color = !all && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
-    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(!all && peer?.person ? { person: true as const } : {}) });
+    const color = all === undefined && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
+    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(all === undefined && peer?.person ? { person: true as const } : {}) });
     at += length;
   }
   return ranges;

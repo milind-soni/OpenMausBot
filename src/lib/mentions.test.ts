@@ -49,6 +49,10 @@ describe("mention display ranges", () => {
     expect(matches("@everyone @Everyone! @everyone_else @everyone2", true)).toEqual(["@everyone", "@Everyone"]);
     expect(matches("@everyone")).toEqual([]);
   });
+  it("decorates @all in channels like @everyone", () => {
+    expect(matches("@all @All! @allow @all_else", true)).toEqual(["@all", "@All"]);
+    expect(matches("@all")).toEqual([]);
+  });
   it("rejects Unicode letters, numbers, combining marks and underscores after names", () => {
     expect(matches("@調査担当者 @everyone調査 @Atlasé @Atlas２ @Atlas𐐀 @Atlas𝟙 @Atlas\u0301 @Atlas_else", true)).toEqual([]);
     expect(matches("@everyoneé @everyone２ @everyone𐐀 @everyone𝟙 @everyone\u0301", true)).toEqual([]);
@@ -106,6 +110,17 @@ describe("a teammate's tag in display ranges", () => {
     for (const list of [[{ name: "Bob" }, { name: "Bob", person: true as const }], [{ name: "Bob", person: true as const }, { name: "Bob" }]]) {
       expect(mentionRanges(text, list).map(({ person }) => person ?? false)).toEqual([true]);
     }
+  });
+  it("keeps a teammate's longer name whole when it starts with @all", () => {
+    const list = [...peers, { name: "All Hands", person: true as const }];
+    const tags = (text: string) => mentionRanges(text, list, true).map(({ start, end, person }) => [text.slice(start, end), person ?? false]);
+    expect(tags("@All Hands please")).toEqual([["@All Hands", true]]);
+    expect(tags("@all please")).toEqual([["@all", false]]);
+  });
+  it("keeps the viewer's own longer name whole when it starts with @all", () => {
+    const tags = (text: string) => mentionRanges(text, peers, true, { profileName: "All Hands" }).map(({ start, end, you }) => [text.slice(start, end), you ?? false]);
+    expect(tags("@All Hands please")).toEqual([["@All Hands", true]]);
+    expect(tags("@all please")).toEqual([["@all", false]]);
   });
   it("does not let a teammate's name take the viewer's own tag away", () => {
     expect(mentionRanges("@Sam", [{ name: "Sam", person: true }], false, { profileName: "Sam" })).toEqual([{ start: 0, end: 4, you: true }]);

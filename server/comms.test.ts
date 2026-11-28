@@ -82,6 +82,14 @@ describe("roomResponders", () => {
     expect(roomResponders("@everyone hello", members, { kind: "mentions" })).toEqual(members);
   });
 
+  it("reads @all as @everyone, unless a member has that name", () => {
+    const mentionsOnly = { kind: "mentions" } as const;
+    expect(roomResponders("@all hello", members, mentionsOnly)).toEqual(members);
+    expect(roomResponders("@allow hello", members, mentionsOnly)).toEqual([]);
+    const allHands = { id: "hands", name: "All Hands" };
+    expect(roomResponders("@All Hands hello", [...members, allHands], mentionsOnly)).toEqual([allHands]);
+  });
+
   it("applies the shared mention boundaries to everyone", () => {
     const mentionsOnly = { kind: "mentions" } as const;
     expect(roomResponders("**@EVERYONE** hello", members, mentionsOnly)).toEqual(members);

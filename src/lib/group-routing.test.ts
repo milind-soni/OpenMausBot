@@ -67,6 +67,14 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("İ @everyone", members, mentionsOnly)).toEqual(members);
   });
+
+  it("reads @all as @everyone, unless a member has that name", () => {
+    const mentionsOnly = { defaultResponder: { kind: "mentions" } } as const;
+    expect(roomRespondersForComposer("@all hello", members, mentionsOnly)).toEqual(members);
+    expect(roomRespondersForComposer("@allow hello", members, mentionsOnly)).toEqual([]);
+    const allHands = { id: "hands", name: "All Hands" };
+    expect(roomRespondersForComposer("@All Hands hello", [...members, allHands], mentionsOnly)).toEqual([allHands]);
+  });
 });
 
 describe("who answers when two room members share a name", () => {
