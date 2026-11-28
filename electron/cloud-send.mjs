@@ -791,7 +791,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const picture = await sendPicture(ctx, bot);
       if (picture) refused[PICTURE_PART] = picture;
     }
-    done(ctx, row.key, parts);
+    done(ctx, row.key, parts.filter((part) => refused[part] === undefined)); // a refused part stayed as it was there, so it must stay pending here
     if (Object.keys(refused).length < parts.length) ctx.result.updatedBots.push(bot.name);
     if (refused.model) ctx.result.notes.push({ kind: "model", bot: bot.name });
     if (Object.keys(refused).some((part) => part !== "model")) ctx.result.notes.push({ kind: "settings", bot: bot.name });

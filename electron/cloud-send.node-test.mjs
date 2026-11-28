@@ -177,6 +177,22 @@ test("a send adds a bot with its own id over one session, says what My Cloud ref
   assert.equal((await createCloudSend(outdated.deps).compare()).cloud, "outdated");
 });
 
+test("a setting My Cloud refused stays to-update instead of being recorded as already in step", async () => {
+  const state = { clouds: { [CLOUD]: { sent: { "bot:ember": { soul: ["old", "old"] } } } } };
+  const sides = fakeSides({
+    localItems: [bot("ember", { soul: "new" })],
+    cloudItems: [bot("ember", { soul: "old" })],
+    refuse: { "/api/bots/ember": { status: 503, error: "My Cloud is busy" } },
+  });
+  sides.deps.store = { read: () => state, write: (value) => { Object.assign(state, value); } };
+  const send = createCloudSend(sides.deps);
+  assert.deepEqual((await send.compare()).rows.find((row) => row.key === "bot:ember").parts, ["soul"]);
+  await send.send();
+  const after = (await send.compare()).rows.find((row) => row.key === "bot:ember");
+  assert.equal(after.state, "to-update");
+  assert.deepEqual(after.parts, ["soul"]);
+});
+
 test("My Cloud's page is told names of bots and counts, with an opaque signature, and never a login's site", async () => {
   const sides = fakeSides({
     localItems: [bot("ember", { soul: "s" }), { key: itemKey.login("bank.example", "amit"), kind: "login", label: "bank.example", id: "l1", parts: { saved: "1" } }],
