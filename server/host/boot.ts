@@ -68,6 +68,15 @@ export async function bootServer(options: {
   pinned: boolean;
   /** Writes each candidate back before its bind so live readers never see a stale port mid-walk. */
   assignPort: (port: number) => void;
+  /** Fires in the listen callback, the moment the socket accepts, before
+   * `onListening`: the request path must not read unset boot state while the
+   * webhook walk is still pending. */
+  onBoundState?: (state: {
+    sessionCookie: string;
+    workspaceAccess: WorkspaceAccess | null;
+    workspaceAccessTimer: NodeJS.Timeout | null;
+    webhookIngressStatus: ServerBoot["webhookIngressStatus"];
+  }) => void;
   /** Fires in the listen callback, the moment the socket accepts. */
   onListening: () => void;
   environmentId: string;
@@ -83,19 +92,48 @@ export async function bootServer(options: {
 }): Promise<ServerBoot> {
   const log = options.log ?? console.log;
   const error = options.error ?? console.error;
+  let sessionCookie = "";
+  let workspaceAccess: WorkspaceAccess | null = null;
+  let workspaceAccessTimer: NodeJS.Timeout | null = null;
+  let webhookIngress: WebhookIngress | null = null;
+  let webhookIngressError: string | null = null;
+  let webhookPort = options.webhookPort;
+  const webhookIngressStatus = () => ({
+    available: Boolean(webhookIngress),
+    baseUrl: webhookIngress?.baseUrl ?? `http://${options.host}:${webhookPort}`,
+    ...(webhookIngressError ? { error: webhookIngressError } : {}),
+  });
   const port = await bindFirstFreePort({
     start: options.port,
     pinned: options.pinned,
     bind: async (candidatePort) => {
       options.assignPort(candidatePort);
       await new Promise<void>((resolve, reject) => {
-        const onError = (listenError: Error) => { options.server.off("error", onError); reject(listenError); };
-        options.server.once("error", onError);
-        options.server.listen(candidatePort, options.host, () => {
+        const onListening = () => {
           options.server.off("error", onError);
-          options.onListening();
-          resolve();
-        });
+          try {
+            sessionCookie = sessionCookieName(candidatePort, options.environmentId);
+            const access = createWorkspaceAccess({ sessions: options.sessions, cookieName: sessionCookie, closeSessionStreams: options.closeSessionStreams });
+            workspaceAccess = access;
+            // With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
+            workspaceAccessTimer = access ? setInterval(() => {
+              void access.revalidate().catch((revalidateError) => console.warn("workspace access revalidation failed", revalidateError));
+            }, 10_000) : null;
+            workspaceAccessTimer?.unref();
+            options.onBoundState?.({ sessionCookie, workspaceAccess, workspaceAccessTimer, webhookIngressStatus });
+            options.onListening();
+            resolve();
+          } catch (bootError) {
+            reject(bootError);
+          }
+        };
+        const onError = (listenError: Error) => {
+          options.server.off("error", onError);
+          options.server.off("listening", onListening);
+          reject(listenError);
+        };
+        options.server.once("error", onError);
+        options.server.listen(candidatePort, options.host, onListening);
       });
     },
   });
@@ -104,17 +142,6 @@ export async function bootServer(options: {
   }
   log(`openmausbot server on http://${options.host}:${port}`);
 
-  const sessionCookie = sessionCookieName(port, options.environmentId);
-  const workspaceAccess = createWorkspaceAccess({ sessions: options.sessions, cookieName: sessionCookie, closeSessionStreams: options.closeSessionStreams });
-  // With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
-  const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
-    void workspaceAccess.revalidate().catch((revalidateError) => console.warn("workspace access revalidation failed", revalidateError));
-  }, 10_000) : null;
-  workspaceAccessTimer?.unref();
-
-  let webhookIngress: WebhookIngress | null = null;
-  let webhookIngressError: string | null = null;
-  let webhookPort = options.webhookPort;
   try {
     const bound = await bindFirstFreePort({
       start: options.webhookPort,
@@ -135,10 +162,5 @@ export async function bootServer(options: {
     webhookIngressError = ingressError instanceof Error ? ingressError.message : String(ingressError);
     error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
   }
-  const webhookIngressStatus = () => ({
-    available: Boolean(webhookIngress),
-    baseUrl: webhookIngress?.baseUrl ?? `http://${options.host}:${webhookPort}`,
-    ...(webhookIngressError ? { error: webhookIngressError } : {}),
-  });
   return { port, webhookPort, webhookIngress, webhookIngressStatus, sessionCookie, workspaceAccess, workspaceAccessTimer };
 }

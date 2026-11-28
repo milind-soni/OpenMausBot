@@ -722,6 +722,11 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     OMB_PORT: String(options.port),
     OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1), ...(options.relay ? { OMB_PHONE_RELAY: "1" } : {}),
   };
+  const requestedWebhookPort = Number(env.OMB_WEBHOOK_PORT);
+  if (!Number.isInteger(requestedWebhookPort) || requestedWebhookPort < 1 || requestedWebhookPort > 65_535) {
+    console.error(`OMB_WEBHOOK_PORT must be a whole port between 1 and 65535, got "${env.OMB_WEBHOOK_PORT}"`);
+    return 1;
+  }
   if (options.local) delete env.OMB_PUBLIC_URL;
   // The per-launch secret goes over stdin, not the environment that every engine the server starts inherits.
   const serviceTrust = resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: hostedWorkspaceConfigured(env) }).trust === "service";
@@ -759,7 +764,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   // lost to a third party relaunches on the next pair, bounded by the launcher.
   const launched = await launchServeChild({
     entry, env, dataDir: options.dataDir, guided: options.guided,
-    requestedPort: options.port, requestedWebhookPort: Number(env.OMB_WEBHOOK_PORT),
+    requestedPort: options.port, requestedWebhookPort,
     publicUrl, ownerToken, tailscale: tailscaleState, otherServer: answersAsMausBot,
     log, error: (line) => console.error(line),
     stopping: () => stopping !== null, stop, onShutdown: onSignal,
@@ -769,7 +774,9 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     onOwnerToken: (token) => { serveOwnerToken = token; },
     serverUp, webhookIngressAvailable,
   });
-  if (launched.status === "exit") return launched.code;
+  // A failed launch can still hold a share or an undisposed tunnel plan;
+  // stop() is idempotent across the paths that already ran it.
+  if (launched.status === "exit") { await stop(); return launched.code; }
   if (launched.status === "stopping") { await stop(); return launched.exit; }
   const server = launched.server;
   publicUrl = server.publicUrl;

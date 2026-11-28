@@ -257,24 +257,33 @@ export async function launchServeChild(deps: ServeLaunchDeps): Promise<ServeLaun
       if (deps.stopping() || exited !== null) return { status: "stopping", exit };
       // The webhook receiver is a second bind on the negotiated pair, and a
       // pinned child that loses it still serves — leaving Caddy and Tailscale
-      // pointed at a foreign socket. Relaunch on a fresh pair when the port
-      // was taken, the same way a stolen main port is handled.
+      // pointed at a socket with no receiver. Relaunch on a fresh pair whenever
+      // the child reports the receiver down: the port probe only says whether
+      // the port can be reused, not why the bind failed.
       let ingressAvailable: boolean | undefined;
       try {
         ingressAvailable = await deps.webhookIngressAvailable(port);
       } catch { /* ingress verification is best-effort; the receiver logged its own failure */ }
-      if (ingressAvailable === false && !(await loopbackPortFree(webhookPort))) {
+      if (ingressAvailable === false) {
+        const held = !(await loopbackPortFree(webhookPort));
         if (attempt + 1 >= SERVE_LAUNCH_ATTEMPTS) {
-          // Never declare ready with the webhook port in foreign hands: Caddy
-          // and Tailscale would forward hooks to a process that is not us.
-          error(`webhook port ${webhookPort} is owned by another process; the server cannot accept webhooks safely`);
+          // Never declare ready without the receiver: Caddy and Tailscale would
+          // forward hooks to a port that is foreign or simply unlistened.
+          error(held
+            ? `webhook port ${webhookPort} is owned by another process; the server cannot accept webhooks safely`
+            : `the webhook receiver did not come up; the server cannot accept webhooks safely`);
           await deps.stop();
           return { status: "exit", code: 1 };
         }
-        log(`webhook port ${webhookPort} was claimed while the server was starting; trying a new pair`);
+        log(held
+          ? `webhook port ${webhookPort} was claimed while the server was starting; trying a new pair`
+          : `the webhook receiver did not come up; trying a new pair`);
         await handle.terminate();
         continue;
       }
+      // Shutdown or a dead child during the ingress probe: the ready path would
+      // start Caddy and the tunnel after teardown already skipped them.
+      if (deps.stopping() || exited !== null) return { status: "stopping", exit };
       serverReady = true;
       const server = Object.assign(handle, { port, webhookPort, logPath, publicUrl, disarm });
       return { status: "ready", server };
