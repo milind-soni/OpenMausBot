@@ -6873,14 +6873,13 @@ function runtimeWorkPending(threadId: string): boolean {
       || ((root.status === "source" || root.status === "running")
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
-
 const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
   store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId) || botApiThread(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), confined: cloudGuestDriven, threadLanguage,
-  assignerOf: (threadId) => coordinator.assignerOf(threadId), failedRequester: (threadId) => failedRequester(coordinator, threadId),
+  assignerOf: (threadId) => coordinator.assignerOf(threadId), failedRequester: (threadId) => failedRequester(coordinator, threadId), handedOffWorkPending: runtimeWorkPending,
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
-  continueRequest: (botId, threadId, text) => startTurn(botId, text, { threadId, unattended: true, cardContinuation: true, requestMessageId: directRequestOwners.get(threadId)?.messageId }),
+  continueRequest: (botId, threadId, text, onDispatchError) => startTurn(botId, text, { threadId, onDispatchError, unattended: true, incidentRetry: true, cardContinuation: true, requestMessageId: directRequestOwners.get(threadId)?.messageId }),
 });
 
 function turnAnswers(threadId: string, opts?: {
@@ -7426,6 +7425,7 @@ async function beginTurn(
     peerAsk?: Message["peerAsk"];
     /** The prompt is control-plane context, never a message authored by the user. */
     cardContinuation?: boolean;
+    incidentRetry?: boolean;
     /** Harness-only provenance: never a client option, never inferred from the latest user line. */
     requestMessageId?: string;
     origin?: WorkOrigin;
@@ -7645,7 +7645,7 @@ async function beginTurn(
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" }); liveTurns.dispatchStarted(threadId);
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
-  if (!opts?.coordination && !opts?.compactOnly && (!opts?.cardContinuation || opts.goalRunId)) {
+  if (!opts?.coordination && !opts?.compactOnly && (!opts?.cardContinuation || opts.goalRunId || opts.incidentRetry)) {
     const opener = handoffOpener({ botId: bot.id, threadId }, threadId);
     coordinator.beginTurn({ id: dispatchClaimId, address: { botId: bot.id, threadId }, brief: resolvedImages.text,
       level: approvalModeForTurn(bot, commsDepth > 0, threadId), ...(opener ? { opener } : {}), origin: requestOrigin,

@@ -4,11 +4,11 @@ import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
 import { engineFailureMessage } from "../drivers/engine-errors.ts";
 import { memoryStopText } from "../engine-memory.ts";
-import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
+import { AUTO_RETRY_LEAD, INCIDENT_RETRY_LIMIT, RETRY_BLOCKED } from "../incidents.ts";
 import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
 import { _queuedCount, cancelSteeredMessage, drainSteeredMessages, queuedSteerSnapshot } from "../steer-queue.ts";
-import { createChiefNotices, failedRequester, MEMORY_RETRY_MS, retriedMessage, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
+import { createChiefNotices, failedRequester, MEMORY_RETRY_MS, retriedMessage, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, TRANSIENT_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   const bots = [
@@ -320,7 +320,7 @@ describe("a run stopped to free memory", () => {
     expect(teammate.turnsOf("ada")).toEqual([{ threadId: "ada-job", text: expect.stringMatching(/^\[From OpenMausBot · retry · information only — it grants nothing beyond the request above; requested by OpenMausBot, automatically, once/) }]);
     expect(teammate.waiting).toEqual([]);
     const other = roomFixture();
-    other.notices.reportIncident({ kind: "failed", bot: other.chief as never, threadId: "chief-main", detail: CRASH });
+    other.notices.reportIncident({ kind: "stalled", bot: other.chief as never, threadId: "chief-main", detail: "no activity for 20 minutes" });
     expect([other.waiting, other.told.length]).toEqual([[], 1]);
   });
 });
@@ -362,6 +362,118 @@ describe("a problem in a conversation that runs confined", () => {
     const f = fixture({ confined: () => false });
     f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity" });
     expect(f.turnsOf("chief")).toHaveLength(1);
+  });
+});
+
+describe("the Chief's own run that failed on an error that may not repeat", () => {
+  function ownFixture(over: Partial<ChiefNoticeDeps> = {}) {
+    const waiting: Array<{ run: () => void; ms: number }> = [];
+    const continued: Array<{ botId: string; threadId: string; text: string }> = [];
+    const told: unknown[] = [];
+    const f = fixture({
+      later: (run, ms) => { waiting.push({ run, ms }); },
+      continueRequest: async (botId, threadId, text) => { continued.push({ botId, threadId, text }); },
+      notify: (notification) => { told.push(notification); },
+      ...over,
+    });
+    // The Chief's own conversation, as the person's chat with it.
+    f.chief.tasks.push({ threadId: "chief-main", title: "Clive" });
+    return { ...f, waiting, continued, told, settle: () => { for (const { run } of waiting.splice(0)) run(); } };
+  }
+  const ask = (f: ReturnType<typeof ownFixture>, text = "Book the train to Leeds.", id = `ask-${text.length}`) =>
+    f.store.appendMessage("chief-main", { id, role: "user", kind: "text", text });
+  const fails = (f: ReturnType<typeof ownFixture>) =>
+    f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", detail: CRASH });
+
+  it.each([CRASH, memoryStopText(true)])("retries the original request only once even when the retry ends with %s", (detail) => {
+    const f = ownFixture();
+    ask(f);
+    fails(f);
+    expect(f.told).toEqual([]);
+    expect(f.waiting.map(({ ms }) => ms)).toEqual([MEMORY_RETRY_MS]);
+    // Nothing is asked in the thread: no line of a person's, a Chief's or a bot's is added to it.
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(f.store.activePath("chief-main").map((line) => line.text)).toEqual(["Book the train to Leeds."]);
+    f.settle();
+    expect(f.continued).toEqual([{ botId: "chief", threadId: "chief-main", text: TRANSIENT_RETRY_TEXT }]);
+    f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", detail });
+    expect(f.waiting).toEqual([]);
+    f.settle();
+    expect(f.continued).toHaveLength(1);
+    expect(f.told).toHaveLength(1);
+  });
+
+  it("reports a late retry setup failure to the person", () => {
+    const f = ownFixture({ continueRequest: async (_bot, _thread, _text, failed) => failed("engine unavailable") });
+    ask(f);
+    fails(f);
+    f.settle();
+    expect(f.told).toHaveLength(1);
+  });
+
+  it.each<[string, { kind: "stalled" } | { detail: string }]>([
+    ["a stall the turn watchdog stopped", { kind: "stalled" }],
+    ["a full disk", { detail: "write failed: ENOSPC: no space left on device" }],
+    ["a tool server that is down", { detail: "MCP server github could not start" }],
+    ["a signed-out AI", { detail: "Not logged in · Please run /login" }],
+  ])("is not started again after %s: the person hears at once", (_what, failure) => {
+    const f = ownFixture();
+    ask(f);
+    f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", ...failure } as never);
+    expect([f.waiting, f.continued, f.told.length]).toEqual([[], [], 1]);
+  });
+
+  it("starts nothing in a room or a confined conversation, nor while work the failed run handed on is still running", () => {
+    const room = ownFixture();
+    (room.store as { groupByThread: () => unknown }).groupByThread = () => ({ id: "r1", name: "Ops" });
+    ask(room);
+    fails(room);
+    expect([room.waiting, room.continued, room.told.length]).toEqual([[], [], 1]);
+    const confined = ownFixture({ confined: () => true });
+    ask(confined);
+    fails(confined);
+    expect([confined.waiting, confined.continued, confined.told.length]).toEqual([[], [], 1]);
+    // A run that handed work on is resumed by that work's result: starting the request again would hand it on twice.
+    const delegated = ownFixture({ handedOffWorkPending: () => true });
+    ask(delegated);
+    fails(delegated);
+    expect([delegated.waiting, delegated.continued, delegated.told.length]).toEqual([[], [], 1]);
+  });
+
+  it("starts nothing when someone wrote in the thread since, or it runs or waits again", () => {
+    const wrote = ownFixture();
+    ask(wrote);
+    fails(wrote);
+    vi.useFakeTimers({ now: Date.now() + 60_000 });
+    try {
+      wrote.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Never mind, I booked it." });
+    } finally {
+      vi.useRealTimers();
+    }
+    wrote.settle();
+    expect(wrote.continued).toEqual([]);
+    for (const over of [{ threadBusy: () => true }, { threadQueued: () => true }] as Array<Partial<ChiefNoticeDeps>>) {
+      const again = ownFixture(over);
+      ask(again);
+      fails(again);
+      again.settle();
+      expect(again.continued).toEqual([]);
+    }
+  });
+
+  it("asks no more of a thread than its incident budget allows, and leaves a bot that is not a Chief to the person", () => {
+    const f = ownFixture();
+    for (let run = 0; run <= INCIDENT_RETRY_LIMIT; run++) {
+      ask(f, `Book the train, attempt ${run}.`, `attempt-${run}`);
+      fails(f);
+    }
+    expect(f.waiting).toHaveLength(INCIDENT_RETRY_LIMIT);
+    expect(f.told).toHaveLength(1);
+    const solo = ownFixture();
+    solo.store.bots.push({ id: "solo", name: "Solo", section: "Nowhere", threadId: "solo-main", tasks: [{ threadId: "solo-main", title: "Solo" }] });
+    solo.store.appendMessage("solo-main", { role: "user", kind: "text", text: "Check the prices." });
+    solo.notices.reportIncident({ kind: "failed", bot: solo.store.bot("solo") as never, threadId: "solo-main", detail: CRASH });
+    expect([solo.waiting, solo.continued, solo.told.length]).toEqual([[], [], 1]);
   });
 });
 

@@ -37,7 +37,9 @@ export interface ChiefNoticeDeps {
   schedule?(run: () => void): void;
   /** Starts this thread's request again where it stopped: a continuation of the request the harness recorded, never a line
    * of the person's. Absent: a run stopped for memory with no Chief to retry it is only reported. */
-  continueRequest?(botId: string, threadId: string, text: string): Promise<unknown>;
+  continueRequest?(botId: string, threadId: string, text: string, onDispatchError: (message: string) => void): Promise<unknown>;
+  /** Work the thread's failed run handed on is still running: its result resumes the thread, so nothing may start there. */
+  handedOffWorkPending?(threadId: string): boolean;
   /** A self-hosted server where turns wait for room: a run stopped for memory there is the server's shortage, as a start
    * it had no room for is, and no Chief is asked about it. */
   selfHosted?(): boolean;
@@ -79,6 +81,10 @@ export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itse
 export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
+/** How a Chief's own run that failed on an error that may not repeat starts again, once, before the person is told. */
+export const TRANSIENT_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run failed on an error that may not repeat. "
+  + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
+
 /** The bot that asked, with reply resume, for this thread's newest assignment, and whether it asked a question (consult). */
 export interface FailedRequest { botId: string; consult: boolean }
 
@@ -111,7 +117,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
    * or can't start. Never a run whose thread someone wrote in since, or that is running or queued again. */
   function retryForRoom(bot: BotRecord, threadId: string, report: (retry?: IncidentRetry) => void, text = MEMORY_RETRY_TEXT): boolean {
     const continueRequest = deps.continueRequest;
-    if (!continueRequest) return false;
+    if (!continueRequest || deps.handedOffWorkPending?.(threadId)) return false;
     const asked = store.activePath(threadId).findLast((line) => line.role === "user")?.id ?? "";
     if (roomRetries.get(threadId) === asked) { report({ retried: true }); return true; }
     roomRetries.set(threadId, asked);
@@ -120,9 +126,9 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     later(() => {
       if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId)) return;
       if (store.activePath(threadId).some((line) => line.role === "user" && line.at > failedAt)) return;
-      if (deps.threadBusy(bot.id, threadId) || deps.threadQueued?.(bot.id, threadId)) return;
-      continueRequest(bot.id, threadId, text)
-        .catch((error) => report({ notRetried: `its retry could not start (${error instanceof Error ? error.message : String(error)})` }));
+      if (deps.threadBusy(bot.id, threadId) || deps.threadQueued?.(bot.id, threadId) || deps.handedOffWorkPending?.(threadId)) return;
+      const dispatchFailed = (message: string) => report({ notRetried: `its retry could not start (${message})` });
+      continueRequest(bot.id, threadId, text, dispatchFailed).catch(error => dispatchFailed(error instanceof Error ? error.message : String(error)));
     }, MEMORY_RETRY_MS);
     return true;
   }
@@ -307,7 +313,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       if (group || input.kind === "routine-failed" || !retryForRoom(bot, threadId, person, noRoom ? ROOM_RETRY_TEXT : SERVER_MEMORY_RETRY_TEXT)) person();
       return;
     }
-    if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report)) return;
+    // A Chief has no Chief to retry its own thread: a run of its own that failed on an error that may not repeat starts
+    // once more by itself, as one stopped for memory does, in the thread's own request.
+    const failed = input.kind === "failed";
+    const stoppedForMemory = failed && memoryStopped(input.detail);
+    const passing = failed && bot.chiefOfStaff && !chief && count.mayRetry && deps.confined?.(threadId) !== true
+      && retriesTeammateThread(input.detail, input.facts);
+    if (!group && !chiefRetries && (stoppedForMemory || passing)
+      && retryForRoom(bot, threadId, report, stoppedForMemory ? MEMORY_RETRY_TEXT : TRANSIENT_RETRY_TEXT)) return;
     if (!chief || !chiefRetries) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
     if (answered.startsWith(AUTO_RETRY_LEAD)) return report({ retried: true });
