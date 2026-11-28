@@ -19,7 +19,7 @@ export class PublishedPageFiles {
   }
 
   save(pageId: string, files: readonly PageFile[]): void {
-    const target = join(this.dir, pageId), staging = `${target}.${randomBytes(6).toString("hex")}.tmp`;
+    const target = join(this.dir, pageId), staging = `${target}.${randomBytes(6).toString("hex")}.tmp`, backup = `${target}.old`;
     rmSync(staging, { recursive: true, force: true });
     try {
       mkdirSync(staging, { recursive: true, mode: DIR_MODE });
@@ -31,8 +31,20 @@ export class PublishedPageFiles {
         writeFileSync(full, file.data, { mode: FILE_MODE });
       }
       if (!existsSync(join(staging, "index.html"))) throw new Error("the page has no index.html");
-      rmSync(target, { recursive: true, force: true });
-      renameWithRetry(staging, target);
+      // A save that stopped between the two renames left the page under the backup name.
+      if (!existsSync(target) && existsSync(backup)) renameWithRetry(backup, target);
+      rmSync(backup, { recursive: true, force: true });
+      if (!existsSync(target)) renameWithRetry(staging, target);
+      else {
+        renameWithRetry(target, backup);
+        try {
+          renameWithRetry(staging, target);
+        } catch (error) {
+          try { renameWithRetry(backup, target); } catch { /* an unrestored backup is unserved; the error below still names the failure */ }
+          throw error;
+        }
+        try { rmSync(backup, { recursive: true, force: true }); } catch { /* the old files stay unserved beside the page */ }
+      }
     } catch (error) {
       rmSync(staging, { recursive: true, force: true });
       throw error;
