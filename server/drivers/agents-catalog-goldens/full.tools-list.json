@@ -140,11 +140,11 @@
           },
           "message": {
             "type": "string",
-            "description": "The question or task; separate calls for different responsibilities."
+            "description": "Task or question, up to 12000 characters. One per responsibility."
           },
           "reason": {
             "type": "string",
-            "description": "Optional one line for the person on why (shown as a chip)."
+            "description": "One-line reason shown as a chip, up to 200 characters."
           },
           "rework": {
             "type": "boolean",
@@ -177,7 +177,7 @@
           },
           "done_when": {
             "type": "string",
-            "description": "What must be true to count as done; the teammate is held to it."
+            "description": "Required outcome, up to 1000 characters."
           },
           "answers": {
             "type": "string",
