@@ -775,16 +775,19 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   /** Direct work `asker` handed to `bot` and still waits on: an open request whose requesting turn is still open, held in the
-   * conversation `bot` asks from or waiting in the one the new request goes to. */
+   * conversation `bot` asks from or waiting in the one the new request goes to. A request held here wins over one waiting there. */
   private waitingOn(bot: RoomAddress, asker: RoomAddress): { request: Assignment; parent: Assignment; here: boolean } | undefined {
+    let there: { request: Assignment; parent: Assignment; here: boolean } | undefined;
     for (const request of this.live()) {
       if (request.assignee.botId !== bot.botId || request.requester.botId !== asker.botId || request.reply === "none" || request.assignee.destination.groupId !== undefined) continue;
       const here = request.assignee.destination.threadId === bot.threadId;
       if (!here && request.requester.threadId !== asker.threadId) continue;
       const parent = request.parentId ? this.store.get(request.parentId) : undefined;
-      if (parent && !isTerminal(parent)) return { request, parent, here };
+      if (!parent || isTerminal(parent)) continue;
+      if (here) return { request, parent, here };
+      there ??= { request, parent, here };
     }
-    return undefined;
+    return there;
   }
 
   private parkedIn(threadId: string): Assignment | undefined {

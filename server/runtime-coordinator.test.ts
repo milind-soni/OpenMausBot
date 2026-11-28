@@ -586,6 +586,14 @@ describe("RuntimeCoordinator: a request back to a bot that is waiting on you", (
     expect(w.coordinator.children("gen-cos-work")).toEqual([]);
   });
 
+  it("names the request held in this conversation even when an older one waits in the thread the new request goes to", () => {
+    const w = world(holdCos);
+    send(w, mailWork, "gen-mail-work", undefined, { botId: "cos", threadId: "cos-elsewhere" }, "Which mailbox should I check?");
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    expect(() => send(w, cosWork, "gen-cos-work", undefined, mailWork, "Why can't you fetch mail?"))
+      .toThrow(`@mail is already waiting on you: it handed you a request in this conversation (assignment ${asked.node.id}), and you have not finished it yet.`);
+  });
+
   it("refuses it into the conversation that waits, a thread you opened on the asker, says which, and lets it through once answered", async () => {
     const w = world(holdCos);
     // The mail bot asks from the work thread the chief of staff opened on it; a new hand-off to the mail bot goes to that thread.
