@@ -274,6 +274,169 @@ describe("the Automations list switch", () => {
     expect(container.querySelector('[data-automation="orphan-hook"]')).toBeNull();
   });
 
+  describe("Pause all / Resume all", () => {
+    const setAll = () => container.querySelector<HTMLButtonElement>("[data-automations-set-all]");
+    const writes = () => fixture.api.mock.calls.filter(([, init]) => (init as { body?: string } | undefined)?.body)
+      .map(([calledPath, init]) => [calledPath, JSON.parse((init as { body: string }).body).enabled]);
+    /** Each write answers with the automation as now saved, as the server does. */
+    function answerWrites() {
+      fixture.api.mockImplementation(async (path: unknown, init: unknown) => {
+        const body = (init as { body?: string } | undefined)?.body;
+        if (!body) return {};
+        const { enabled } = JSON.parse(body) as { enabled: boolean };
+        const id = String(path).split("/").pop();
+        if (String(path).startsWith("/api/routines/")) return { routine: { ...(fixture.state.routines as Array<{ id: string }>).find((item) => item.id === id), enabled } };
+        return { webhook: { ...(fixture.state.webhooks as Array<{ id: string }>).find((item) => item.id === id), enabled } };
+      });
+    }
+    /** The confirm "Pause all" asks first, answering `answer`. */
+    function stubConfirm(answer: boolean) {
+      const confirm = vi.fn((_question?: string) => answer);
+      vi.stubGlobal("confirm", confirm);
+      return confirm;
+    }
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it("pauses every automation listed after one confirm that says how many, then resumes them all", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      answerWrites();
+      const confirm = stubConfirm(true);
+      expect(setAll()!.textContent).toBe("Pause all");
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenCalledWith("Pause all? This turns off 3 of the automations listed here. None of them runs until you resume it.");
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Resume all"));
+      expect(writes()).toEqual([["/api/routines/routine-2", false], ["/api/routines/routine-1", false], ["/api/webhooks/hook-1", false]]);
+      expect([...container.querySelectorAll<HTMLElement>("[data-automation]")].map((item) => item.dataset.automationStatus)).toEqual(["paused", "paused", "paused"]);
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenLastCalledWith("Resume all? This turns 3 of the automations listed here back on.");
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Pause all"));
+      expect(writes().slice(3)).toEqual([["/api/routines/routine-2", true], ["/api/routines/routine-1", true], ["/api/webhooks/hook-1", true]]);
+    });
+
+    it("pauses only the ones still on, and changes nothing when the confirm is cancelled", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest", enabled: false, nextRunAt: null }];
+      mountPage();
+      answerWrites();
+      const confirm = stubConfirm(false);
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenCalledWith("Pause all? This turns off 2 of the automations listed here. None of them runs until you resume it.");
+      expect(writes()).toEqual([]);
+      confirm.mockReturnValue(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Resume all"));
+      expect(writes()).toEqual([["/api/routines/routine-1", false], ["/api/webhooks/hook-1", false]]);
+    });
+
+    it("forgets an earlier refusal beside one automation, and says a refusal of its own below the list", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockRejectedValueOnce(new Error("The assigned bot no longer exists"));
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelectorAll("[role=alert]")).toHaveLength(1));
+      expect(container.querySelector("[role=alert]")!.textContent).toBe("The server is restarting");
+      expect(row("routine-1").querySelector("[role=alert]")).toBeNull();
+    });
+
+    it("lets a later switch replace its refusal, beside the switch only when that switch is refused too", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")?.textContent).toBe("The server is restarting"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      answerWrites();
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(row("routine-1").dataset.automationStatus).toBe("paused"));
+      expect(container.querySelector("[role=alert]")).toBeNull();
+      fixture.api.mockRejectedValueOnce(new Error("The assigned bot no longer exists"));
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(container.querySelectorAll("[role=alert]")).toHaveLength(1));
+      expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists");
+    });
+
+    it("lets a panel's Run now replace its refusal, in the panel only while the panel is open", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")?.textContent).toBe("The server is restarting"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      flushSync(() => button(row("hook-1"), "Sales form leads").click());
+      expect(container.querySelectorAll("[role=alert]")).toHaveLength(1);
+      expect(container.querySelector("aside [role=alert]")?.textContent).toBe("The server is restarting");
+      fixture.api.mockResolvedValue({});
+      flushSync(() => button(container.querySelector("aside")!, "Run now").click());
+      await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/webhooks/hook-1/test", expect.objectContaining({ method: "POST" })));
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")).toBeNull());
+    });
+
+    it("keeps the panel open with the refusal when a delete is refused", async () => {
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { method?: string } | undefined)?.method === "DELETE") throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => button(row("hook-1"), "Sales form leads").click());
+      flushSync(() => button(container.querySelector("aside")!, "Delete").click());
+      await vi.waitFor(() => expect(container.querySelector("aside [role=alert]")?.textContent).toBe("The server is restarting"));
+      expect(container.querySelector("aside h2")!.textContent).toBe("Sales form leads");
+      expect(container.querySelectorAll("[role=alert]")).toHaveLength(1);
+    });
+
+    it("keeps every switch waiting while it writes, so a click cannot be undone by it", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      let release = () => {};
+      fixture.api.mockImplementation(async (path: unknown, init: unknown) => {
+        const body = (init as { body?: string } | undefined)?.body;
+        if (!body) return {};
+        await new Promise<void>((resolve) => { release = resolve; });
+        const id = String(path).split("/").pop();
+        return String(path).startsWith("/api/routines/")
+          ? { routine: { ...(fixture.state.routines as Array<{ id: string }>).find((item) => item.id === id), enabled: false } }
+          : { webhook: { ...webhook, enabled: false } };
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(writes()).toHaveLength(1));
+      expect(toggle("Morning summary").disabled).toBe(true);
+      expect(toggle("Sales form leads").disabled).toBe(true);
+      flushSync(() => toggle("Morning summary").click());
+      expect(writes()).toHaveLength(1);
+      for (let written = 1; written <= 3; written++) {
+        await vi.waitFor(() => expect(writes()).toHaveLength(written));
+        release();
+      }
+      await vi.waitFor(() => expect(toggle("Morning summary").disabled).toBe(false));
+      expect(writes().map(([, enabled]) => enabled)).toEqual([false, false, false]);
+    });
+
+    it("offers nothing when fewer than two automations have a switch", () => {
+      fixture.state.routines = [{ ...routine, enabled: false, nextRunAt: null, schedule: { type: "once", at: now - 60_000 } }];
+      mountPage();
+      expect(setAll()).toBeNull();
+    });
+  });
+
   describe("by department", () => {
     const sectioned = [{ ...botA, section: "Social" }, { ...botB, section: "Dev" }, { ...botB, id: "bot-c", name: "Atlas", threadId: "thread-c" }] as unknown as Bot[];
     const department = () => container.querySelector<HTMLSelectElement>('select[aria-label="All departments"]');

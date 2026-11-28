@@ -20,44 +20,53 @@ export function useAutomationActions() {
   const [errorFor, setErrorFor] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
+  /** Runs one action unless another is running; true when it ran and was not refused. */
   const attempt = async (key: string, work: () => Promise<unknown>) => {
-    if (busy) return;
+    if (busy) return false;
     setBusy(key);
     setError("");
     setErrorFor(null);
-    try { await work(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); setErrorFor(key); }
+    try { await work(); return true; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); setErrorFor(key); return false; }
     finally { setBusy(null); }
   };
 
-  const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, async () => {
+  /** Turns a schedule or another app's automation on or off: what its switch does, and "Pause all" does for each. */
+  const setEnabled = async (automation: Automation, enabled: boolean) => {
     if (automation.kind === "schedule") {
-      const response = await api(`/api/routines/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled }) });
+      const response = await api(`/api/routines/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
       dispatch({ type: "routinePatched", routine: response.routine });
       return;
     }
-    const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled, verificationPending: false }) });
+    const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled, verificationPending: false }) });
     dispatch({ type: "webhookPatched", webhook: response.webhook });
-  });
+  };
+
+  const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, () => setEnabled(automation, !automation.enabled));
+
+  /** Forgets the last refusal and what it was about, so it no longer shows beside that automation. */
+  const clearError = () => { setError(""); setErrorFor(null); };
 
   const runNow = (automation: Automation) => attempt(`run:${automation.id}`, () => automation.kind === "schedule"
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
     : api(`/api/webhooks/${automation.id}/test`, { method: "POST", body: JSON.stringify({ event: "openmaus.test", message: "A test run from Automations" }) }));
 
-  /** Asks once (a person deleting their own automation), then deletes it. */
-  const remove = async (automation: Automation, question: string): Promise<boolean> => {
-    if (!window.confirm(question)) return false;
+  /** Deletes it once the person said yes to the question; false when it is kept, so a refusal stays in view. */
+  const removeConfirmed = async (automation: Automation): Promise<boolean> => {
     if (automation.kind === "schedule") {
+      clearError();
       dispatch({ type: "deleteRoutine", routineId: automation.id });
       return true;
     }
-    await attempt(`delete:${automation.id}`, async () => {
+    return attempt(`delete:${automation.id}`, async () => {
       await api(`/api/webhooks/${automation.id}`, { method: "DELETE" });
       dispatch({ type: "webhookDeleted", webhookId: automation.id });
       removeWebhookCredential(webhookCredentialStore(), automation.id);
     });
-    return true;
   };
+
+  /** Asks once (a person deleting their own automation), then deletes it. */
+  const remove = async (automation: Automation, question: string) => window.confirm(question) && removeConfirmed(automation);
 
   /** The address another app sends to, as the server keeps it: the owning bot may already have given it to an app, so
    * copying never replaces it. Only one from before addresses were kept, and not copied here before, gets a new one. */
@@ -90,5 +99,5 @@ export function useAutomationActions() {
     if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
   });
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
+  return { busy, error, errorFor, setError, clearError, copied, setEnabled, toggle, runNow, remove, removeConfirmed, copyAddress, openRun, cancelRun };
 }
