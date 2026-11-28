@@ -117,6 +117,11 @@ describe("a teammate's tag in display ranges", () => {
     expect(tags("@All Hands please")).toEqual([["@All Hands", true]]);
     expect(tags("@all please")).toEqual([["@all", false]]);
   });
+  it("keeps the viewer's own longer name whole when it starts with @all", () => {
+    const tags = (text: string) => mentionRanges(text, peers, true, { profileName: "All Hands" }).map(({ start, end, you }) => [text.slice(start, end), you ?? false]);
+    expect(tags("@All Hands please")).toEqual([["@All Hands", true]]);
+    expect(tags("@all please")).toEqual([["@all", false]]);
+  });
   it("does not let a teammate's name take the viewer's own tag away", () => {
     expect(mentionRanges("@Sam", [{ name: "Sam", person: true }], false, { profileName: "Sam" })).toEqual([{ start: 0, end: 4, you: true }]);
   });
