@@ -1,6 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { createLocalVmAvailability } from "./local-vm-availability.ts";
+import type { ContainerComputerStatus } from "./container-computer.ts";
+import { createLocalVmAvailability, waitForLocalVmDesktop } from "./local-vm-availability.ts";
+
+it("bounds the Local VM readiness wait and preserves the probe's failure reason", async () => {
+  const status = {
+    image: true, imageMatches: true, managed: true, container: "running",
+    network: "loopback", security: "hardened", persistence: "durable",
+    ready: false, problem: "Cua Driver is starting",
+  } as ContainerComputerStatus;
+  vi.useFakeTimers();
+  try {
+    const probe = vi.fn(async () => status);
+    const result = waitForLocalVmDesktop(status, probe, () => true);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(await result).toMatchObject({ ready: false, problem: "Timed out waiting for the Local VM desktop. Cua Driver is starting" });
+    expect(probe).toHaveBeenCalledTimes(44);
+
+    let current = true;
+    probe.mockClear();
+    const cancelled = waitForLocalVmDesktop(status, probe, () => current);
+    current = false;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await cancelled).toBe(status);
+    expect(probe).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 

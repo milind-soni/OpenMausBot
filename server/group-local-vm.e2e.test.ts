@@ -232,6 +232,73 @@ describe("Local VM stop and resume", () => {
   });
 });
 
+describe("scheduled Local VM readiness", () => {
+  afterAll(async () => {
+    // The scheduled pool run leaves thread affinity in memory, which changes the next cold pool's seat order.
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer();
+  });
+
+  it.each([
+    { initial: "ready", mode: "pool" },
+    { initial: "booting", mode: "shared" },
+    { initial: "stopped", mode: "per-bot" },
+    { initial: "missing mount", mode: "shared", failure: "missing its durable folder" },
+    { initial: "start failed", mode: "shared", failure: "could not start the Local VM" },
+  ])("uses the configured $mode target when $initial", async ({ initial, mode, failure }) => {
+    const { bot } = await api("POST", "/api/bots", { name: `Scheduled VM ${initial}`, useDefaults: false,
+      settings: { computer: "vm", browser: false } });
+    expect(bot.computer).toBe("vm");
+    for (const path of [dumpFile, finishFile, stateFile + ".booting"]) rmSync(path, { force: true });
+    const target = mode === "per-bot" ? `bot:${createHash("sha256").update(bot.id).digest("hex")}` : mode === "pool" ? "pool:0" : "shared";
+    const stopped = initial === "stopped" || initial === "start failed";
+    const booting = initial === "booting" || initial === "stopped";
+    let routineId: string | undefined;
+    try {
+      vmState({ containers: [] });
+      await api("PATCH", "/api/config", { localVm: { mode, maxInstances: 2 } });
+      vmState({ containers: [target], stopped: stopped ? [target] : [], booting, missingMount: initial === "missing mount", failStart: initial === "start failed" });
+      const { routine } = await api("POST", "/api/routines", { name: "Check the VM workspace", prompt: "Check the fixture workspace.",
+        botId: bot.id, runOn: "maus", schedule: { type: "once", at: Date.now() + 1_000 } });
+      routineId = routine.id;
+      const run = async () => (await api("GET", "/api/routines")).runs.find((row: any) => row.routineId === routineId);
+      const started = await until(run, row => Boolean(row?.threadId));
+      expect(started).toMatchObject({ triggerSource: "schedule", manual: false });
+      if (failure) {
+        const failed = await until(run, row => row?.status === "failed");
+        expect(failed).toMatchObject({ id: started.id, error: expect.stringContaining(failure) });
+        expect(existsSync(dumpFile)).toBe(false);
+        return;
+      }
+      if (booting) {
+        await until(() => existsSync(stateFile + ".booting"), Boolean);
+        // Give an early dispatch or an early terminal failure time to reach the routine ledger.
+        await new Promise(resolve => setTimeout(resolve, 350));
+        expect(await run()).toMatchObject({ id: started.id, status: "running" });
+        expect(existsSync(dumpFile)).toBe(false);
+        vmState({ ...JSON.parse(readFileSync(stateFile, "utf8")), booting: false });
+      }
+      const mounted: any = await dump();
+      expect(computer(mounted)).toBeTruthy();
+      const token = mounted.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const execution = await fetch(base + "/api/internal/vm-exec", { method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ command: "pwd" }) });
+      expect(execution.status, await execution.text()).toBe(200);
+      expect(JSON.parse(readFileSync(stateFile + ".exec", "utf8"))).toMatchObject({ target: { key: target }, command: "pwd" });
+      expect(JSON.parse(readFileSync(stateFile, "utf8")).actions ?? []).toEqual(stopped ? [{ action: "start", target }] : []);
+      writeFileSync(finishFile, "finish");
+      expect(await until(run, row => row?.status === "completed")).toMatchObject({ id: started.id, threadId: started.threadId });
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+      if (routineId) await api("DELETE", `/api/routines/${routineId}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      vmState({ containers: [] });
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+    }
+  }, 30_000);
+});
+
 describe("Group Local VM ownership on the real isolated server", () => {
   it("cleans the remaining rooms after one cleanup operation fails", async () => {
     rooms.set("missing-fixture-room", []);

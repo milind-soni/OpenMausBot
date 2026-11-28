@@ -34,6 +34,7 @@ import {
 } from "./container-isolation.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { runtimeHealthy } from "./container-runtime-probe.ts";
+import { canProbeLocalVmDesktop } from "./local-vm-availability.ts";
 
 // Its own group: a timeout also ends the docker CLI plugins and credential helpers it started.
 const run = execFileInGroupAsync;
@@ -585,14 +586,7 @@ export async function containerComputerStatus(
   } catch {
   }
 
-  const canProbe = options.probeDesktop !== false &&
-    status.container === "running" &&
-    status.imageMatches &&
-    status.managed &&
-    status.network === "loopback" &&
-    status.security === "hardened" &&
-    status.persistence === "durable";
-  if (canProbe) {
+  if (options.probeDesktop !== false && canProbeLocalVmDesktop(status)) {
     try {
       const expected = `cua-driver ${CUA_DRIVER_VERSION}`;
       const version = await runner(status.runtime, cuaExecArgs(["--version"], { container: target.containerName }), 8000);
