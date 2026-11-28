@@ -92,8 +92,7 @@ import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
 import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
-
-
+import { SidebarRecentConversations } from "./SidebarRecentConversations";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
@@ -1026,7 +1025,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     return () => window.clearTimeout(timer);
   }, [teamFeedback]);
 
-
   const requestArchive = (bot: Bot) => {
     const current = currentArchivableBot(state.bots, bot.id);
     if (current) setConfirm({ kind: "archive", bot: current });
@@ -1088,7 +1086,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
   const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), oneList = useOneList(matchingBots, placed, state.sections ?? NO_SECTIONS, dispatch, state.hydrated === true);
-  const parts = partitionSidebarBots(botDrag.preview(oneList?.bots ?? matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
+  const welcoming = useWelcomingBot();
+  const parts = partitionSidebarBots(botDrag.preview(oneList?.bots ?? matchingBots), { universalPins, viewerEmail, welcoming, searching: Boolean(q) });
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
   // as a move to the top or into an Unread list. Only a pin, a drag, Alt+Up/Down or a move to a department moves a row.
@@ -1353,6 +1352,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
+          {!q && density !== "icons" && <SidebarRecentConversations bots={sideLists.bots} groups={sideLists.groups} routineRuns={state.routineRuns} viewerEmail={viewerEmail} welcoming={welcoming} selectedId={state.activeView === "chat" && state.newChat?.botId !== state.selectedId ? state.selectedId : null} onOpen={(target) => { if (openThread(dispatch, target, state, showThreads) && phone) onClose(); }} />}
           {sectionIds.map((id, index) => {
             const sectionName = userSectionName(id), editable = oneList?.mirror ? null : sectionName;
             const sectionChiefItems = sectionName
