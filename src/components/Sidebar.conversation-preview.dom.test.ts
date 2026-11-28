@@ -169,3 +169,25 @@ it("does not retry a failed sidebar request on an unrelated rerender", async () 
   await visible("first");
   expect(network).toHaveBeenCalledTimes(2);
 });
+
+it("waits until the document is visible before starting a sidebar read", async () => {
+  const state = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  try {
+    await render();
+    await visible("first");
+    expect(network).not.toHaveBeenCalled();
+    state.mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(row("first").textContent).toContain("First answer");
+  } finally {
+    state.mockRestore();
+  }
+});
+
+it("keeps every expanded panel preview when the list exceeds the shared cache", async () => {
+  const tasks = Array.from({ length: 205 }, (_, i) => ({ threadId: `many-${i}`, title: `Thread ${i}`, createdAt: i + 1 }));
+  showAllConversations(bot.id);
+  await act(async () => root.render(createElement(StoreProvider, null, createElement(BotConversations, { bot: { ...bot, tasks } }))));
+  expect(network).toHaveBeenCalledTimes(205);
+  expect(host.querySelectorAll("[data-conversation]")).toHaveLength(205);
+});
