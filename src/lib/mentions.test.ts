@@ -49,6 +49,10 @@ describe("mention display ranges", () => {
     expect(matches("@everyone @Everyone! @everyone_else @everyone2", true)).toEqual(["@everyone", "@Everyone"]);
     expect(matches("@everyone")).toEqual([]);
   });
+  it("decorates @all in channels like @everyone", () => {
+    expect(matches("@all @All! @allow @all_else", true)).toEqual(["@all", "@All"]);
+    expect(matches("@all")).toEqual([]);
+  });
   it("rejects Unicode letters, numbers, combining marks and underscores after names", () => {
     expect(matches("@調査担当者 @everyone調査 @Atlasé @Atlas２ @Atlas𐐀 @Atlas𝟙 @Atlas\u0301 @Atlas_else", true)).toEqual([]);
     expect(matches("@everyoneé @everyone２ @everyone𐐀 @everyone𝟙 @everyone\u0301", true)).toEqual([]);

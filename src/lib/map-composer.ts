@@ -1,3 +1,4 @@
+import { EVERYONE_TAGS } from "../../shared/everyone-mention";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 
 export interface MapComposerBot {
@@ -34,7 +35,7 @@ export function mapMessageTargets(text: string, bots: readonly MapComposerBot[],
       kind: "team" as const, name: team.name,
       botIds: visible.filter((bot) => (bot.section?.trim() ?? "") === team.key).map((bot) => bot.id),
     } })),
-    { name: "everyone", tag: { kind: "everyone" as const, name: "everyone", botIds: visible.map((bot) => bot.id) } },
+    ...EVERYONE_TAGS.map((name) => ({ name, tag: { kind: "everyone" as const, name: "everyone", botIds: visible.map((bot) => bot.id) } })),
   ].sort((a, b) => b.name.length - a.name.length);
   const tags: MapTag[] = [];
   const unknown: string[] = [];

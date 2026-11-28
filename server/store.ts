@@ -26,7 +26,7 @@ import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
-import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts"; import { resolveMentions } from "../shared/room-mentions.ts";
+import { tagsEveryone } from "../shared/everyone-mention.ts"; import { resolveMentions } from "../shared/room-mentions.ts";
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
@@ -221,17 +221,7 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   picked: readonly string[] = [],
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  const everyone = "everyone";
-  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
-    const candidate = text.slice(at + 1, at + 1 + everyone.length);
-    if (
-      isMentionBoundary(text, at) &&
-      candidate.toLocaleLowerCase() === everyone &&
-      !isMentionNameContinuation(text.slice(at + 1 + everyone.length))
-    ) {
-      return available;
-    }
-  }
+  if (tagsEveryone(text, available.map((member) => member.name))) return available;
   const { bots, ambiguous } = resolveMentions(text, available, picked);
   const mentioned = bots.filter((bot) => !ambiguous.some((sharing) => sharing.includes(bot)));
   if (mentioned.length) return mentioned;
