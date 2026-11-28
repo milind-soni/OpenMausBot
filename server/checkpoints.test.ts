@@ -524,6 +524,29 @@ describe("prime", () => {
     expect(userGit(shadow, "show", `${second}:file0.txt`)).toBe("edited");
     expect(Number(/^packs: (\d+)$/m.exec(userGit(shadow, "count-objects", "-v"))?.[1])).toBe(1);
   });
+
+  it("drops pack files an interrupted repack left behind, and keeps one a git is still writing", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "kept");
+    await snapshot(bot, cwd, "before the leftover");
+    const pack = join(shadow, ".git", "objects", "pack");
+    mkdirSync(pack, { recursive: true });
+    const stale = join(pack, "tmp_pack_dead");
+    const fresh = join(pack, "tmp_pack_live");
+    const real = join(pack, "pack-kept.pack");
+    writeFileSync(stale, "leftover");
+    writeFileSync(fresh, "in progress");
+    writeFileSync(real, "kept pack");
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    utimesSync(stale, old, old);
+    writeFileSync(join(cwd, "a.txt"), "next");
+    const turn = await snapshot(bot, cwd, "after the leftover");
+    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(fresh, "utf8")).toBe("in progress");
+    expect(readFileSync(real, "utf8")).toBe("kept pack");
+    expect(userGit(shadow, "show", `${turn}:a.txt`)).toBe("next");
+  });
 });
 
 describe("a restart in the middle of a snapshot", () => {
