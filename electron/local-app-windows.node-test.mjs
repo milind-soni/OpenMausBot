@@ -120,6 +120,18 @@ test("opens one window per app, with the main window's preload, and focuses it a
   assert.equal(result.windows().length, 2);
 });
 
+test("a saved app's window takes the app icon current when it opens", async () => {
+  let icon = "first.png";
+  const { call } = install({ icon: () => icon });
+  await call("local-apps:open-window", fromMain, ID);
+  assert.equal(FakeWindow.made[0].options.icon, "first.png");
+  icon = "second.png";
+  await call("local-apps:open-window", fromMain, OTHER);
+  assert.equal(FakeWindow.made[1].options.icon, "second.png");
+  await call("local-apps:open-window", fromMain, ID);
+  assert.equal(FakeWindow.made.length, 2, "an open app window is focused again, not remade");
+});
+
 test("refuses a bad id, an unknown origin and a page the guard turns away", async () => {
   const { call, refused } = install();
   assert.equal(await call("local-apps:open-window", fromMain, "la_x"), false);

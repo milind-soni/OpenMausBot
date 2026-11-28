@@ -104,7 +104,7 @@ export function installLocalAppWindows({
       minWidth: APP_WINDOW_MIN.width,
       minHeight: APP_WINDOW_MIN.height,
       show: false,
-      ...(icon ? { icon } : {}),
+      ...(icon ? { icon: typeof icon === "function" ? icon() : icon } : {}),
       backgroundColor: background(),
       autoHideMenuBar: true,
       webPreferences: webPreferences(),
