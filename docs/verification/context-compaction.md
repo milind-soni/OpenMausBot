@@ -46,7 +46,10 @@ pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-
 
 Long direct conversations can summarize older exchanges before the next turn.
 The full transcript, its branches and attachments are retained. The new session
-gets a bounded summary plus recent exchanges; later turns resume that session.
+gets a bounded summary plus recent exchanges. If a check-back or another
+continuation opens the new session without a new user message, its prompt tells
+the engine to resume the pending work in the user's language. Later turns resume
+that session.
 A visible, expandable note explains what was summarized, even with tool chips off;
 when no model wrote the summary, it says the agent continues from recent excerpts only.
 
