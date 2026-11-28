@@ -14,9 +14,11 @@ import { useRoomFeedHere } from "./room-feed/use-room-feed";
 import { useThreadTurnStart } from "./room-feed/thread-turn-start";
 import { useRoomWorkStatuses } from "./room-feed/use-room-work";
 import { FEED_MIN_WIDTH } from "./room-feed/feed-fit";
-import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
+import { PANEL_MIN_WIDTH, readPanelWidth, useComputerPanelResize } from "./computer-panel-resize";
 
-const BESIDE_INBOX_MAX = 400;
+const PANEL_WIDTH_KEY = "omb-thread-panel-width";
+const PANEL_DEFAULT_WIDTH = 440;
+const BESIDE_INBOX_DEFAULT_MAX = 400;
 
 /** Any thread beside the chat: a fork, and where the server has the room feed, the room thread a feed row or the Inbox
  * opened. `full`: that room thread takes the feed's place, because the two don't fit side by side; its back button
@@ -27,9 +29,15 @@ export function ForkPanel({ full = false }: { full?: boolean }) {
   const asideRef = useRef<HTMLElement>(null);
   const focusedLoad = useRef<string | undefined>(undefined);
   const beside = useRoomFeedHere();
-  const resize = useComputerPanelResize({ key: "omb-thread-panel-width", defaultWidth: 440, chatMin: panel?.kind === "group" ? FEED_MIN_WIDTH : undefined });
-  // Beside the Inbox the chat keeps the 440 it has beside any other side panel.
-  const width = useInboxPanel().open ? Math.min(resize.panelWidth, BESIDE_INBOX_MAX) : resize.panelWidth;
+  const inboxOpen = useInboxPanel().open;
+  // Beside the Inbox the thread starts narrower, so the chat keeps the 440 it has beside any other side panel, and a
+  // width dragged there is kept apart from the one without the Inbox.
+  const resize = useComputerPanelResize({
+    key: inboxOpen ? `${PANEL_WIDTH_KEY}-beside-inbox` : PANEL_WIDTH_KEY,
+    defaultWidth: inboxOpen ? Math.min(readPanelWidth(PANEL_WIDTH_KEY, PANEL_DEFAULT_WIDTH), BESIDE_INBOX_DEFAULT_MAX) : PANEL_DEFAULT_WIDTH,
+    chatMin: panel?.kind === "group" ? FEED_MIN_WIDTH : undefined,
+  });
+  const width = resize.panelWidth;
   useLayoutEffect(() => {
     const aside = asideRef.current;
     if (!panel?.focusComposer || !aside) return;
