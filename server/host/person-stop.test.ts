@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../store.ts";
 import { createPersonStop, type PersonStopDeps, type TypedStop } from "./person-stop.ts";
 
-function world(over: { working?: string[]; asking?: boolean; threads?: string[] } = {}) {
+function world(over: { working?: string[]; asking?: boolean; threads?: string[]; name?: string } = {}) {
   const rows: Partial<Message>[] = [], stopped: string[] = [];
   const stop = createPersonStop({
     store: {
       appendMessage: (_threadId: string, row: Partial<Message>) => { rows.push(row); return row as Message; },
-      bot: () => ({ name: "Ada" }), botByThread: () => undefined, groupByThread: () => undefined, taskByThread: () => undefined,
+      bot: () => ({ name: over.name ?? "Ada" }), botByThread: () => undefined, groupByThread: () => undefined, taskByThread: () => undefined,
       tasks: () => (over.threads ?? ["t", "other"]).map((threadId) => ({ threadId })),
     } as unknown as PersonStopDeps["store"],
     routines: () => null, handoffs: () => ({ stoppedByPerson: () => {} }) as never, interruptDirectThread: async (_botId, threadId) => { stopped.push(threadId); }, stopping: () => () => {},
@@ -58,7 +58,7 @@ describe("a typed stop", () => {
     expect(w.rows).toHaveLength(1);
   });
 
-  it.each(["stop @Todo", "stop @Now", "@Adaplease stop", "@Ada.stop stop", "@Ada+Todo stop", "@all+Please stop", "@everyone stop @Todo"])(
+  it.each(["stop @Todo", "stop @Now", "@Adaplease stop", "@Ada.stop stop", "@Ada+Todo stop", "@all+Please stop", "@Ada++Todo stop", '"@Ada+Todo" stop', '"/@Ada" stop', '"@Ada\u0301" stop', "@everyone stop @Todo"])(
     "leaves the current turn running when the stop names someone else: %s", async (text) => {
       const w = world({ working: ["t", "other"] });
       expect(await w.send(text, { busy: true })).toBeNull();
@@ -67,12 +67,28 @@ describe("a typed stop", () => {
     },
   );
 
-  it.each(["@aDa stop", "(**@Ada**) STOP!", "@all stop"])(
+  it.each(["@aDa stop", "(**@Ada**) STOP!", "@all stop", "`@Ada` stop", "`@all` stop"])(
     "still stops work addressed to the bot or everyone: %s", async (text) => {
       const w = world({ working: ["t"] });
       expect(await w.send(text, { busy: true })).toMatchObject({ ok: true });
       expect(w.stopped).toEqual(["t"]);
       expect(w.rows).toHaveLength(1);
+    },
+  );
+
+  it.each(["all+Ada", "all++Ada", "everyone.Bot", "everyone--Ada"])(
+    "keeps a stop for %s scoped to the current thread", async (name) => {
+      const text = `@${name} stop`;
+      const active = world({ name, working: ["t", "other"] });
+      expect(await active.send(text, { busy: true })).toMatchObject({ ok: true });
+      expect(active.stopped).toEqual(["t"]);
+      expect(active.rows).toHaveLength(1);
+      for (const asking of [false, true]) {
+        const quiet = world({ name, working: ["other"], asking });
+        expect(await quiet.send(text)).toBeNull();
+        expect(quiet.stopped).toEqual([]);
+        expect(quiet.rows).toEqual([]);
+      }
     },
   );
 

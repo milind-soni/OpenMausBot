@@ -69,6 +69,17 @@ describe("room member holds", () => {
     expect(classifyHoldDirective("para @Scout", ["scout"]).hold).toEqual([]);
   });
 
+  it("does not widen a punctuated bot name into a hold for everyone", () => {
+    for (const name of ["all+Ada", "all++Ada", "everyone.Bot", "everyone--Ada"]) {
+      const text = `@${name} stop`;
+      expect(isStopCommand(text, name), text).toBe(true);
+      expect(addressesEveryone(text), text).toBe(false);
+      const directive = classifyHoldDirective(text, ["scout"]);
+      expect(directive.holdAll, text).toBe(false);
+      expect(applyHoldDirective({}, directive, members, 1).held, text).toEqual(["scout"]);
+    }
+  });
+
   it("applies directives to the room's holds and reports what changed", () => {
     const first = applyHoldDirective(undefined, classifyHoldDirective("stop @Scout", ["scout"]), members, 10);
     expect(first).toEqual({ holds: { scout: { at: 10 } }, held: ["scout"], released: [] });
@@ -140,8 +151,24 @@ describe("isStopCommand", () => {
     "@Ada.stop stop",
     "@Ada+Todo stop",
     "@all+Please stop",
+    "@Ada++Todo stop",
+    "@Ada..Todo stop",
+    "@Ada.-+Todo stop",
+    "@Ada...stop",
+    '"@Ada+Todo" stop',
+    "`@Ada+Todo` stop",
+    "```\n@Ada+Todo\n```\nstop",
     "@everyoneplease stop",
     "/@Ada stop",
+    '"/@Ada" stop',
+    "`/@Ada` stop",
+    "```\n/@Ada\n```\nstop",
+    "> /@Ada\nstop",
+    '"mail@Ada" stop',
+    '"@Ada@Ada" stop',
+    '"@Ada\u0301" stop',
+    "`@Ada\u0301` stop",
+    "```\n@Ada\u0301\n```\nstop",
     "@everyone stop @Todo",
   ])("keeps another name or a non-mention out of a typed stop: %s", (text) => {
     expect(isStopCommand(text, "Ada")).toBe(false);
@@ -156,6 +183,15 @@ describe("isStopCommand", () => {
     ["@Ada.Bot stop", "Ada.Bot"],
     ["@A+Bot stop", "A+Bot"],
     ["@Ada+Todo stop", "Ada+Todo"],
+    ["@Ada++Todo stop", "Ada++Todo"],
+    ["@Ada... stop", "Ada"],
+    ['"@Ada+Todo" stop', "Ada+Todo"],
+    ['"@Ada\u0301" stop', "Adá"],
+    ['"@Rene\u0301" stop', "René"],
+    ["`@Ada` stop", "Ada"],
+    ["`@Ada+Todo` stop", "Ada+Todo"],
+    ["`@Rene\u0301` stop", "René"],
+    ["`@all` stop", "Ada"],
     ["@Chris Assistent stop", "Chris Assistent"],
     ["@Rene\u0301 stop", "René"],
     ["【@小助手】停止", "小助手"],
@@ -166,6 +202,11 @@ describe("isStopCommand", () => {
     ["@all stop", "Ada"],
   ])("keeps a complete allowed name usable: %s", (text, name) => {
     expect(isStopCommand(text, name)).toBe(true);
+  });
+
+  it("retains a path boundary on a quoted punctuated name", () => {
+    expect(isStopCommand('"/@Ada+Todo" stop', "Ada+Todo")).toBe(false);
+    expect(isStopCommand('"@Ada+Todo" stop', "Ada+Todo")).toBe(true);
   });
 
   it("reads any other message as a message, including a quoted or coded stop", () => {
