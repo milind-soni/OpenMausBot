@@ -30,7 +30,7 @@ interface Child {
   /** The child's MCP initialize handshake; answered before the first call is sent. */
   ready: Promise<void>;
   /** One MCP request, serialized after the child's earlier ones (one desktop: calls act in order). */
-  rpc(method: string, params: unknown, signal?: AbortSignal): Promise<Record<string, unknown>>;
+  rpc(method: string, params: unknown): Promise<Record<string, unknown>>;
   sshAlias?: string;
   container: string;
 }
@@ -94,8 +94,15 @@ export async function vpsComputerTurn(turn: {
   const arrivedAt = turn.takeSequence();
   // One desktop: a call waits for the bot's earlier ones, in arrival order, and passes the gate when its turn comes, so
   // a desktop a person took while it waited is never acted on.
+  const timeout = AbortSignal.timeout(COMPUTER_PROXY_TIMEOUT_MS - 5_000);
+  const signal = turn.signal ? AbortSignal.any([timeout, turn.signal]) : timeout;
+  let sent = false;
+  const interrupted = () => new Error(timeout.aborted
+    ? (sent ? "The VPS computer did not answer in time. Its result was not confirmed." : "The VPS request timed out before it reached the desktop.")
+    : (sent ? "The turn ended while the VPS computer was working, so the result was not confirmed." : "The turn ended before this call reached the VPS computer, so nothing was run."));
   const previous = queues.get(turn.botId) ?? Promise.resolve();
   const queued = previous.then(async (): Promise<Record<string, unknown>> => {
+    if (signal.aborted) throw interrupted();
     const child = await childFor(turn.botId, targets.get(turn.botId)!);
     if (method === "tools/call") {
       const state = await turn.gate(arrivedAt);
@@ -103,7 +110,9 @@ export async function vpsComputerTurn(turn: {
       turn.assertActive();
     }
     try {
-      return await child.rpc(method, turn.body.params ?? {}, turn.signal);
+      if (signal.aborted) throw interrupted();
+      sent = true;
+      return await child.rpc(method, turn.body.params ?? {});
     } catch (error) {
       if (method === "tools/list") throw error;
       // A call the desktop never answered may still be running there: the next one starts a new child, never this one.
@@ -112,11 +121,19 @@ export async function vpsComputerTurn(turn: {
     }
   });
   queues.set(turn.botId, queued.then(() => undefined, () => undefined));
+  let onAbort: () => void = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(interrupted());
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    turn.json(turn.res, 200, { result: await queued });
+    turn.json(turn.res, 200, { result: await Promise.race([queued, aborted]) });
   } catch (error) {
     if (method === "tools/list") throw error;
     turn.json(turn.res, 200, { result: failure(error) });
+  } finally {
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -184,32 +201,13 @@ function openChild(botId: string, target: VpsTarget): Child {
   const outbound = createLineSplitter(takeLine);
   proc.stdout?.on("data", (chunk: Buffer) => outbound.push(chunk));
   proc.stdout?.on("end", () => outbound.flush());
-  const send = (method: string, params: unknown, signal: AbortSignal | undefined) => new Promise<Record<string, unknown>>((resolve, reject) => {
+  const rpc = (method: string, params: unknown) => new Promise<Record<string, unknown>>((resolve, reject) => {
     if (proc.exitCode !== null || proc.signalCode !== null) return reject(new Error(CONNECTION_LOST));
-    // The abort event is not repeated for a listener added after it, so a turn that ended while this call waited is seen here.
-    if (signal?.aborted) return reject(new Error("The turn ended before this call reached the VPS computer, so nothing was run."));
+    if (idle) clearTimeout(idle);
     const id = `omb-vps-${++sequence}`;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(unanswered("The VPS computer did not answer in time. It may still have run; check its state before repeating anything."));
-    }, COMPUTER_PROXY_TIMEOUT_MS - 5_000);
-    timer.unref?.();
-    const onAbort = () => {
-      pending.delete(id);
-      clearTimeout(timer);
-      reject(unanswered("The turn ended while the VPS computer was working, so the result was not confirmed."));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    pending.set(id, {
-      resolve: (value) => { pending.delete(id); clearTimeout(timer); signal?.removeEventListener("abort", onAbort); touch(); resolve(value); },
-      reject: (error) => { pending.delete(id); clearTimeout(timer); signal?.removeEventListener("abort", onAbort); reject(error); },
-    });
+    pending.set(id, { resolve, reject });
     proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
   });
-  const rpc = (method: string, params: unknown, signal?: AbortSignal) => {
-    touch();
-    return send(method, params, signal);
-  };
   const ready = rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "openmausbot-vps-computer", version: "1" } })
     .then(() => {
       handshakeDone = true;

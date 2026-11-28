@@ -221,15 +221,14 @@ describe("the boxed VPS computer's host-side proxy", () => {
     await expect(call("tools/call", { name: "get_screen_size" }, 32)).resolves.toMatchObject({ result: { content: [{ text: "did get_screen_size #2 on slow" }] } });
   });
 
-  it("a call the desktop never answered ends unconfirmed, and the next one starts a new child", async () => {
+  it("an aborted call reports uncertainty and keeps its queue slot until the desktop answers", async () => {
     const marker = join(home, "unconfirmed.txt");
     serve("slow", ["slow", marker]);
     const first = call("tools/call", { name: "type_text" }, 40);
     await until(() => callsReceived(marker), (count: number) => count >= 1);
     turns.at(-1)!.abort();
     expect((await first).result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("the result was not confirmed") }] });
-    // The first call may still be typing on the desktop: a new child, whose count starts again, takes the next one.
-    await expect(call("tools/call", { name: "screenshot" }, 41)).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #1 on slow" }] } });
+    await expect(call("tools/call", { name: "screenshot" }, 41)).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #2 on slow" }] } });
   });
 
   it("a proxy that cannot start answers the failure instead of letting its start error escape", async () => {
