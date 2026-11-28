@@ -130,6 +130,8 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide(host, "example.com:443", ["198.18.0.7"], open)).toBe("fakeIp");
     expect(await decide(host, "mixed.example:443", ["203.0.113.7", "::ffff:198.19.255.254"], open)).toBe("fakeIp");
     expect(await decide(host, "198.18.0.7:443", ["198.18.0.7"], open)).toBe("fakeIp");
+    expect(await decide(host, "example.com:443", ["64:ff9b::c612:7"], open)).toBe("fakeIp");
+    expect(await decide(host, "example.com:443", ["2002:c612:7::1"], open)).toBe("fakeIp");
   });
 
   it("lets a server reach only the loopback ports a bot's own processes opened, or that an admin allowed", async () => {

@@ -47,7 +47,7 @@ function ipv6Groups(address) {
 }
 
 /** The IPv4 address a NAT64 or 6to4 address stands for, which a translator will route to. */
-function embeddedIPv4(address) {
+export function embeddedIPv4(address) {
   const at = NAT64.check(address, "ipv6") ? 6 : SIX_TO_FOUR.check(address, "ipv6") ? 1 : -1;
   if (at === -1) return undefined;
   const groups = ipv6Groups(address);

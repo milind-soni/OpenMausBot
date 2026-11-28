@@ -3,7 +3,7 @@
 import { BlockList, isIP } from "node:net";
 import { z } from "zod";
 
-import { addressClass, listed, ownAddresses, type AddressClass } from "../../../electron/egress-addresses.mjs";
+import { addressClass, embeddedIPv4, listed, ownAddresses, type AddressClass } from "../../../electron/egress-addresses.mjs";
 
 export { addressClass, ownAddresses, type AddressClass };
 
@@ -130,6 +130,7 @@ export async function refusalFor(
   const { host, port } = target;
   for (const { address } of addresses) {
     let kind = addressClass(address, own);
+    if (kind === "reserved" && rules.host !== "desktop" && isIP(address) === 6 && listed(FAKE_IP, embeddedIPv4(address) ?? address)) return "fakeIp";
     if (kind === "reserved" && listed(FAKE_IP, address)) {
       if (rules.host !== "desktop") return "fakeIp";
       // A desktop proxy can route the address back to this computer, so keep OpenMausBot's own ports closed.
