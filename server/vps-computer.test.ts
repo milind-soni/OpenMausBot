@@ -1108,6 +1108,26 @@ describe("VPS computer", () => {
     expect(absent.calls.some(({ args }) => args[2] === "rm")).toBe(false);
   });
 
+  it("stops a managed container even when its image is outdated or missing, while refusing unowned containers", async () => {
+    const missingNewImage = fixture({ image: false, environmentId: vpsEnvironmentId() });
+    const idleStopped = await vpsComputerAction("stop", CONFIG, BOT_ID, missingNewImage.runner, () => true);
+    expect(idleStopped.container).toBe("stopped");
+    expect(missingNewImage.calls.some(({ args }) => args[2] === "stop" && args[3] === CONTAINER_ID)).toBe(true);
+
+    const stale = fixture({ containerImageId: `sha256:${"c".repeat(64)}` });
+    const manualStopped = await vpsComputerAction("stop", CONFIG, BOT_ID, stale.runner);
+    expect(manualStopped.container).toBe("stopped");
+    expect(stale.calls.some(({ args }) => args[2] === "stop" && args[3] === CONTAINER_ID)).toBe(true);
+
+    const unowned = fixture({ managed: false });
+    await expect(vpsComputerAction("stop", CONFIG, BOT_ID, unowned.runner)).rejects.toThrow(/did not create/);
+    expect(unowned.calls.some(({ args }) => args[2] === "stop")).toBe(false);
+
+    const foreign = fixture({ environmentId: "11111111-2222-4333-8444-555555555555" });
+    await expect(vpsComputerAction("stop", CONFIG, BOT_ID, foreign.runner)).rejects.toThrow(/did not create/);
+    expect(foreign.calls.some(({ args }) => args[2] === "stop")).toBe(false);
+  });
+
   it("surfaces the supervisor error log when the desktop probe fails", async () => {
     const fake = fixture({ desktopProbeFails: true });
     const status = await vpsComputerStatus(CONFIG, BOT_ID, fake.runner);
