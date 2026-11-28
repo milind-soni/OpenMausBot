@@ -10,7 +10,9 @@ describe("the Local VM at server start", () => {
   it("recovers running VMs before the server listens, never behind the window", () => {
     const recover = source.indexOf("void recoverLocalVms({");
     expect(recover).toBeGreaterThan(0);
-    expect(recover).toBeLessThan(source.indexOf("server.listen(PORT"));
+    // The listener is bound through bootServer (host/boot.ts) since the port-fallback rework; recovery must
+    // still be positioned ahead of that call in the module's load order.
+    expect(recover).toBeLessThan(source.indexOf("await bootServer({"));
     expect(source).not.toMatch(/afterLaunchSettles\(\(\) => void recoverLocalVms/);
   });
 
