@@ -195,6 +195,65 @@ posixOnly("Live call e2e", () => {
     }
   }, 40_000);
 
+  it("keeps the opted-in OpenAI session through standby while the bot replies", async () => {
+    rmSync(steerGate, { force: true });
+    const bot = await createBot("steer", "claude-fake");
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    try {
+      const saved = await fetch(`${base}/api/live/settings`, {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ standby: true, standbyIdleSeconds: 10 }),
+      });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ live: { standby: true, standbyIdleSeconds: 10 } });
+      expect(await (await fetch(`${base}/api/config`)).json()).toMatchObject({ live: { standby: true, standbyIdleSeconds: 10 } });
+
+      const before = live.sessions.length;
+      const { call, session } = await startCall(bot.id);
+      callId = call.callId;
+      expect(session.body.session).toMatchObject({ wake_policy: { type: "speech" }, idle_timeout_s: 10 });
+      expect(live.sessions).toHaveLength(before + 1);
+      await live.waitForAttach(session.id);
+      live.emit(session.id, { type: "session.input_transcript.delta", delta: "check the standby report", start_ms: 100, end_ms: 900 });
+      live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_standby", target: "client", type: "delegation" } });
+      const asked = await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.role === "user" && frame.message?.via === "call");
+      expect(asked.message.text).toBe("check the standby report");
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(true);
+
+      live.emit(session.id, { type: "session.paused" });
+      expect(session.paused).toBe(true);
+      expect(session.closed).toBe(false);
+      expect(await (await fetch(`${base}/api/live/call`)).json()).toMatchObject({ call: { callId, status: "live" } });
+      expect(live.sessions).toHaveLength(before + 1);
+
+      writeFileSync(steerGate, "finish");
+      const spoken = await live.waitForCommand(session.id, (command) => command.type === "session.commentary.append" && command.delegation_id === "del_standby", 20_000);
+      expect(spoken.content).toContain("check the standby report");
+      expect(await (await fetch(`${base}/api/live/call`)).json()).toMatchObject({ call: { callId, status: "live" } });
+      expect(session.closed).toBe(false);
+      expect(live.sessions).toHaveLength(before + 1);
+
+      live.emit(session.id, { type: "session.resumed" });
+      expect(session.paused).toBe(false);
+      live.emit(session.id, { type: "session.input_transcript.delta", delta: "continue after standby", start_ms: 2_000, end_ms: 2_800 });
+      live.emit(session.id, { type: "session.delegation.created", offset_ms: 2_850, delegation: { id: "del_resumed", target: "client", type: "delegation" } });
+      await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.role === "user" && frame.message?.text === "continue after standby");
+      await live.waitForCommand(session.id, (command) => command.type === "session.commentary.append" && command.delegation_id === "del_resumed", 20_000);
+      expect(await (await fetch(`${base}/api/live/call`)).json()).toMatchObject({ call: { callId, status: "live" } });
+      expect(live.sessions).toHaveLength(before + 1);
+    } finally {
+      writeFileSync(steerGate, "finish");
+      if (callId) await post("/api/live/call/end", { callId });
+      await post(`/api/bots/${bot.id}/interrupt`, {});
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+      await fetch(`${base}/api/live/settings`, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ standby: false }),
+      });
+      sse.close();
+    }
+  }, 60_000);
+
   it("answers 409 with the running call to a second client", async () => {
     const bot = await createBot();
     const { call, session } = await startCall(bot.id, "web");

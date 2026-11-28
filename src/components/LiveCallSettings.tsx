@@ -1,6 +1,6 @@
 import { useCallback, useId, useState } from "react";
 
-import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_STANDBY_IDLE_SECONDS_DEFAULT, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy, liveKeyFormKey } from "@/lib/call-mode";
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
@@ -12,6 +12,7 @@ import { KeysLink } from "./keys/KeysLink";
 import { Select } from "./Select";
 
 const IDLE_CHOICES = [1, 2, 3, 5, 10, 15, 30, 60];
+const STANDBY_CHOICES = Array.from({ length: 56 }, (_, index) => index + 5);
 
 /** With `bot`, the bot on the call: it can have a voice of its own, and the other voice is the default for every other bot. */
 export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "name" | "liveVoice">; onClose: () => void }) {
@@ -23,6 +24,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const [providerSaving, setProviderSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typedHintId = useId();
+  const standbyHintId = useId();
   // Stable, so this callback ref runs once when the popover mounts, not on every save.
   const focusOnOpen = useCallback((dialog: HTMLDivElement | null) => {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
@@ -32,6 +34,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const fish = live.provider === "fish";
   const gemini = live.provider === "gemini";
   const elevenlabs = live.provider === "elevenlabs";
+  const openai = (live.provider ?? "openai") === "openai";
   const copy = liveKeyCopy(live.provider);
   const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : elevenlabs ? "elevenlabs" : "live");
   // Gemini has its own voices, kept apart from the GPT-Live one.
@@ -39,7 +42,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
   const known = voiceOptions.some((option) => option.id === voice);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes" | "standby" | "standbyIdleSeconds">>) => {
     setSaving(true);
     setError(null);
     try {
@@ -124,6 +127,32 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
           ))}
         </Select>
       </label>
+      {openai && <>
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-ink-secondary">{t("call.live.standby")}</span>
+          <input
+            type="checkbox"
+            checked={live.standby === true}
+            disabled={saving}
+            aria-describedby={standbyHintId}
+            onChange={(event) => void save({ standby: event.target.checked, ...(event.target.checked ? { standbyIdleSeconds: live.standbyIdleSeconds ?? LIVE_STANDBY_IDLE_SECONDS_DEFAULT } : {}) })}
+          />
+        </label>
+        <div id={standbyHintId} className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.standbyHint")}</div>
+        {live.standby === true && <label className="flex items-center justify-between gap-2">
+          <span className="text-ink-secondary">{t("call.live.standbyTimeout")}</span>
+          <Select
+            size="sm"
+            value={live.standbyIdleSeconds ?? LIVE_STANDBY_IDLE_SECONDS_DEFAULT}
+            disabled={saving}
+            onChange={(event) => void save({ standbyIdleSeconds: Number(event.target.value) })}
+          >
+            {STANDBY_CHOICES.map((seconds) => (
+              <option key={seconds} value={seconds}>{seconds}s</option>
+            ))}
+          </Select>
+        </label>}
+      </>}
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
         <span className="text-ink-secondary">{t(copy.key)}</span>
         <span className="flex gap-2">

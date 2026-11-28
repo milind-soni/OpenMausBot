@@ -4,8 +4,10 @@ import { z } from "zod";
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 export const LIVE_KEY_NEEDS_CUSTOM_ENDPOINT = "Save the custom endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
+export const LIVE_STANDBY_IDLE_SECONDS_MIN = 5;
+export const LIVE_STANDBY_IDLE_SECONDS_MAX = 60;
 
-/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name; with "custom", `key` is the key of the OpenAI-compatible server at `customEndpoint` and is required, and `customModel` its model. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key, and `fishAgentLanguage` is the language the harness last set it to speak (absent: English, as agents were first set up). `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
+/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name; with "custom", `key` is the key of the OpenAI-compatible server at `customEndpoint` and is required, and `customModel` its model. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key, and `fishAgentLanguage` is the language the harness last set it to speak (absent: English, as agents were first set up). `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice, `standby` opts direct OpenAI GPT-Live WebRTC calls into speech wake, and `standbyIdleSeconds` sets the 5–60 second pause timeout. */
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
@@ -23,6 +25,8 @@ export const liveConfigSchema = z.object({
   geminiVoice: z.string().trim().max(40).regex(/^[A-Za-z]*$/, "a Gemini Live voice is a built-in voice name").optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
+  standby: z.boolean().optional(),
+  standbyIdleSeconds: z.number().int().min(LIVE_STANDBY_IDLE_SECONDS_MIN).max(LIVE_STANDBY_IDLE_SECONDS_MAX).optional(),
 });
 
 export interface LiveConfig {
@@ -42,6 +46,8 @@ export interface LiveConfig {
   geminiVoice?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
+  standby?: boolean;
+  standbyIdleSeconds?: number;
 }
 
 /** Where a key saved now may go: "openai", "azure:<host>" or "custom:<host>"; null while Azure or a custom endpoint is chosen

@@ -1,7 +1,8 @@
 import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
 import { azureLiveEndpoint, customLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_CUSTOM, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
-import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
+import { LIVE_STANDBY_IDLE_SECONDS_MAX, LIVE_STANDBY_IDLE_SECONDS_MIN, liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
+import { LIVE_STANDBY_IDLE_SECONDS_DEFAULT } from "../shared/live-call.ts";
 import { fishLiveEndpoint, usableFishAgent } from "./live-fish.ts";
 import { voiceCredential } from "./included-services.ts";
 import { elevenLabsLiveEndpoint, usableElevenLabsAgent } from "./live-elevenlabs.ts";
@@ -87,5 +88,10 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
     ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,
     idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
+    ...(cfg.live?.standby === true ? { standby: true } : {}),
+    ...(cfg.live?.standby === true || cfg.live?.standbyIdleSeconds !== undefined ? {
+      standbyIdleSeconds: Number.isInteger(cfg.live.standbyIdleSeconds) && cfg.live.standbyIdleSeconds! >= LIVE_STANDBY_IDLE_SECONDS_MIN && cfg.live.standbyIdleSeconds! <= LIVE_STANDBY_IDLE_SECONDS_MAX
+        ? cfg.live.standbyIdleSeconds! : LIVE_STANDBY_IDLE_SECONDS_DEFAULT,
+    } : {}),
   };
 }

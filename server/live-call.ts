@@ -2,6 +2,7 @@
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 import type { LiveProvider } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
+import { LIVE_STANDBY_IDLE_SECONDS_DEFAULT } from "../shared/live-call.ts";
 
 export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
@@ -259,6 +260,8 @@ export interface CreateLiveSessionInput {
   cloudHome: boolean;
   voice?: string;
   endpoint?: LiveEndpoint;
+  standby?: boolean;
+  standbyIdleSeconds?: number;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -279,6 +282,10 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
       instructions: liveInstructions(input.bot, { cloudHome: input.cloudHome }),
       delegation: { type: "client" },
       audio: { output: { voice: liveVoice(input.voice) } },
+      ...(endpoint.provider === "openai" && input.standby ? {
+        wake_policy: { type: "speech" },
+        idle_timeout_s: input.standbyIdleSeconds ?? LIVE_STANDBY_IDLE_SECONDS_DEFAULT,
+      } : {}),
       // Azure's GPT-Live refuses `session.client` ("Unknown parameter"): see LIVE_DATA_CHANNEL for who may hold such a call.
       ...(endpoint.provider === "azure" ? {} : { client: { data_channel: LIVE_DATA_CHANNEL } }),
       ...(initialInput.length ? { input: initialInput } : {}),

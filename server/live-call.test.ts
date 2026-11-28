@@ -53,6 +53,8 @@ describe("createLiveSession", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.transport).toEqual({ type: "webrtc", sdp: OFFER });
     expect(body.session.model).toBe(LIVE_MODEL);
+    expect(body.session).not.toHaveProperty("wake_policy");
+    expect(body.session).not.toHaveProperty("idle_timeout_s");
     expect(body.session.delegation).toEqual({ type: "client" });
     expect(body.session.audio).toEqual({ output: { voice: "cedar" } });
     expect(body.session.instructions).toContain("You are Ada, Tech Lead");
@@ -62,6 +64,20 @@ describe("createLiveSession", () => {
       { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done: two fixes." }] },
     ]);
     expect(String(init?.body)).not.toContain("sk-live-secret");
+  });
+
+  it("opts direct OpenAI WebRTC sessions into speech standby with a bounded idle timeout", async () => {
+    const fetchImpl = okFetch();
+    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, standby: true, standbyIdleSeconds: 12, fetchImpl });
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.transport).toEqual({ type: "webrtc", sdp: OFFER });
+    expect(body.session).toMatchObject({ wake_policy: { type: "speech" }, idle_timeout_s: 12 });
+
+    const azure = okFetch();
+    await createLiveSession({ key: "k", endpoint: azureLiveEndpoint("https://my-res.openai.azure.com", "live-prod")!, sdp: OFFER, bot: BOT, history: [], cloudHome: false, standby: true, standbyIdleSeconds: 12, fetchImpl: azure });
+    const azureSession = JSON.parse(String(azure.mock.calls[0][1]?.body)).session;
+    expect(azureSession).not.toHaveProperty("wake_policy");
+    expect(azureSession).not.toHaveProperty("idle_timeout_s");
   });
 
   it("tells the voice where it runs: the user's own computer, or their My Cloud", async () => {

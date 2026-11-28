@@ -88,6 +88,10 @@ export interface LiveSettings {
   geminiVoice?: string;
   readTypedReplies: boolean;
   idleMinutes: number;
+  /** Opts direct OpenAI GPT-Live WebRTC calls into speech-wake standby; absent or false keeps active inference. */
+  standby?: boolean;
+  /** Whole seconds before standby, from 5 to 60; defaults to 15 when enabled. */
+  standbyIdleSeconds?: number;
 }
 
 /** The single-use token Fish Audio returns for one agent session (Fish API v1 `LiveKitSessionToken`), passed verbatim to

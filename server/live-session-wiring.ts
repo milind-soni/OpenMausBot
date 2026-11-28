@@ -101,7 +101,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
       fishRefusal: (auth) => fishLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       geminiRefusal: (auth) => geminiLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       elevenlabsRefusal: (auth) => elevenLabsLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
-      createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
+      createSession: async ({ key, endpoint, sdp, botId, threadId, voice, standby, standbyIdleSeconds }) => {
         if (endpoint.provider === "gemini") {
           const session = await createGeminiLiveSession({ key, endpoint, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
           // Gemini has nothing to end: the session ends when the client closes it, and the token is single use.
@@ -115,7 +115,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
           return { sessionId: session.session_id, elevenlabs: { type: "elevenlabs", session, relayToken: token } };
         }
         if (endpoint.provider !== "fish") {
-          return createLiveSession({ key, endpoint, sdp, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome });
+          return createLiveSession({ key, endpoint, sdp, voice, standby, standbyIdleSeconds, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome });
         }
         const { agent, token: session } = await startFish(key, endpoint, botId, threadId);
         const { token } = relays.open(session.session_id, () => endFishLiveSession(session.session_id, key, agent, fetchImpl));

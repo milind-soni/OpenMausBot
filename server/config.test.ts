@@ -2227,6 +2227,12 @@ describe("live settings", () => {
     expect(() => parseConfigPatch({ live: { idleMinutes: 2.5 } })).toThrow();
     expect(parseConfigPatch({ live: { idleMinutes: 60, readTypedReplies: false } })).toMatchObject({ live: { idleMinutes: 60, readTypedReplies: false } });
   });
+  it("accepts the OpenAI standby idle timeout only from 5 to 60 whole seconds", () => {
+    expect(() => parseConfigPatch({ live: { standbyIdleSeconds: 4 } })).toThrow();
+    expect(() => parseConfigPatch({ live: { standbyIdleSeconds: 61 } })).toThrow();
+    expect(() => parseConfigPatch({ live: { standbyIdleSeconds: 15.5 } })).toThrow();
+    expect(parseConfigPatch({ live: { standby: true, standbyIdleSeconds: 60 } })).toMatchObject({ live: { standby: true, standbyIdleSeconds: 60 } });
+  });
   it("does not reload providers for live changes", () => {
     expect(reloaded({ live: { idleMinutes: 3 } })).toEqual([]);
   });
