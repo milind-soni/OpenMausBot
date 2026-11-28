@@ -90,6 +90,7 @@ export interface SideJobsDeps {
 }
 
 interface SideJobContext {
+  threadId?: string;
   instance?: SideJobInstance | null;
   modelSelection?: SideJobBot["modelSelection"];
   titleModel?: Pick<ModelSelection, "instanceId" | "model"> | null;
@@ -175,7 +176,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
       const { checkModel, ...generation } = fixed();
       const budgetBot = job === "thread-title" ? bot.id : undefined;
       if (!checkModel) deps.assertWithinBudget(budgetBot);
-      const threadId = `${job}-${randomUUID()}`;
+      const threadId = job === "thread-title" ? bot.threadId : `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
         ...generation,
@@ -303,8 +304,9 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     : found;
 
   function find(job: SideJob, botId: string, at: SideJobContext): SideJobText | null {
-    const bot = deps.bot(botId);
-    if (!bot) return null;
+    const record = deps.bot(botId);
+    if (!record) return null;
+    const bot = at.threadId ? { ...record, threadId: at.threadId } : record;
     const selection = (job === "thread-title" ? at.modelSelection : undefined) ?? bot.modelSelection;
     const own = at.instance ?? deps.instance(selection.instanceId);
     if (!own || deps.refusal(own)) return null;

@@ -7400,7 +7400,7 @@ function threadTitleGate(bot: BotRecord, ownOnly = false): ThreadTitleGate {
   catch (error) { return { ok: false, refusal: error instanceof Error ? error.message : String(error) }; }
   const opener = store.taskByThread(bot.id, bot.threadId)?.openedBy?.botId;
   const confined = cloudGuestDriven(bot.threadId) || botApiThread(bot.threadId) || linkLimits.held(bot.threadId) || (opener && isLinkedId(opener));
-  const instance = sideJobs.text("thread-title", bot.id, { instance: own ?? undefined, modelSelection: bot.modelSelection,
+  const instance = sideJobs.text("thread-title", bot.id, { threadId: bot.threadId, instance: own ?? undefined, modelSelection: bot.modelSelection,
     ...(ownOnly || confined ? { ownOnly: true } : { titleModel: cfg.threadTitles?.model }) });
   return instance?.generateText ? { ok: true, instance } : { ok: false, refusal: "No available model can generate a title for this thread." };
 }

@@ -228,11 +228,11 @@ describe("who writes a thread title", () => {
     const slots = createJobSlots(1);
     const run = vi.spyOn(slots, "run");
     const { jobs, state, claude, openrouter } = setup({ slots });
-    const writer = jobs.text("thread-title", "claude", { titleModel });
+    const writer = jobs.text("thread-title", "claude", { titleModel, threadId: "private-chat" });
     const signal = new AbortController().signal;
     expect(await writer!.generateText("title prompt", { signal, maxOutputTokens: 512 })).toBe("openrouter wrote this");
     expect(openrouter.calls[0]?.options).toMatchObject({ model: titleModel.model, signal, maxOutputTokens: 512, finalTextOnly: true });
-    expect(state.booked[0]?.row).toMatchObject({ instanceId: "openrouter", model: titleModel.model, threadId: expect.stringMatching(/^thread-title-/) });
+    expect(state.booked[0]?.row).toMatchObject({ instanceId: "openrouter", model: titleModel.model, threadId: "private-chat" });
     expect(claude.calls).toEqual([]);
     expect(run).not.toHaveBeenCalled();
     state.cappedBots.add("claude");
