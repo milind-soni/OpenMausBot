@@ -15,6 +15,8 @@ import {
   Maximize2,
   RotateCcw,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import {
@@ -30,7 +32,7 @@ import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { ImageLoading } from "./ImageLoading"; import { OutsideWorkspaceFile } from "./OutsideWorkspacePreview"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { isPlaceId } from "@/lib/place-chat"; import { serverFetch } from "@/lib/relay-server";
-import { usePreviewZoom } from "./preview-zoom";
+import { PREVIEW_ZOOM_MAX, usePreviewZoom } from "./preview-zoom";
 
 export { OutsideWorkspaceFile };
 
@@ -60,10 +62,13 @@ export function wrappedImageIndex(index: number, step: -1 | 1, count: number): n
   return (index + step + count) % count;
 }
 
-export type PreviewKeyAction = "close" | "previous" | "next" | null;
+export type PreviewKeyAction = "close" | "previous" | "next" | "zoom-in" | "zoom-out" | "zoom-reset" | null;
 
 export function previewKeyAction(key: string, count: number): PreviewKeyAction {
   if (key === "Escape") return "close";
+  if (key === "+" || key === "=") return "zoom-in";
+  if (key === "-") return "zoom-out";
+  if (key === "0") return "zoom-reset";
   if (count > 1 && key === "ArrowLeft") return "previous";
   if (count > 1 && key === "ArrowRight") return "next";
   return null;
@@ -460,11 +465,14 @@ export function AttachmentPreviewDialog({
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      const action = previewKeyAction(event.key, items.length);
+      const action = event.metaKey || event.ctrlKey || event.altKey ? null : previewKeyAction(event.key, items.length);
       if (action) {
         event.preventDefault();
         event.stopPropagation();
         if (action === "close") closeRef.current();
+        else if (action === "zoom-in") zoom.step(1);
+        else if (action === "zoom-out") zoom.step(-1);
+        else if (action === "zoom-reset") zoom.reset();
         else navigate(action === "previous" ? -1 : 1);
         return;
       }
@@ -494,7 +502,7 @@ export function AttachmentPreviewDialog({
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [items.length, navigate]);
+  }, [items.length, navigate, zoom.step, zoom.reset]);
 
   const loaded = loadedSources.has(current.src);
   const failed = failedSource === current.src;
@@ -532,6 +540,36 @@ export function AttachmentPreviewDialog({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => zoom.step(-1)}
+              disabled={zoom.scale === 1}
+              className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+              aria-label={t("attach.zoomOut")}
+              title={t("attach.zoomOut")}
+            >
+              <ZoomOut size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={zoom.reset}
+              disabled={zoom.scale === 1}
+              className="h-9 min-w-12 rounded-lg px-1.5 text-[12px] tabular-nums text-white/65 hover:bg-white/10 hover:text-white disabled:pointer-events-none"
+              aria-label={t("attach.zoomReset")}
+              title={t("attach.zoomReset")}
+            >
+              {Math.round(zoom.scale * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() => zoom.step(1)}
+              disabled={zoom.scale >= PREVIEW_ZOOM_MAX}
+              className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+              aria-label={t("attach.zoomIn")}
+              title={t("attach.zoomIn")}
+            >
+              <ZoomIn size={17} />
+            </button>
             <CopyImageButton key={current.src} src={current.src} name={current.name} />
             {current.downloadUrl && (
               <a
@@ -590,6 +628,7 @@ export function AttachmentPreviewDialog({
               key={`${current.src}:${attempt}`}
               ref={zoom.image}
               style={zoom.style}
+              draggable={false}
               src={current.src}
               alt={current.name}
               onLoad={() => setLoadedSources((sources) => new Set(sources).add(current.src))}
