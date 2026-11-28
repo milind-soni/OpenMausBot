@@ -411,7 +411,7 @@ export class BrowserSweep {
     engine: () => string | null;
     owns: (session: string) => boolean;
     live: (session: string) => boolean;
-    /** A turn holds it until it finishes: never closed while one does. */
+    /** The session is in use and skipped by this sweep. */
     held: (session: string) => boolean;
     closeIdle: (session: string) => Promise<boolean>;
     intervalMs?: number;

@@ -393,7 +393,8 @@ describe("browsers on one computer", () => {
     expect(await service.closeIdle(1)).toEqual(["bot:a"]);
     expect(backend.chromes).toHaveLength(1);
     const reopened = text(await call("agent_browser_status"));
-    expect(reopened).toContain("Your browser sat unused and was closed to free memory");
+    expect(reopened).toContain("Your browser sat unused and was closed");
+    expect(reopened).not.toContain("to free memory");
     expect(backend.chromes).toHaveLength(2);
   });
 
@@ -412,7 +413,9 @@ describe("browsers on one computer", () => {
     expect(await service.closeUnused(target.session)).toBe(true);
     expect(service.runs(target.session)).toBe(false);
     expect(await service.closeUnused(target.session)).toBe(false);
-    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    const reopened = text(await call("agent_browser_status"));
+    expect(reopened).toContain("Your browser sat unused and was closed");
+    expect(reopened).not.toContain("to free memory");
     expect(backend.chromes).toHaveLength(2);
   });
 
@@ -434,7 +437,9 @@ describe("browsers on one computer", () => {
     expect(service.profiles()[0]!.hub.size).toBe(1);
     expect(backend.chromes).toHaveLength(1);
     outputs.length = 0;
-    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    const reopened = text(await call("agent_browser_status"));
+    expect(reopened).toContain("Your browser sat unused and was closed");
+    expect(reopened).not.toContain("to free memory");
     expect(backend.chromes).toHaveLength(2);
     expect(outputs).toContain("awake");
     for (let waited = 0; !outputs.includes("frame") && waited < 1_000; waited += 10) await sleep(10);

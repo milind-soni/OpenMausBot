@@ -203,10 +203,11 @@ same rules hold on the desktop, a server and Cloud:
   fill_login's typing; a preview frame only holds off a close while it is
   taken), no turn that has used it and is still running, and no person
   holding it or using it through a Browser panel (opening the panel, a
-  click, a key, an address, taking or handing back control). A panel that
-  only watches does not keep it open: the panel says the browser closed
-  after it sat unused and offers to open it again, and on the new engine
-  it shows the browser again by itself once the bot's next call starts it.
+  click, a key, an address, taking or handing back control). On desktop,
+  an open Browser panel also keeps an agent-browser session open while you
+  watch it. On servers, watching alone does not extend the idle time. An
+  idle-closed panel offers to open the browser again. With the new engine,
+  it shows the browser again once the bot's next call starts it.
   It never reconnects on its own, which would start the browser again.
   Saved sign-ins stay, and the bot's next browser call opens it again and is
   told its pages are gone. A temporary browser saves nothing, so it starts

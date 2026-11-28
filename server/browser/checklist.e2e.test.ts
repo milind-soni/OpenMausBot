@@ -226,7 +226,9 @@ suite("the bots' browser service on real Chrome", () => {
     await real.call(target, "agent_browser_open", { url: page("/idle", "<p>idle</p>") });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(await real.service.closeIdle(1)).toContain(target.key);
-    expect(real.text(await real.call(target, "agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    const reopened = real.text(await real.call(target, "agent_browser_status"));
+    expect(reopened).toContain("Your browser sat unused and was closed");
+    expect(reopened).not.toContain("to free memory");
   }, hostTimeout(90_000));
 });
 
