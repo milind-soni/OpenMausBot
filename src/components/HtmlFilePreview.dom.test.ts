@@ -57,3 +57,34 @@ describe("HTML file preview errors", () => {
     expect(JSON.parse(String(fetch.mock.calls[1]![1]!.body))).toEqual({ path: "/outside/report.html", allowOutsideWorkspace: true });
   });
 });
+
+describe("PDF file preview", () => {
+  it("shows the PDF from a blob typed as PDF whatever the server said, with Download beside it", async () => {
+    const made: Blob[] = [];
+    const create = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => { made.push(blob as Blob); return "blob:pdf-preview"; });
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("%PDF-1.4 report", { headers: { "content-type": "text/html" } })));
+      await act(async () => root.render(createElement(HtmlFileButton, { path: "/workspace/report.pdf", name: "report.pdf", message })));
+      await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
+      await vi.waitFor(() => expect(document.body.querySelector("iframe")?.getAttribute("src")).toBe("blob:pdf-preview"));
+      expect(made).toHaveLength(1);
+      expect(made[0]!.type).toBe("application/pdf");
+      expect(await made[0]!.text()).toBe("%PDF-1.4 report");
+      expect(document.body.querySelector('button[aria-label="Save a copy of report.pdf"]')).not.toBeNull();
+      expect(alertText()).toBe("");
+      await act(async () => root.render(null));
+      expect(revoke).toHaveBeenCalledWith("blob:pdf-preview");
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it("says the PDF could not be opened, not the page, when the request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await act(async () => root.render(createElement(HtmlFileButton, { path: "/workspace/report.pdf", name: "report.pdf", message })));
+    await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
+    await vi.waitFor(() => expect(alertText()).toBe("Could not open this PDF. Check your connection and try again."));
+  });
+});

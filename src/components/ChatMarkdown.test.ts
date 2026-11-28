@@ -789,16 +789,16 @@ describe("ChatMarkdown attachments", () => {
     const message = { threadId: "thread-1", messageId: "message-1" };
     try {
       const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-        text: "See https://github.com/a/app/pull/7 and [report.pdf](/work/report.pdf).",
+        text: "See https://github.com/a/app/pull/7 and [report.zip](/work/report.zip).",
         message,
-        delivered: { "report.pdf": "/store/delivered-report.pdf" },
+        delivered: { "report.zip": "/store/delivered-report.zip" },
       }));
       expect(html).toContain('data-github-ref="pull"');
       expect(html).toContain("<span>#7</span>");
       expect(html).toContain('title="Save a copy"');
-      expect(save).toHaveBeenCalledWith("/store/delivered-report.pdf", "report.pdf", message);
-      expect(html).not.toContain("/store/delivered-report.pdf");
-      expect(html).not.toContain("/work/report.pdf");
+      expect(save).toHaveBeenCalledWith("/store/delivered-report.zip", "report.zip", message);
+      expect(html).not.toContain("/store/delivered-report.zip");
+      expect(html).not.toContain("/work/report.zip");
     } finally {
       save.mockRestore();
     }
@@ -1132,12 +1132,21 @@ describe("ChatMarkdown attachments", () => {
 
   it("makes a message-authorized file link downloadable", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: "[Download the report](/workspace/final-report.pdf)",
+      text: "[Download the report](/workspace/final-report.zip)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(html).toContain('title="Save a copy"');
-    expect(html).not.toContain("/workspace/final-report.pdf");
+    expect(html).not.toContain("/workspace/final-report.zip");
     expect(html).toContain("type=\"button\"");
+  });
+
+  it("opens a linked PDF in the preview, keeping its path private", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[final-report.pdf](/workspace/final-report.pdf)",
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).toContain('title="Preview: final-report.pdf"');
+    expect(html).not.toContain("/workspace/final-report.pdf");
   });
 
   it("does not nest a preview button in an anchor or block in a paragraph", () => {

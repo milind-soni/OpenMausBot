@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachedFileChip } from "./AttachmentPreview";
-import { HtmlPreviewFrame, OpenInBrowserButton, htmlPreviewDocument, isHtmlFile } from "./HtmlFilePreview";
+import { HtmlPreviewFrame, OpenInBrowserButton, htmlPreviewDocument, isHtmlFile, isPdfFile } from "./HtmlFilePreview";
 import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 import { readTableResponse } from "./TableFilePreview";
 
@@ -73,6 +73,29 @@ describe("HTML file chip (#4406)", () => {
     expect(csv).toMatch(/aria-label="Save a copy of data.csv"/);
     expect(csv).toContain("Preview table: data.csv");
     expect(csv).not.toContain("Preview page:");
+  });
+});
+
+describe("PDF file chip", () => {
+  it.each(["report.pdf", "REPORT.PDF"])("knows %s is a PDF", (name) => expect(isPdfFile(name)).toBe(true));
+  it.each(["report.pdf.zip", "pdf", "notes.md"])("rejects %s", (name) => expect(isPdfFile(name)).toBe(false));
+
+  it("opens the preview from the file name and keeps saving on its own button", () => {
+    const html = chip("2026 报告.pdf");
+    expect(html).toMatch(/aria-label="Preview: 2026 报告.pdf"[^>]*>[^]*2026 报告\.pdf/);
+    expect(html).not.toMatch(/<button[^>]*aria-label="Save a copy of 2026 报告.pdf"[^>]*class="flex min-h-10/);
+    expect(html).toMatch(/class="table-action" aria-label="Save a copy of 2026 报告.pdf"/);
+  });
+
+  it("keeps saving from the name where the browser has no PDF viewer", () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, pdfViewerEnabled: false });
+    try {
+      const html = chip("report.pdf");
+      expect(html).toMatch(/<button[^>]*aria-label="Save a copy of report.pdf"[^>]*class="flex min-h-10/);
+      expect(html).not.toContain("Preview: report.pdf");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
