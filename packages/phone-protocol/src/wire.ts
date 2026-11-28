@@ -373,11 +373,12 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   fallback?: ModelSelection[];
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
-  /** Record a screenshot and a short note of each browser action, kept with
-   * the conversation. Off unless true. */
+  /** Record a screenshot and a short note of each browser action, kept with the conversation. Off unless true. */
   recordBrowserSteps?: boolean;
   /** Capture facts from finished chats into memory and About me, and tidy nightly. On unless false. */
   memoryUpkeep?: boolean;
+  /** When false, capture and the dream add nothing to About me; the bot's own notes are kept and tidied as before. On unless false. */
+  memoryLearnAboutMe?: boolean;
   /** The model memory upkeep uses on this bot's OpenRouter connection; absent uses the connection's automatic pick. */
   memoryModel?: { instanceId: string; model: string };
   /** Prompt-cache keep-warm for this bot's Claude threads: true or false overrides the workspace setting; absent follows it. */
@@ -398,8 +399,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** What the bot is doing right now; transient like busy. */
   activity?: BotActivity;
   createdAt: number;
-  /** Who may see this bot on a workspace several people share. Absent means
-   * everyone. Sent to admins only; a member's copy of a bot never carries it. */
+  /** Who may see this bot on a workspace several people share. Absent means everyone. Sent to admins only; a member's copy of a bot never carries it. */
   visibility?: BotVisibility;
 }
 

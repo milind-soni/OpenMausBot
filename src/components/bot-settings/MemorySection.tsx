@@ -356,6 +356,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         onToggle={toggleUpkeep}
         onTidy={() => void tidyNow()}
         rooms={{ enabled: learnFromRooms, saving: roomsSaving, error: roomsError, onToggle: () => void toggleRooms() }}
+        aboutMe={{ enabled: bot.memoryLearnAboutMe !== false, onToggle: () => dispatch({ type: "updateBot", botId: bot.id, patch: { memoryLearnAboutMe: bot.memoryLearnAboutMe === false } }) }}
         model={active && bot.memoryUpkeep !== false
           ? <MemoryModelSetting key={bot.id} bot={bot} upkeep={upkeep} className="mt-3 border-t border-hairline/40" /> : undefined}
       />}
@@ -487,6 +488,7 @@ export function MemoryUpkeepCard({
   onToggle,
   onTidy,
   rooms,
+  aboutMe,
   model,
 }: {
   enabled: boolean;
@@ -495,6 +497,7 @@ export function MemoryUpkeepCard({
   onToggle: () => void;
   onTidy: () => void;
   rooms?: { enabled: boolean; saving: boolean; error: string; onToggle: () => void };
+  aboutMe?: { enabled: boolean; onToggle: () => void };
   model?: ReactNode;
 }) {
   return (
@@ -524,6 +527,15 @@ export function MemoryUpkeepCard({
             onClick={rooms.onToggle}
             className="disabled:cursor-wait disabled:opacity-50"
           />
+        </div>
+      )}
+      {enabled && aboutMe && (
+        <div className="mt-3 flex items-start justify-between gap-3 border-t border-hairline/40 pt-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-ink">{t("memory.learnAboutMe.title")}</div>
+            <p className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("memory.learnAboutMe.subtitle")}</p>
+          </div>
+          <Switch checked={aboutMe.enabled} aria-label={t("memory.learnAboutMe.title")} onClick={aboutMe.onToggle} />
         </div>
       )}
       {enabled && status && !status.modelSteps && (

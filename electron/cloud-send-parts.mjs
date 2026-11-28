@@ -12,7 +12,7 @@ export const BOT_PARTS = Object.freeze({
   access: ["approvalMode", "alwaysAllow"],
   voice: ["speakReplies", "replyStyle", "voice", "voiceNotes"],
   tools: ["browser", "composio", "connectorTools", "connectorScopes", "outbound", "xResearch", "mcpServers", "toolScope"],
-  memory: ["memoryEnabled", "memoryUpkeep"],
+  memory: ["memoryEnabled", "memoryUpkeep", "memoryLearnAboutMe"],
   team: ["section"],
   habits: ["notifications", "parkDirectMessages", "helperModel", "cacheKeepWarm", "recordBrowserSteps"],
 });

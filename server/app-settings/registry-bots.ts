@@ -45,6 +45,7 @@ const OTHER = {
   voiceNoteEveryReply: { label: "a voice note with every reply", value: z.boolean().nullable(), shown: onOff, was: (one: BotRecord) => one.voiceNoteEveryReply ?? null },
   memoryEnabled: { label: "memory", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.memoryEnabled) },
   memoryUpkeep: { label: "memory upkeep", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.memoryUpkeep) },
+  memoryLearnAboutMe: { label: "learning facts into About me", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.memoryLearnAboutMe) },
   helperModel: { label: "helper model", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.helperModel) },
   browser: { label: "built-in browser", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.browser) },
   recordBrowserSteps: { label: "saving browser steps", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.recordBrowserSteps) },

@@ -173,6 +173,18 @@ describe("MemoryUpkeepCard", () => {
     expect(off).not.toContain("Learn from group chats");
   });
 
+  it("shows Learn facts into About me beside upkeep, only while upkeep is on", () => {
+    const aboutMe = { enabled: true, onToggle: noop };
+    const on = render(createElement(MemoryUpkeepCard, { enabled: true, status: null, tidying: false, onToggle: noop, onTidy: noop, aboutMe }));
+    expect(on).toContain("Learn facts into About me");
+    expect(on).toContain("this bot still keeps its own notes and tidies them");
+    expect(on).toContain('aria-label="Learn facts into About me"');
+    const unchecked = render(createElement(MemoryUpkeepCard, { enabled: true, status: null, tidying: false, onToggle: noop, onTidy: noop, aboutMe: { ...aboutMe, enabled: false } }));
+    expect(unchecked).toMatch(/<button(?=[^>]*aria-label="Learn facts into About me")(?=[^>]*aria-checked="false")[^>]*>/);
+    const off = render(createElement(MemoryUpkeepCard, { enabled: false, status: null, tidying: false, onToggle: noop, onTidy: noop, aboutMe }));
+    expect(off).not.toContain("Learn facts into About me");
+  });
+
   it("says under Learn from group chats when this bot's engine can't make the background call, and only then", () => {
     const rooms = { enabled: true, saving: false, error: "", onToggle: noop };
     const line = "can't make the background model call this needs, so it won't learn anything from group chats";

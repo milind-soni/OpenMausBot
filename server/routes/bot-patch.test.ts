@@ -632,6 +632,19 @@ describe("PATCH /api/bots/:id unread", () => {
   });
 });
 
+describe("PATCH /api/bots/:id memoryLearnAboutMe", () => {
+  it("saves the switch for learning into About me only as true or false, and leaves what was saved on a bad value", async () => {
+    const { store, bot, patch } = fixture();
+    expect(store.bot(bot.id)?.memoryLearnAboutMe).toBeUndefined();
+    expect((await patch(bot.id, { memoryLearnAboutMe: false })).status).toBe(200);
+    expect(store.bot(bot.id)?.memoryLearnAboutMe).toBe(false);
+    expect((await patch(bot.id, { memoryLearnAboutMe: "off" })).status).toBe(400);
+    expect(store.bot(bot.id)?.memoryLearnAboutMe).toBe(false);
+    expect((await patch(bot.id, { memoryLearnAboutMe: true })).status).toBe(200);
+    expect(store.bot(bot.id)?.memoryLearnAboutMe).toBe(true);
+  });
+});
+
 describe("PATCH /api/bots/:id fallback", () => {
   it("checks a backup's reasoning as a model choice is checked, saves what that check returns, and passes plain rows as before", async () => {
     const engine = { instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
