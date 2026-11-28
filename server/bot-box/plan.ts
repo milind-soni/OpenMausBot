@@ -2,7 +2,8 @@
 //
 // What the box sees:
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
-//     /opt (the bots' browser) and the server's own code folder, so the engine CLIs and the proxies they start run;
+//     the bots' browser folders under /opt and the server's own code folder, so the engine CLIs and the proxies they
+//     start run; /opt and /var/lib themselves are not shown: on a self-hosted host they hold other services' files;
 //   - its HOME read-write (the engine's own login and settings live there), with the server's data folder replaced by an
 //     empty private folder, so messages.db, config.json, logins, other bots' folders and the server's sockets are not there;
 //     on a Team Cloud that HOME is the audience's engine home instead (server/engine-homes), with only the team's engine
@@ -207,6 +208,12 @@ export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HO
  * runtime) read `possible` at start and stop themselves (SIGABRT, exit 134) when it is missing. */
 export const CPU_LIST_FILES = ["/sys/devices/system/cpu/possible", "/sys/devices/system/cpu/online"] as const;
 
+/** The bots' browser folders under /opt, the only part of it the box shows: the image's and deb's browser, and an
+ * installed Google Chrome. /opt and /var/lib are not bound whole: on a self-hosted host they hold other
+ * services' files a bot must not read. What an install needs beyond the browser is the server's own code, which
+ * `codeRoots` already carries. */
+export const BROWSER_ROOTS = ["/opt/openmausbot-browser", "/opt/google/chrome"] as const;
+
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
 
@@ -232,13 +239,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest, signIns?: SignInMa
     { kind: "symlink", link: "/lib64", target: "usr/lib64" },
     { kind: "symlink", link: "/sbin", target: "usr/sbin" },
     { kind: "ro", source: "/etc", target: "/etc" },
-    { kind: "ro", source: "/opt", target: "/opt", optional: true },
-    { kind: "ro", source: "/var/lib", target: "/var/lib", optional: true },
+    ...BROWSER_ROOTS.map((root): Mount => ({ kind: "ro", source: root, target: root, optional: true })),
     ...CPU_LIST_FILES.map((file): Mount => ({ kind: "ro", source: file, target: file, optional: true })),
   ];
   for (const root of setup.codeRoots) {
     const code = resolve(root);
-    if (["/usr", "/etc", "/opt", "/var/lib"].some((base) => under(code, base))) continue;
+    if (["/usr", "/etc", ...BROWSER_ROOTS].some((base) => under(code, base))) continue;
     mounts.push({ kind: "ro", source: code, target: code });
   }
   mounts.push({ kind: "proc", target: "/proc" }, { kind: "dev", target: "/dev" });
@@ -354,7 +360,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest, signIns?: SignInMa
     if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if ((!asked.has(full) && covered(full)) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
+    if (["/usr", "/etc", ...BROWSER_ROOTS, ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
   }

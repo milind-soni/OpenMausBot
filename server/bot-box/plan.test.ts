@@ -5,7 +5,7 @@ import { engineInstallRoots } from "../engine-roots.ts";
 import { githubFolders } from "../github/sign-in.ts";
 import { chatgptAccountHome } from "../drivers/codex-account-home.ts";
 import { boxEnvironment } from "./env.ts";
-import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, BROWSER_ROOTS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -63,6 +63,21 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/tmp/other-turn/mcp.json")).toBe("none");
     expect(visibleInBox(plan, "/.fly/api")).toBe("none");
     expect(visibleInBox(plan, "/root/.ssh/id_ed25519")).toBe("none");
+  });
+
+  it("shows the browsers' own folders under /opt, never /opt or /var/lib whole (issue #4011)", () => {
+    const plan = turn();
+    const text = bwrapArgs(plan).join(" ");
+    expect(text).not.toContain("--ro-bind /opt /opt");
+    expect(text).not.toContain("/var/lib");
+    expect(visibleInBox(plan, "/opt/other-service/.env"), "another service's files").toBe("none");
+    expect(visibleInBox(plan, "/var/lib/docker/volumes/one/_data")).toBe("none");
+    for (const root of BROWSER_ROOTS) expect(visibleInBox(plan, join(root, "chrome")), root).toBe("ro");
+  });
+
+  it("a code root under /opt is mounted itself, so a deb install's server code stays in the box", () => {
+    const plan = planBox({ ...setup(), codeRoots: ["/opt/OpenMausBot/resources"] }, { command: "/usr/bin/x", args: [], env: {} });
+    expect(visibleInBox(plan, "/opt/OpenMausBot/resources/dist-server/index.js")).toBe("ro");
   });
 
   it("a process the bot's conversations share sees all of that bot's conversation folders and uploads, and no other bot's", () => {
