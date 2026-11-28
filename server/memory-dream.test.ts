@@ -259,6 +259,7 @@ describe("dreaming in the upkeep loop", () => {
     sinces = [];
     aboutMeAdded = [];
     BOT.memoryUpkeep = true;
+    BOT.memoryLearnAboutMe = undefined;
     clock = new Date(2026, 9, 22, 10, 0);
     chats = [
       { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
@@ -312,6 +313,24 @@ describe("dreaming in the upkeep loop", () => {
     expect(rows.map((row) => row.path)).toEqual(expect.arrayContaining(["MEMORY.md", "memory/work.md"]));
     expect(rows.every((row) => row.actor === "upkeep")).toBe(true);
     expect(upkeep().status(BOT.id)).toMatchObject({ lastDream: { conversations: 2 } });
+  });
+
+  it("keeps what the dream learned in the notes but adds nothing to About me while the bot's switch for that is off", async () => {
+    BOT.memoryLearnAboutMe = false;
+    ensureWorkspace(BOT.id);
+    chats[0]!.lines[0]!.text = "I want drafts under 100 words. I prefer plain words.";
+    chats[1]!.lines[0]!.text = "Again, drafts under 100 words. I prefer plain words.";
+    const evidence = chats.map((chat) => chat.lines[0]!.text);
+    answers.push(JSON.stringify({
+      learned: [
+        { text: "The person wants drafts under 100 words", from: [1, 2], evidence, confidence: 0.9 },
+        { text: "The person prefers plain words", from: [1, 2], evidence, aboutUser: true, confidence: 0.8 },
+      ],
+    }));
+    const report = await upkeep().dream(BOT.id);
+    expect(report.aboutMe).toBe(0);
+    expect(report.learned.map((item) => item.text)).toEqual(["The person wants drafts under 100 words", "The person prefers plain words"]);
+    expect(aboutMeAdded).toEqual([]);
   });
 
   it("refuses invented numbers before notebook or profile writes", async () => {

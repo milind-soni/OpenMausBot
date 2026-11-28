@@ -44,6 +44,12 @@ export interface UpkeepBot {
   name: string;
   memoryUpkeep?: boolean;
   memoryEnabled?: boolean;
+  memoryLearnAboutMe?: boolean;
+}
+
+/** Whether what this bot's capture and dream learn about the person is added to About me. */
+function learnsAboutMe(bot: Pick<UpkeepBot, "memoryLearnAboutMe">): boolean {
+  return bot.memoryLearnAboutMe !== false;
 }
 
 export function upkeepEnabled(bot: Pick<UpkeepBot, "memoryUpkeep" | "memoryEnabled"> | undefined): bot is UpkeepBot {
@@ -489,7 +495,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return { added, topics };
     });
     const learned = filed.filter((item) => item.aboutMe).map((item) => item.candidate.text);
-    const aboutMe = learned.length ? deps.addToAboutMe({ botId: id, botName: bot.name }, learned) : 0;
+    const aboutMe = learned.length && learnsAboutMe(bot) ? deps.addToAboutMe({ botId: id, botName: bot.name }, learned) : 0;
     const organized = await organize(id);
     const report: CaptureReport = { at, added, topics, aboutMe, organized };
     if (cancelled(started)) return report;
@@ -821,7 +827,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return { outdated, kept, stale };
     });
     const aboutUser = dreamt.learned.filter((item) => item.aboutUser).map((item) => item.text);
-    const aboutMe = aboutUser.length ? deps.addToAboutMe({ botId, botName: bot.name }, aboutUser) : 0;
+    const aboutMe = aboutUser.length && learnsAboutMe(bot) ? deps.addToAboutMe({ botId, botName: bot.name }, aboutUser) : 0;
     const done: DreamReport = {
       at,
       conversations: conversations.length,

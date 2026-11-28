@@ -394,6 +394,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.memoryUpkeep !== "boolean") return json(res, 400, { error: "memoryUpkeep must be true or false" });
         patch.memoryUpkeep = body.memoryUpkeep;
       }
+      if (body.memoryLearnAboutMe !== undefined) {
+        if (typeof body.memoryLearnAboutMe !== "boolean") return json(res, 400, { error: "memoryLearnAboutMe must be true or false" });
+        patch.memoryLearnAboutMe = body.memoryLearnAboutMe;
+      }
       let memoryModel: MemoryModelSelection | undefined;
       if (body.memoryModel !== undefined) {
         const parsed = z.object({

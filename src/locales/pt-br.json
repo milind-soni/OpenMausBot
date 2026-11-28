@@ -1548,6 +1548,8 @@
   "memory.learnFromRooms.subtitle": "Vale para todos os bots: eles também identificam fatos nos chats em grupo de que participam. Suas palavras são atribuídas a você; as dos outros bots só contam se forem resultados verificados ou decisões com que você concordou. Se menos pessoas têm acesso ao chat em grupo do que ao bot, esse chat nunca alimenta a memória dele. Desligado por padrão.",
   "memory.learnFromRooms.error": "Não foi possível salvar a configuração de chats em grupo.",
   "memory.learnFromRooms.noModelSteps": "Para aprender com chats em grupo, o bot precisa chamar o modelo em segundo plano. A IA deste bot não consegue fazer isso, então ele não vai aprender nada com esses chats.",
+  "memory.learnAboutMe.title": "Aprender fatos para o Sobre mim",
+  "memory.learnAboutMe.subtitle": "Adiciona ao Sobre mim fatos duradouros que este bot percebe sobre você, onde todos os bots leem. Desligado, este bot continua mantendo as próprias anotações e organizando-as.",
   "memory.upkeep.noModelSteps": "A IA deste bot não consegue fazer a chamada rápida ao modelo em segundo plano necessária para a manutenção. Por isso, a manutenção só arquiva notas expiradas e junta duplicatas exatas.",
   "memory.lendingReviewStale": "A memória mudou novamente depois que você conferiu, então o bot ainda não pode usar seu computador. Confira as notas abaixo e marque-as como revisadas.",
   "cloudSignIn.title": "Conecte uma IA ao Cloud",

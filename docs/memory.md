@@ -214,7 +214,9 @@ off. It keeps the notes in shape without the bot having to decide to:
   dated line `- 2026-09-25 · learned by Scout · …`. **Added by your bots**
   under About me lists each one with **Remove**; a removed fact is never
   added again. On a shared installation, another person's messages never add
-  to the owner's About me.
+  to the owner's About me. **Learn facts into About me**, under Memory
+  upkeep, turns this off for one bot: its notes are still noticed, filed and
+  tidied, and only About me is left alone.
 - **Nightly tidy-up.** Once a day after 3 am (`memory.tidyHour`), or at the
   next check if the computer was asleep, never while the bot is working, and
   on **Tidy up now**: expired entries move to `memory/archive.md` (from

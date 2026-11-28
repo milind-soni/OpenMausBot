@@ -1742,6 +1742,8 @@
   "memory.learnFromRooms.subtitle": "For every bot: also notice facts from the group chats a bot is in. Your own words count as yours; other bots' only when they're checked results or decisions you agreed to. A group chat fewer people can see than the bot never feeds its memory. Off by default.",
   "memory.learnFromRooms.error": "Could not save the group chat setting.",
   "memory.learnFromRooms.noModelSteps": "This bot's AI can't make the background model call this needs, so it won't learn anything from group chats.",
+  "memory.learnAboutMe.title": "Learn facts into About me",
+  "memory.learnAboutMe.subtitle": "Add lasting facts this bot notices about you to About me, where every bot reads them. Off, this bot still keeps its own notes and tidies them.",
   "memory.upkeep.noModelSteps": "This bot's AI can't make the quick background model call upkeep uses, so it only archives expired notes and merges exact duplicates.",
   "memory.lendingReviewStale": "The memory changed again after you looked, so it can't use your computer yet. Check the notes below, then mark them reviewed.",
   "cloudSignIn.title": "Connect an AI to the Cloud",

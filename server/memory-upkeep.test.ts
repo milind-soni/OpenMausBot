@@ -295,6 +295,7 @@ describe("the upkeep loop", () => {
     busy = false;
     aboutMeAdded = [];
     BOT.memoryUpkeep = undefined;
+    BOT.memoryLearnAboutMe = undefined;
     clock = new Date(2026, 8, 25, 10, 0);
     organizeAnswer = '{"moves": []}';
     organizePrompts = [];
@@ -327,6 +328,20 @@ describe("the upkeep loop", () => {
     await flushMemoryJournal(BOT.id);
     expect(readMemoryJournal(BOT.id, 5)[0]).toMatchObject({ actor: "upkeep", via: "capture", threadId: "t1", path: "MEMORY.md" });
     expect(aboutMeAdded).toEqual(["The person is vegetarian"]);
+  });
+
+  it("keeps a bot's notes but adds nothing to About me while its switch for that is off", async () => {
+    BOT.memoryLearnAboutMe = false;
+    ensureWorkspace(BOT.id);
+    answers.push(JSON.stringify([
+      { text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 },
+      { text: "The person has exams this weekend", kind: "fact", evidence: "I have exams this weekend", until: "2026-09-27", confidence: 0.9 },
+    ]));
+    const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian and I have exams this weekend", bot: "Good luck!" }] });
+    expect(report).toMatchObject({ added: 2, topics: 0, aboutMe: 0 });
+    expect(memory()).toContain('- 2026-09-25 · from chat "Plans" (noticed) · The person is vegetarian\n');
+    expect(memory()).toContain("The person has exams this weekend · until 2026-09-27");
+    expect(aboutMeAdded).toEqual([]);
   });
 
   it("captures onto a full MEMORY.md: every fact lands, the oldest entries move to the archive, both journaled", async () => {
