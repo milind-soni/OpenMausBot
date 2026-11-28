@@ -9,6 +9,7 @@ import type { SkillsLibrarySkillWire } from "../../shared/wire";
 import { Layer } from "./Layer";
 import { Select } from "./Select";
 import { serverFetch } from "@/lib/relay-server";
+import { SKILL_FILE_ACCEPT, skillFilesOf } from "@/lib/skill-files";
 
 export function filterLibrarySkills(
   skills: readonly SkillsLibrarySkillWire[],
@@ -50,6 +51,7 @@ export function SkillsSection() {
   const [importMessage, setImportMessage] = useState("");
   const [assignBot, setAssignBot] = useState("");
   const busy = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const bots = state.bots.filter((bot) => !bot.hidden);
   const tags = useMemo(
@@ -180,6 +182,17 @@ export function SkillsSection() {
     }
   };
 
+  const importOne = async (text: string): Promise<string> => {
+    const response = await serverFetch("/api/skills-library", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const body = (await response.json()) as { skill?: { name: string }; error?: string };
+    if (!response.ok) throw new Error(body.error ?? t("skills.error.import"));
+    return body.skill?.name ?? "";
+  };
+
   const importSkill = async () => {
     const text = importText.trim();
     if (!text) return;
@@ -187,20 +200,43 @@ export function SkillsSection() {
     setError("");
     setImportMessage("");
     try {
-      const response = await serverFetch("/api/skills-library", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const body = (await response.json()) as { skill?: { name: string }; error?: string };
-      if (!response.ok) throw new Error(body.error ?? t("skills.error.import"));
-      setImportMessage(t("skills.library.imported", { name: body.skill?.name ?? "" }));
+      const name = await importOne(text);
+      setImportMessage(t("skills.library.imported", { name }));
       setImportText("");
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("skills.error.import"));
     } finally {
       setImporting(false);
+    }
+  };
+
+  /** Each chosen SKILL.md goes through the same local import as a paste: no URL is read, and the bytes are the file's. */
+  const importFiles = async (list: FileList | null) => {
+    const files = skillFilesOf(list);
+    if (!files.length) return;
+    setImporting(true);
+    setError("");
+    setImportMessage("");
+    const failed: string[] = [];
+    let imported = 0;
+    try {
+      for (const file of files) {
+        try {
+          await importOne(await file.text());
+          imported++;
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      if (imported) {
+        setImportMessage(t("skills.library.importFilesDone", { count: imported }));
+        await refresh();
+      }
+      if (failed.length) setError(t("skills.library.importFilesFailed", { count: failed.length, names: failed.slice(0, 3).join(", ") + (failed.length > 3 ? "…" : "") }));
+    } finally {
+      setImporting(false);
+      if (fileInput.current) fileInput.current.value = "";
     }
   };
 
@@ -360,13 +396,33 @@ export function SkillsSection() {
           />
           <div className="flex items-center justify-between gap-2">
             {importMessage ? <div className="text-[12px] text-ink-secondary">{importMessage}</div> : <span />}
-            <button
-              type="submit"
-              disabled={importing || Boolean(working) || !importText.trim()}
-              className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-            >
-              {importing ? t("skills.library.importing") : t("skills.library.importButton")}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <input
+                ref={fileInput}
+                type="file"
+                accept={SKILL_FILE_ACCEPT}
+                multiple
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(e) => void importFiles(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                disabled={importing || Boolean(working)}
+                className="rounded-lg border border-hairline/40 px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              >
+                {t("skills.library.importFiles")}
+              </button>
+              <button
+                type="submit"
+                disabled={importing || Boolean(working) || !importText.trim()}
+                className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              >
+                {importing ? t("skills.library.importing") : t("skills.library.importButton")}
+              </button>
+            </div>
           </div>
         </form>
       </Card>
