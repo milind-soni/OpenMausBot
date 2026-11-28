@@ -20,8 +20,8 @@ describe("object bodies", () => {
   });
 
   it("carries every starter, gallery and moodboard avatar once, leaving Shield and Star to our shapes", () => {
-    expect(OBJECT_BODY_IDS).toHaveLength(33);
-    expect(new Set(OBJECT_BODY_IDS).size).toBe(33);
+    expect(OBJECT_BODY_IDS).toHaveLength(34);
+    expect(new Set(OBJECT_BODY_IDS).size).toBe(34);
     expect(OBJECT_BODY_IDS).not.toContain("obj-shield");
   });
 
