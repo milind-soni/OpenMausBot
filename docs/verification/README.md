@@ -244,6 +244,10 @@ The [rich tables fixture](rich-tables.md) checks Markdown tables and message-sco
 CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
 interaction in a disposable workspace.
 
+The [ZIP import fixture](zip-short-reads.md) checks XMind attachment uploads over
+the real HTTP route when filesystem reads return partial ZIP metadata, including
+the saved outline, rejection of a truncated archive and temporary-file cleanup.
+
 The [recent files fixture](computer-files.md) mounts the Files panel with synthetic
 digest rows and real message-scoped downloads from a disposable workspace.
 
