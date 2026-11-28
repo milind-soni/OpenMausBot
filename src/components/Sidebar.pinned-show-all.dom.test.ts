@@ -26,16 +26,25 @@ const bot: Bot = {
   projects: [{ id: "folder", name: "Taxes" }],
   tasks: [...loose, ...filed],
 };
+const crowded: Bot = {
+  ...bot,
+  threadId: "loose-12",
+  tasks: [
+    ...Array.from({ length: 13 }, (_, index) => ({ threadId: `loose-${index}`, title: `Loose chat ${index}`, createdAt: 100 + index, unread: true, pinned: index < 2 })),
+    ...filed.map((task) => task.threadId === "filed-plain" ? { ...task, archivedAt: 1 } : task),
+  ],
+};
 
 let host: HTMLElement;
 let root: Root;
-const mount = async () => {
+const render = async (candidate: Bot = bot, query = "") => act(async () => {
+  root.render(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), candidate, { density: "comfortable", query, onMenu: vi.fn() }), selected: true }));
+});
+const mount = async (candidate: Bot = bot, query = "") => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => {
-    root.render(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true }));
-  });
+  await render(candidate, query);
 };
 const unmount = async () => {
   await act(async () => { root.unmount(); });
@@ -87,6 +96,41 @@ describe("a bot's Show all threads", () => {
     expect(host.textContent).not.toContain("Loose chat 0");
     expect(button("Show all 11 threads")).toBeTruthy();
     await unmount();
+  });
+});
+
+describe("a bot's ungrouped threads", () => {
+  const looseRows = () => [...host.querySelectorAll('[data-sidebar-thread-row^="loose-"]')];
+
+  it("bounds a long list while keeping show all, search and bulk selection available", async () => {
+    await mount(crowded);
+    expect(looseRows()).toHaveLength(10);
+    expect(looseRows()[0]?.getAttribute("data-sidebar-thread-row")).toBe("loose-12");
+    expect(looseRows().slice(1, 3).map((row) => row.getAttribute("data-sidebar-thread-row"))).toEqual(expect.arrayContaining(["loose-0", "loose-1"]));
+    expect(host.textContent).toContain("Filed pinned");
+
+    await click("Show 3 more");
+    expect(looseRows()).toHaveLength(13);
+    expect(button("Show less")?.getAttribute("aria-expanded")).toBe("true");
+    await click("Show less");
+    expect(looseRows()).toHaveLength(10);
+
+    await click("Show all 15 threads");
+    expect(looseRows()).toHaveLength(13);
+    expect(button("Show 3 more")).toBeUndefined();
+    expect(host.querySelectorAll("[data-sidebar-thread-row]")).toHaveLength(15);
+    expect(button("Show fewer threads")).toBeTruthy();
+    await click("Show fewer threads");
+    expect(looseRows()).toHaveLength(10);
+
+    await render(crowded, "Loose chat");
+    expect(looseRows()).toHaveLength(13);
+    expect(button("Show 3 more")).toBeUndefined();
+    await render(crowded);
+    await click("Select threads");
+    expect(looseRows()).toHaveLength(13);
+    expect(button("Show 3 more")).toBeUndefined();
+    await click("Done");
   });
 });
 
