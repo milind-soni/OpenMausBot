@@ -111,8 +111,9 @@ const TRIGGER_FIELDS_SCHEMA = {
   run_on_startup: { type: "boolean", description: "Repeating schedules: also run when OpenMausBot starts." },
 } as const;
 
-/** What the engine keeps of a brief: it clips a longer one instead of refusing the call. */
 const MESSAGE_MAX = 12_000;
+const HANDOFF_REASON_MAX = 200;
+const HANDOFF_DONE_WHEN_MAX = 1_000;
 
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const CHIEF_SKILL_ACTION = "teammates";
@@ -181,14 +182,14 @@ const TOOL_DEFINITIONS = [
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Another room, from list_room_targets." },
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too." }, minItems: 1, maxItems: 4, uniqueItems: true },
-      message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: "The question or task; separate calls for different responsibilities." },
-      reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip)." },
+      message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: `Task or question, up to ${MESSAGE_MAX} characters. One per responsibility.` },
+      reason: { type: "string", maxLength: HANDOFF_REASON_MAX, description: `One-line reason shown as a chip, up to ${HANDOFF_REASON_MAX} characters.` },
       rework: { type: "boolean", description: "True only for concrete work after a teammate's work finished or failed: a fix, a re-check, a retry or a follow-up task." },
       thread: { type: "string", description: "standing (default), new (its own history and run), or a threadId from your receipts or list_threads." },
       title: { type: "string", maxLength: 80, description: "With thread \"new\": its short sidebar name." }, in_my_folder: { type: "boolean", description: "Default true." },
       reply: { type: "string", enum: ["resume", "none"], description: "none: a one-way notice; nothing comes back." },
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
-      done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },
+      done_when: { type: "string", maxLength: HANDOFF_DONE_WHEN_MAX, description: `Required outcome, up to ${HANDOFF_DONE_WHEN_MAX} characters.` },
       answers: { type: "string", description: "Only to answer a teammate's question: the assignment id its note names; message is the answer." },
       files: { type: "array", items: { type: "string" }, maxItems: 5, description: "Paths as for attach_file, 100 MB together: copied into each teammate's inbox. Files a teammate attaches with attach_file come back with its result." },
     }, required: ["bot_ids", "message"] },

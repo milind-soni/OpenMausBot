@@ -93,6 +93,14 @@ describe("the advertised agents tool schemas", () => {
     }
   });
 
+  it("tells the model the limits enforced on a hand-off brief, reason and completion criteria", () => {
+    const advertised = LISTED.find((tool) => tool.name === "coordinate_bots")!.inputSchema.properties as Record<string, Json>;
+    const full = fullInputSchema("coordinate_bots") as { properties: Record<string, { maxLength: number }> };
+    for (const field of ["message", "reason", "done_when"]) {
+      expect(advertised[field]!.description, field).toContain(`${full.properties[field]!.maxLength} characters`);
+    }
+  });
+
   it("keep a bound the model needs and drop one it reads from the words or never comes near", () => {
     const coordinate = LISTED.find((tool) => tool.name === "coordinate_bots")!.inputSchema.properties as Record<string, Json>;
     expect(coordinate.title).toMatchObject({ maxLength: 80 });
