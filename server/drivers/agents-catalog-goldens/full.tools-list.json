@@ -148,7 +148,7 @@
           },
           "rework": {
             "type": "boolean",
-            "description": "True only to resend finished or failed work: a fix, a re-check or a retry."
+            "description": "True only for concrete work after a teammate's work finished or failed: a fix, a re-check, a retry or a follow-up task."
           },
           "thread": {
             "type": "string",
@@ -2342,7 +2342,7 @@
     },
     {
       "name": "skill_manage",
-      "description": "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill. It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.",
+      "description": "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. A Chief of Staff may switch teammates' skills in one go (action teammates). Never change a skill unless the person explicitly asked for that named skill. It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2355,7 +2355,8 @@
               "import",
               "enable",
               "disable",
-              "delete"
+              "delete",
+              "teammates"
             ]
           },
           "skill_name": {
@@ -2403,6 +2404,31 @@
           "all_bots": {
             "type": "boolean",
             "description": "create/import: on all the person's bots, if they asked."
+          },
+          "changes": {
+            "type": "array",
+            "description": "teammates: all apply or none do.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bot_id": {
+                  "type": "string",
+                  "description": "From list_bots."
+                },
+                "skill_name": {
+                  "type": "string"
+                },
+                "on": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "bot_id",
+                "skill_name",
+                "on"
+              ]
+            }
           }
         },
         "required": [

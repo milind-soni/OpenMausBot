@@ -160,6 +160,18 @@ export class LimitResetClock {
     return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;
   }
 
+  /** What holds this engine for `model` now, as far as is known: `"engine"` when a refusal holds it or its usage meter
+   * covers every model of the account, `"model"` when only a meter that covers some models does (OpenCode's meter is the
+   * Go subscription's, so at its limit the account's other providers still run), null when nothing does. */
+  holdScope(engine: string, model?: string): "engine" | "model" | null {
+    const now = this.now();
+    const refused = this.refusal(engine);
+    const usage = this.meterFor(engine, model);
+    const until = Math.max(refused ?? 0, usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
+    if (until <= now) return null;
+    return refused === null && usage?.driver === "opencode" && model !== undefined ? "model" : "engine";
+  }
+
   /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
    * the Go subscription's and never covers Zen's free models. */
   private meterFor(engine: string, model?: string): EngineLimit | undefined {

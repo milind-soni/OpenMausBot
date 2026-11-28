@@ -346,6 +346,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/bots$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+$/ },
   { methods: ["GET"], path: /^\/api\/team-map$/ },
+  // Members need instance capabilities (queueing) to steer running turns; the route itself requires only a valid session.
+  { methods: ["GET"], path: /^\/api\/instances$/ },
   // a link into the organisation's Admin: identifiers only, and Admin authorizes its own visitor
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/slack-management$/ },
   // what a bot made in the conversations this viewer can read, the same rows those conversations' messages show (routes/bot-library.ts)

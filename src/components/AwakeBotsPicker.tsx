@@ -1,3 +1,4 @@
+import { isPlaceId } from "@/lib/place-chat";
 import { useState } from "react";
 import { Check } from "lucide-react";
 import { awakeCandidates, showBotLimit } from "@/lib/bot-limit";
@@ -24,7 +25,7 @@ export function initialAwake(bots: readonly Candidate[], paused: ReadonlySet<str
 /** Which of a Starter Cloud's bots stay awake: the plan's number of them, the rest paused until swapped in or an upgrade. */
 export function AwakeBotsPicker({ limit, onSaved, swapIn }: { limit: number; onSaved: () => void; swapIn?: string }) {
   const { state } = useStore();
-  const bots = awakeCandidates(state.bots);
+  const bots = awakeCandidates(state.bots.filter((bot) => !isPlaceId(bot.id)));
   const paused = new Set(state.config?.pausedBots ?? []);
   const wanted = Math.min(limit, bots.length);
   const [chosen, setChosen] = useState<Set<string>>(() => initialAwake(bots, paused, wanted, swapIn));

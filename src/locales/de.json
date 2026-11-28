@@ -117,6 +117,7 @@
   "server.teammates.handedWork": "weitergegebener Arbeit",
   "server.incidents.where.room": "im Raum „{room}“",
   "server.incidents.where.thread": "im Thread #{title}",
+  "server.chief.retryQueued": "Neuer Versuch im Thread #{title} von {name} wartet in der Warteschlange",
   "server.incidents.where.main": "in der Hauptunterhaltung",
   "server.incidents.folded": "{chief} wird nur zu einer begrenzten Zahl von Problemen pro Stunde gefragt, daher wurden {count} weitere in dieser Stunde nicht dorthin geschickt. Aus: {list}",
   "server.connect.signIn": "Bitte melde dich bei {site} an.",
@@ -158,6 +159,11 @@
   "server.skillSwitch.delete.title": "Skill „{name}“ löschen?",
   "server.skillSwitch.delete.body": "Entfernt diesen Skill mit all seinen Dateien endgültig vom Bot. Seine SKILL.md steht unten, Geheimnisse sind ausgeblendet.",
   "server.skillSwitch.delete.done": "Skill „{name}“ gelöscht",
+  "server.teammateSkills.title": "Skills in deinem Team ändern ({count})?",
+  "server.teammateSkills.body": "Schaltet jeden Skill unten für das jeweilige Teammitglied ein oder aus, alle auf einmal. Lässt sich einer nicht ändern, ändert sich keiner.",
+  "server.teammateSkills.done": "Skills in deinem Team geändert ({count})",
+  "server.teammateSkills.on": "@{bot}: „{name}“ einschalten",
+  "server.teammateSkills.off": "@{bot}: „{name}“ ausschalten",
   "server.allBotsSkill.create.title": "Skill „{name}“ auf alle deine Bots legen?",
   "server.allBotsSkill.create.done": "Skill „{name}“ ist auf allen deinen Bots",
   "server.allBotsSkill.update.title": "Skill „{name}“ auf allen deinen Bots aktualisieren?",
@@ -4582,5 +4588,8 @@
   "server.github.card.description": "Verbinde GitHub, damit {bot} seine Arbeit in deine Repositorys pushen kann.",
   "server.github.card.connectInApps": "Verbinde GitHub über diese Karte in der App auf deinem Computer oder unter Apps.",
   "githubSignIn.title": "GitHub-Anmeldung",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "approval.status.teammateSkills": "Team-Skills geändert",
+  "approval.applied.skill.teammates": "{name} hat Skills im Team geändert: {title}",
+  "skills.request.reviewTeammates": "Prüfe jede Änderung, bevor du sie anwendest"
 }

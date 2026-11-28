@@ -121,6 +121,7 @@ export class AppTriggerRequestService {
     const parsed = operationSchema.safeParse(args.operation);
     if (!parsed.success) throw new AppTriggerError(parsed.error.issues[0]?.message ?? "Invalid automation request");
     const operation = parsed.data as AppTriggerRequestOperation;
+    const enabledOnly = operation.action === "pause" || operation.action === "resume";
     const owner = operation.forBot?.botId ?? args.botId;
     const triggers = this.options.triggers;
     const before = operation.action === "create" ? undefined : this.owned(operation.triggerId, owner);
@@ -168,9 +169,10 @@ export class AppTriggerRequestService {
       undo: {
         name: redactSecretsInText(subject.name),
         ...(after && operation.action !== "run_now" ? { appliedUpdatedAt: after.updatedAt } : {}),
-        ...(before && (operation.action === "update" || operation.action === "delete")
-          ? { before: { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, config: before.config, ...(before.filter ? { filter: before.filter } : {}),
-            ...(before.sameConversation ? { sameConversation: true } : {}) } }
+        ...(before && operation.action !== "run_now"
+          ? { before: { name: enabledOnly ? redactSecretsInText(before.name) : before.name, prompt: enabledOnly ? redactSecretsInText(before.prompt) : before.prompt,
+            runOn: before.runOn, enabled: before.enabled, config: enabledOnly ? {} : before.config, ...(!enabledOnly && before.filter ? { filter: before.filter } : {}),
+            ...(!enabledOnly && before.sameConversation ? { sameConversation: true } : {}) } }
           : {}),
       },
     };
@@ -223,7 +225,7 @@ export class AppTriggerRequestService {
           const patch = operation.action === "update"
             ? before ? { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, filter: before.filter ?? null, restoreConfig: before.config,
               sameConversation: before.sameConversation === true } : undefined
-            : { enabled: operation.action === "pause" };
+            : { enabled: before?.enabled ?? (operation.action === "pause") };
           if (!patch || !await triggers.update(triggerId, patch)) return stale;
           break;
         }

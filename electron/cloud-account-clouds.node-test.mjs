@@ -43,7 +43,7 @@ async function admin(t) {
   const saved = { origin: f.origin, token: accessToken, expiresAt: NOW + 86400_000, device: { id: "device-1" }, account: { id: "acct-1", email: "person@example.test" } };
   f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.fixture", now: () => NOW,
     store: { read: async () => saved, write: async () => {} }, openBrowser: async url => { f.browsers.push(url); },
-    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; } });
+    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, random: () => 0.5 });
   t.after(async () => { f.client.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return f;
 }

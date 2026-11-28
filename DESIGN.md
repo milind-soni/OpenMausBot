@@ -199,7 +199,10 @@ element's job and never a pixel value:
   thread's first line, its reply count, who replied and when; a row, a room
   thread opened from anywhere, and an Inbox line open their thread in a panel
   beside the chat (`ForkPanel`), never by moving the room's current thread,
-  which is everyone's. The feed's composer starts a new thread; the room's
+  which is everyone's. Returning from the sidebar reopens the thread that person
+  last viewed in the room on this device. Closing the panel leaves just the feed
+  on the next visit, as does a thread that was archived or deleted.
+  The feed's composer starts a new thread; the room's
   "+" in the sidebar brings the room up with the cursor in that composer. A row carries
   the sidebar thread row's menu behind a quiet More (hover, focus and touch),
   a pin mark when pinned, and its unread or waiting dot; the thread beside the

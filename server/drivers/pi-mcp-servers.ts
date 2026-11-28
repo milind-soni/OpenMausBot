@@ -5,6 +5,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { appMountFor, customServerGate, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
 import { remoteMcpSpec } from "../mcp-http.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { agentsStartupMs } from "./chat-mcp-tools.ts";
 
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
@@ -43,7 +44,9 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
     const original = server as { scope?: string };
-    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(directory ? { directory: true } : {}) };
+    // A turn can't run without the agents server: give it the start time every other engine gives it. No other server
+    // carries a start time of its own, so a custom server's config can't set one.
+    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(name === "agents" ? { startupMs: agentsStartupMs() } : {}), ...(directory ? { directory: true } : {}) };
   }
   return Object.keys(servers).length ? servers : null;
 }

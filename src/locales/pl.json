@@ -127,6 +127,7 @@
   "server.problem.routineFailed": "Bot {bot} napotkał problem: zaplanowana rutyna {where} nie powiodła się",
   "server.problem.routineFailedWhy": "Bot {bot} napotkał problem: zaplanowana rutyna {where} nie powiodła się: „{detail}”",
   "server.incidents.where.thread": "w wątku #{title}",
+  "server.chief.retryQueued": "Ponowna próba w wątku #{title} ({name}) czeka w kolejce",
   "server.incidents.where.main": "w głównej rozmowie",
   "server.connect.signIn": "Musisz zalogować się do {site}.",
   "server.connect.signInWhy": "Musisz zalogować się do {site}: {reason}",

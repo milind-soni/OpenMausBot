@@ -1575,6 +1575,7 @@ body {
     line-height: 1;
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
+    overflow-wrap: anywhere;
   }
   /* One row of a popover menu: 30px, 14px, icon then label. */
   .ui-menu-row {

@@ -1,3 +1,4 @@
+import { isPlaceId } from "@/lib/place-chat";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Plus, Users, X } from "lucide-react";
 import { openBot, useStore, type Bot } from "@/state/store";
@@ -83,7 +84,7 @@ export function SidebarNewChatPanel({
     selectedRef.current?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
-  const bots = rankByName(state.bots.filter((bot) => !bot.hidden), query);
+  const bots = rankByName(state.bots.filter((bot) => !bot.hidden && !isPlaceId(bot.id)), query);
   const actions = [
     ...(onNewBot ? [{ key: "bot", icon: <Plus size={16} />, label: t("sidebar.newChat.createBot"), run: onNewBot }] : []),
     { key: "group", icon: <Users size={16} />, label: t("sidebar.newChat.createGroup"), run: onNewGroup },

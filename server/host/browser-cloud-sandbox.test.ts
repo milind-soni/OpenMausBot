@@ -11,7 +11,7 @@ import { REDDIT_REFUSAL } from "../browser/egress/reddit.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { RELAY_KEY, startFakeComputer, type FakeComputer } from "../cloud-browser/testing/fake-computer.ts";
-import { LOCAL_SCHEME_REFUSAL } from "../cloud-browser/guards.ts";
+import { LOCAL_SCHEME_REFUSAL, PRIVATE_ADDRESS_REFUSAL } from "../cloud-browser/guards.ts";
 import { createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
@@ -128,6 +128,23 @@ describe("a personal Cloud's bot browser opens in the Cloud's browser sandbox", 
     const { host } = setup();
     await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_close" });
     expect(fake.requests).toEqual([]);
+  });
+
+  it("a call the sandbox's guards refuse never wakes it: it is refused, and nothing opens", async () => {
+    const { host } = setup();
+    for (const url of ["http://127.0.0.1:9222/json/list", "file:///home/user/.omb-browser/"]) {
+      const call = { name: OPEN, arguments: { url } };
+      const browser = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: OPEN, params: call }))!;
+      expect(browser.spec.env.AGENT_BROWSER_CDP, url).toBeUndefined();
+      const answer = await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", call) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(answer.isError, url).toBe(true);
+      expect([PRIVATE_ADDRESS_REFUSAL, LOCAL_SCHEME_REFUSAL]).toContain(answer.content[0]!.text);
+    }
+    expect(fake.requests, "no relay call: nothing woken").toEqual([]);
+    expect(BrowserRuntime.prototype.agentRpc, "nothing reached the engine").not.toHaveBeenCalledWith(expect.anything(), expect.anything(), "tools/call", expect.anything(), expect.anything());
+    // A public site opens the sandbox as before.
+    const browser = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: OPEN, params: { name: OPEN, arguments: { url: "https://93.184.215.14/" } } }))!;
+    expect(browser.spec.env.AGENT_BROWSER_CDP).toMatch(/^ws:\/\/127\.0\.0\.1:/);
   });
 
   it("a temporary or shared profile opens in the home: the sandbox keeps one profile per bot", async () => {

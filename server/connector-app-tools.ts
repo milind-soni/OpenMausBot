@@ -76,19 +76,20 @@ export const APP_TOOLS: readonly AppTool[] = [
   {
     name: "gmail.create_draft",
     slug: "GMAIL_CREATE_EMAIL_DRAFT",
-    description: "Create a new Gmail draft without sending. For a reply, read the original thread and provide its thread_id and matching subject. Each call creates a separate draft: first check gmail.list_drafts; revise an existing draft with gmail.update_draft and its draft ID. Never use send_email or a reply/send action to save a draft.",
+    description: "Create a new Gmail draft without sending. For a reply, read the original thread, pass its thread_id and leave the subject out: a subject on a reply starts a new thread and the draft leaves the conversation. Each call creates a separate draft: first check gmail.list_drafts; revise an existing draft with gmail.update_draft and its draft ID. Never use send_email or a reply/send action to save a draft.",
     properties: {
       to: { type: "string", description: "The recipient's address; several separated by commas." },
-      subject: { type: "string" },
+      subject: { type: "string", description: "The subject of a new draft. Leave out for a reply: with thread_id, a subject starts a new thread instead." },
       body: { type: "string", description: "The text of the email." },
       thread_id: { type: "string", description: "For a reply: the conversation's thread id." },
     },
-    required: ["to", "subject", "body"],
+    required: ["to", "body"],
     args: (input) => {
       const [first, ...rest] = addresses(input.to ?? input.recipient_email) ?? [];
+      const subject = text(input.subject);
       return {
-        user_id: "me", recipient_email: first ?? "", body: String(input.body ?? ""), subject: String(input.subject ?? ""),
-        ...(rest.length ? { extra_recipients: rest } : {}), ...(text(input.thread_id) ? { thread_id: text(input.thread_id) } : {}),
+        user_id: "me", recipient_email: first ?? "", body: String(input.body ?? ""),
+        ...(subject ? { subject } : {}), ...(rest.length ? { extra_recipients: rest } : {}), ...(text(input.thread_id) ? { thread_id: text(input.thread_id) } : {}),
       };
     },
   },
@@ -115,7 +116,7 @@ export const APP_TOOLS: readonly AppTool[] = [
   {
     name: "gmail.update_draft",
     slug: "GMAIL_UPDATE_DRAFT",
-    description: "Replace an existing Gmail draft in place without sending. Use its draft_id from creation or gmail.list_drafts, not a message ID. Read it first and provide the complete revised content, preserving recipients, subject and thread_id. Never create a replacement if this fails. Verify the result before claiming success.",
+    description: "Replace an existing Gmail draft in place without sending. Use its draft_id from creation or gmail.list_drafts, not a message ID. Read it first and provide the complete revised content, preserving recipients and thread_id, and the subject only when the draft has one. Never create a replacement if this fails. Verify the result before claiming success.",
     properties: {
       draft_id: { type: "string" }, to: { type: "string" }, subject: { type: "string" }, body: { type: "string" },
       thread_id: { type: "string" }, cc: { type: "string" }, bcc: { type: "string" }, is_html: { type: "boolean" },
