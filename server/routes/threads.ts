@@ -19,6 +19,7 @@ import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
+import { threadGoalPage } from "../message-db-goals.ts";
 import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";
 import {
   canOpenOutsideWorkspaceMessageFile, listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
@@ -148,6 +149,20 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, { bot: shownBot(bot, visible, limit) });
+    }
+
+    m = path.match(/^\/api\/threads\/([\w-]+)\/goals$/);
+    if (m && method === "GET") {
+      const threadId = m[1]!;
+      res.setHeader("cache-control", "private, no-store");
+      if (!visible.thread(threadId) || (!store.botByThread(threadId) && !store.groupByThread(threadId))) {
+        return json(res, 404, { error: "no such conversation" });
+      }
+      if (backgroundWhileAsleep(path, req.headers)) return answerAsleep(res, json);
+      const limit = pageSize(url.searchParams.get("limit"));
+      if (limit === null || limit === 0) return json(res, 400, { error: "limit must be a positive whole number" });
+      const page = threadGoalPage(threadId, limit ?? DEFAULT_PAGE, url.searchParams.get("before"));
+      return page ? json(res, 200, page) : json(res, 404, { error: "no such goal" });
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);

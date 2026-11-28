@@ -133,7 +133,7 @@ import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { BOT_BUBBLE_FINISH, isBotTextRow, joinedCorners, needsStamp, quietRow, simpleRowLayout, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT, SIMPLE_STACKED, SIMPLE_USER_BUBBLE, type BubbleJoin } from "./chat-bubble";
-
+import { ThreadGoals } from "./ThreadGoals";
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
 
@@ -1044,7 +1044,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <ChatNotice notice={state.notice} />
       <UnreadContextOverlay messages={chatMessages} windowedMessages={windowedMessages} unreadMessageId={unreadDivider.messageId} scrollRef={scrollRef} visitKey={`${bot.id}:${bot.threadId}:${openedAt}`} onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })} />
       <PinnedSignInSlot cards={pinnedSignIns} />
-
+      <ThreadGoals key={bot.threadId} thread={bot} botId={bot.id} canSwitchVersion={canWrite === true} inForkPanel={inForkPanel} />
       </GlassBar>
 
       <div

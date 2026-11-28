@@ -7,11 +7,12 @@ import { t } from "@/lib/i18n";
 
 const FLASH_CLASSES = ["ring-2", "ring-accent/70", "rounded-2xl", "transition-shadow"];
 
-async function loadThroughMessage(
+export async function loadThroughMessage(
   owner: { threadId: string; messages: Message[]; hasMore?: boolean },
   messageId: string,
   generation: number,
   dispatch: React.Dispatch<Action>,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
   const older: Message[] = [];
@@ -21,13 +22,16 @@ async function loadThroughMessage(
   let found = false;
   while (before && hasMore && !found) {
     const page = await api<{ messages?: Message[]; hasMore?: boolean }>(
-      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+      `/api/threads/${encodeURIComponent(owner.threadId)}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+      signal ? { signal } : undefined,
     );
+    signal?.throwIfAborted();
     const messages = page.messages ?? [];
     older.unshift(...messages);
     found = messages.some((message) => message.id === messageId);
-    hasMore = Boolean(page.hasMore) && messages.length > 0;
-    before = messages[0]?.id;
+    const next = messages[0]?.id;
+    hasMore = Boolean(page.hasMore) && next !== undefined && next !== before;
+    before = next;
   }
   if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, before: heldFrom, messages: older, hasMore });
 }

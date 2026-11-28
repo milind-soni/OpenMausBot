@@ -9,6 +9,7 @@ import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
+import { GOAL_MESSAGE_INDEXES_SQL } from "./message-db-goals.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts"; import { createAttachmentNameIndex, STORED_UPLOAD_NAME } from "./message-db-attachment-names.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
@@ -16,6 +17,7 @@ import { MessageSearchWorker } from "./message-search-worker.ts"; import { messa
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
 import type { Notification, NotificationLogEntry } from "../shared/notification.ts";
 export type { SearchHit } from "./message-search-query.ts";
+export { workingGoalRunMessages } from "./message-db-goals.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 /** The rows the Today page reads, and among them the failed tool calls. JSON.stringify escapes every quote inside a
@@ -68,8 +70,8 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
     CREATE INDEX IF NOT EXISTS messages_failed_at ON messages(at) WHERE ${FAILED_CALL};
+    ${GOAL_MESSAGE_INDEXES_SQL}
     -- For the periodic scans, whose WHERE clauses no index above repeats.
-    CREATE INDEX IF NOT EXISTS messages_goal_run ON messages(at) WHERE kind = 'goal.run';
     CREATE INDEX IF NOT EXISTS messages_app ON messages(at) WHERE kind = 'app';
     CREATE INDEX IF NOT EXISTS messages_open_rescue ON messages(at) WHERE kind = 'activity' AND json_extract(json, '$.tool.rescue') IS NOT NULL AND json_extract(json, '$.tool.rescue.settled') IS NULL AND json_extract(json, '$.tool.rescue.over') IS NULL;
     CREATE TABLE IF NOT EXISTS thread_state (
@@ -467,16 +469,6 @@ export function appendMessage(threadId: string, message: Message): void {
 
 export function updateMessage(threadId: string, message: Message): void {
   const json = JSON.stringify(message); prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, json, cjkSearchText(message.text), threadId, message.id); messageWritten(json); attachmentNameIndex.written(threadId, message.id, json);
-}
-
-export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
-  const rows = db()
-    .prepare(
-      "SELECT thread_id, json FROM messages " +
-      "WHERE kind = 'goal.run' AND json_extract(json, '$.goalRun.status') = 'working'",
-    )
-    .all() as Array<{ thread_id: string; json: string }>;
-  return rows.map((row) => ({ threadId: row.thread_id, message: JSON.parse(row.json) as Message }));
 }
 
 /** First-reply rescue rows that never settled or ended: at boot, every one of them belongs to a turn that is gone. */

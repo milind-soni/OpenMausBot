@@ -183,6 +183,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/goals$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
