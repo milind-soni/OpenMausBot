@@ -10,6 +10,7 @@ import type { OptionCardData } from "../../shared/wire.ts";
 import { noticeTool, type ChatNoticeKey } from "../chat-notices.ts";
 import { openCardRows } from "../message-db.ts";
 import type { RuntimeEvent } from "../contracts.ts";
+import type { DecisionVia } from "../decision-log.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -37,6 +38,16 @@ export function copiedQuestionAnswer(store: Pick<Store, "messagesFor">, threadId
   if (!origin || copy?.card?.handoffQuestion?.copyTo !== threadId || origin.threadId === threadId) return undefined;
   const original = store.messagesFor(origin.threadId).find(row => row.id === origin.messageId);
   return original?.card?.requestId ? { threadId: origin.threadId, requestId: original.card.requestId } : undefined;
+}
+
+export interface CardResponseInput {
+  auth: RequestAuth;
+  threadId: string;
+  requestId: string;
+  behavior: "allow" | "deny" | "answer";
+  message?: string;
+  callId?: string;
+  via?: DecisionVia;
 }
 
 export interface AskCardsDeps {
