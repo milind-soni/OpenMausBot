@@ -4841,9 +4841,9 @@ async function respondToCard(input: {
   }
   const refusal = cardAnswerRefusal(auth, input.threadId, requestId, behavior) ?? cardAnswerRefusal(auth, threadId, requestId, behavior);
   if (refusal) return { ok: false, status: 403, error: refusal };
-  const bot = store.botByThread(threadId);
-  if (!bot) return { ok: false, status: 404, error: "The chat is gone." };
   const cardMessage = store.messagesFor(threadId).find((candidate) => candidate.card?.requestId === requestId);
+  const bot = store.botByThread(threadId) ?? (store.groupByThread(threadId) && cardMessage?.from ? store.bot(cardMessage.from.botId) : undefined);
+  if (!bot) return { ok: false, status: 404, error: "The chat is gone." };
   const card = cardMessage?.card;
   const refused = liveDecisionRefusal(card);
   if (refused) return { ok: false, status: 409, error: refused };
