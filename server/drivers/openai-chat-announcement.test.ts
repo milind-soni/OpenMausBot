@@ -60,6 +60,7 @@ describe("announcesAction", () => {
     `${"先前检查的实际结果如下。".repeat(50)}\n\n    我会先运行命令。`,
     "> 以下是示例回复\n我现在直接检查项目文档。",
     "我现在确认：项目文档已检查完毕，无需继续操作。",
+    "我现在确认：是否已更新的检查已完成，无需继续操作。",
     "> 我会读取文件。",
     `检查已完成。${"这里是核对结果。".repeat(70)}\n\n检查结果：`,
   ])("does not nudge Chinese questions, waits, quotes or final replies: %s", text => {
