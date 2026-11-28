@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { readMcpPaste, type McpPasteError } from "@/lib/mcp-paste";
 
@@ -47,6 +48,7 @@ export function McpServerEditor({ server, fixKeys = false, taken, team, busy, on
   const draft = drafts.length === 1 ? drafts[0]! : null;
   const setDraft = (update: (current: McpDraft) => McpDraft) => setDrafts((current) => current.length === 1 ? [update(current[0]!)] : current);
   const savedOAuth = server && isRemoteMcpListing(server) ? server.oauth : undefined;
+  const redirectCopy = useCopyFeedback(savedOAuth?.redirectUri ?? "");
   const secretKept = Boolean(savedOAuth?.clientSecretConfigured && !draft?.oauthForgetSecret);
   const canKeepOwn = team && adding && draft !== null && soleKey(draft) !== null;
 
@@ -161,7 +163,14 @@ export function McpServerEditor({ server, fixKeys = false, taken, team, busy, on
                 </div>
                 <div className="sm:col-span-2">
                   <div className="text-[12px] font-medium text-ink">{t("mcp.oauth.title")}</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-ink-secondary">{savedOAuth ? t("mcp.oauth.hintRedirect", { uri: savedOAuth.redirectUri }) : t("mcp.oauth.hint")}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] leading-relaxed text-ink-secondary">
+                    <span>{savedOAuth ? t("mcp.oauth.hintRedirect", { uri: savedOAuth.redirectUri }) : t("mcp.oauth.hint")}</span>
+                    {savedOAuth && (
+                      <button type="button" onClick={redirectCopy.copy} className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[11px] text-ink-secondary hover:text-ink">
+                        {t(redirectCopy.state === "copied" ? "mcp.oauth.copied" : redirectCopy.state === "failed" ? "mcp.oauth.copyFailed" : "mcp.oauth.copy")}
+                      </button>
+                    )}
+                  </p>
                   <div className="mt-2 grid gap-4 sm:grid-cols-2">
                     <label className="block">
                       <span className={LABEL}>{t("mcp.oauth.clientId")}</span>
@@ -185,6 +194,12 @@ export function McpServerEditor({ server, fixKeys = false, taken, team, busy, on
                       <span className={LABEL}>{t("mcp.oauth.scopes")}</span>
                       <input value={draft.oauthScopes} placeholder="offline_access api://my-app/mcp.read" spellCheck={false} className={cn(FIELD, "font-mono text-[12px]")}
                         onChange={(event) => setDraft((current) => ({ ...current, oauthScopes: event.target.value }))} />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className={LABEL}>{t("mcp.oauth.redirectUri")}</span>
+                      <input value={draft.oauthRedirectUri} placeholder={savedOAuth?.redirectUri ?? "https://maus.example/mcp-oauth/callback"} spellCheck={false} autoComplete="off" className={cn(FIELD, "font-mono text-[12px]")}
+                        onChange={(event) => setDraft((current) => ({ ...current, oauthRedirectUri: event.target.value }))} />
+                      <span className="mt-1.5 block text-[11px] text-ink-secondary">{t("mcp.oauth.redirectHint")}</span>
                     </label>
                   </div>
                 </div>

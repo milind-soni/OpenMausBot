@@ -24,6 +24,7 @@ export interface McpOAuthClientListing {
   scopes: string[];
   clientSecretConfigured: boolean;
   redirectUri: string;
+  redirectUriDefault?: boolean;
 }
 export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & {
   scope?: "team" | "person"; managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean;
@@ -61,6 +62,7 @@ export interface McpDraft extends McpResultBudgetDraft {
   oauthClientId: string;
   oauthClientSecret: string;
   oauthScopes: string;
+  oauthRedirectUri: string;
   oauthForgetSecret: boolean;
 }
 
@@ -73,7 +75,7 @@ export function secretRow(row: Omit<SecretRow, "id"> = { name: "", value: "" }):
 export function emptyDraft(): McpDraft {
   return {
     name: "", transport: "remote", command: "", args: "", env: [secretRow()], type: "http", url: "", headers: [secretRow()],
-    oauthClientId: "", oauthClientSecret: "", oauthScopes: "", oauthForgetSecret: false, resultBudget: "",
+    oauthClientId: "", oauthClientSecret: "", oauthScopes: "", oauthRedirectUri: "", oauthForgetSecret: false, resultBudget: "",
   };
 }
 
@@ -90,6 +92,7 @@ export function draftFor(server: McpServerListing): McpDraft {
       headers: savedRows(server.headerKeys),
       oauthClientId: server.oauth?.clientId ?? "",
       oauthScopes: server.oauth?.scopes.join(" ") ?? "",
+      oauthRedirectUri: server.oauth && !server.oauth.redirectUriDefault ? server.oauth.redirectUri : "",
       resultBudget: resultBudgetDraft(server),
     };
   }
@@ -158,17 +161,20 @@ export function parseMcpArguments(value: string): string[] {
 }
 
 export function parseMcpOAuthClient(
-  input: { clientId: string; clientSecret: string; scopes: string; forgetSecret: boolean },
-  saved?: { clientSecretConfigured: boolean },
-): { clientId: string; clientSecret?: string | true; scopes?: string[] } | undefined {
+  input: { clientId: string; clientSecret: string; scopes: string; redirectUri: string; forgetSecret: boolean },
+  saved?: { clientSecretConfigured: boolean; redirectUriDefault?: boolean },
+): { clientId: string; clientSecret?: string | true; scopes?: string[]; redirectUri?: string } | undefined {
   const clientId = input.clientId.trim();
   if (!clientId) return undefined;
   const secret = input.clientSecret.trim();
   const scopes = input.scopes.split(/[\s,]+/).filter(Boolean);
+  const redirectUri = input.redirectUri.trim();
   return {
     clientId,
     ...(secret ? { clientSecret: secret } : saved?.clientSecretConfigured && !input.forgetSecret ? { clientSecret: true as const } : {}),
     ...(scopes.length ? { scopes } : {}),
+    // A cleared field on an app that named a return address goes back to the default loopback one.
+    ...(redirectUri ? { redirectUri } : saved?.redirectUriDefault === false ? { redirectUri: "" } : {}),
   };
 }
 
@@ -184,7 +190,7 @@ export function draftBody(
     const headers = rowsBody(draft.headers, "header");
     if (!headers.ok) return headers;
     const oauth = parseMcpOAuthClient(
-      { clientId: draft.oauthClientId, clientSecret: draft.oauthClientSecret, scopes: draft.oauthScopes, forgetSecret: draft.oauthForgetSecret },
+      { clientId: draft.oauthClientId, clientSecret: draft.oauthClientSecret, scopes: draft.oauthScopes, redirectUri: draft.oauthRedirectUri, forgetSecret: draft.oauthForgetSecret },
       existing && isRemoteMcpListing(existing) ? existing.oauth : undefined,
     );
     return { ok: true, body: { type: draft.type, url, headers: headers.values, ...(oauth ? { oauth } : {}) } };

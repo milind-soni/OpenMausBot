@@ -9040,7 +9040,7 @@ describe("harness HTTP API", () => {
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
         name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true, scope: "team",
-        oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
+        oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/), redirectUriDefault: true },
       }]);
 
       expect((await api("POST", "/api/mcp/servers/corp/test")).body.auth).toBe("required");

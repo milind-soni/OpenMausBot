@@ -356,6 +356,28 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(host.querySelector("[data-mcp-editor]")).toBeNull();
   });
 
+  it("shows the sign-in app's return address, copies it, and saves an edited one", async () => {
+    fixture.servers = [{
+      name: "mail", type: "http", url: "https://mail.example.com/mcp", headerKeys: [], enabled: true,
+      oauth: { clientId: "fixture-client-id", scopes: [], clientSecretConfigured: false, redirectUri: "https://maus.example/mcp-oauth/callback", redirectUriDefault: false },
+    }];
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Refresh MCP servers']")!.click());
+    await settle();
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Edit mail']")!.click());
+    await settle();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    await click("Copy");
+    expect(writeText).toHaveBeenCalledWith("https://maus.example/mcp-oauth/callback");
+
+    const field = "input[placeholder='https://maus.example/mcp-oauth/callback']";
+    expect(host.querySelector<HTMLInputElement>(field)!.value).toBe("https://maus.example/mcp-oauth/callback");
+    await type(field, "https://new.example/mcp-oauth/callback");
+    await click("Save");
+    expect(calls("PUT", "/api/mcp/servers/mail")[0]!.body).toMatchObject({
+      oauth: { clientId: "fixture-client-id", redirectUri: "https://new.example/mcp-oauth/callback" },
+    });
+  });
+
   it.each([
     ["edit", ""], ["fix", ""],
     ["edit", "Bearer replacement-key"], ["fix", "Bearer replacement-key"],
