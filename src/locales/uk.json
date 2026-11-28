@@ -4003,7 +4003,7 @@
   "placeLook.pictureLine": "Зображення, що розчиняється вгорі бічної панелі.",
   "settings.glance.appsConnected": "Підключено: {count}",
   "settings.glance.appsNone": "Поки немає",
-  "settings.recovery.short": "Якщо провайдер не запуститься, один раз пробується запасний.",
+  "settings.recovery.short": "Якщо провайдер не запуститься, досягне ліміту використання або в нього закінчаться кредити, роботу продовжить запасний.",
   "decider.introShort": "Невеликі швидкі моделі, що сортують і читають для ваших ботів.",
   "decider.provider.title": "Провайдер",
   "decider.status.notSetUpShort": "Не налаштовано",

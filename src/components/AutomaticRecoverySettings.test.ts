@@ -70,14 +70,14 @@ describe("AutomaticRecoverySettings", () => {
     expect(view.engine).toBeUndefined();
     expect(view.model).toBeUndefined();
     expect(view.save).toBeUndefined();
-    expect(view.html).toContain("If a provider fails before it starts, try a backup once.");
+    expect(view.html).toContain("If a provider fails before it starts, hits a usage limit or runs out of credit, a backup takes over.");
     expect(view.html).toContain("Learn more");
     expect(view.html).not.toContain("Channels are not included");
     expect(view.html).toContain('aria-describedby="automatic-recovery-help"');
     // Learn more (the fourth piece of state) opens the rest under the row.
     fixture.values[3] = true;
     const more = render().html;
-    expect(more).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
+    expect(more).toContain("If a bot&#x27;s model provider fails before starting, reaches a usage limit or runs out of credit, the bot carries on with this backup until its provider works again. Work that may have already run is not replayed.");
     expect(more).toContain("direct bot threads, including Chief and work handed on");
     expect(more).toContain("Channels are not included");
     expect(more).toContain("Only this thread switches; bot defaults stay unchanged.");
