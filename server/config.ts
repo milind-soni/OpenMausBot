@@ -30,7 +30,9 @@ import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
-import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { hearingConfigShape } from "./tts/hearing-config.ts";
+import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
+import { ttsConfigSchema, type TtsConfig } from "./tts/config.ts";
+export { FISH_TTS_MODELS, type FishTtsModel } from "./tts/config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
@@ -40,10 +42,6 @@ export * from "./vps-config.ts";
 const optionalText = z.string().optional(), secretText = z.string().trim().optional(); // secretText: a saved key without a paste's surrounding whitespace (a trailing newline), so it can go in a header.
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
-
-/** Fish Audio speech models (`tts.fishModel`); unset means `s2.1-pro`, and `s2.1-pro-free` is Fish's free tier. */
-export const FISH_TTS_MODELS = ["s2.1-pro", "s2.1-pro-free"] as const;
-export type FishTtsModel = (typeof FISH_TTS_MODELS)[number];
 
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
@@ -348,22 +346,7 @@ const appConfigSchema = z.object({
   vpsServers: vpsServersSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: secretText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
-  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`), "deepseek" (`deepseek.key`; it also hears dictation) or "chatterbox" (local; `baseUrl`, `model`). */
-  tts: z.object({
-    key: secretText,
-    fishKey: secretText,
-    geminiKey: secretText,
-    voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "deepseek"]).optional(),
-    baseUrl: z
-      .string()
-      .trim()
-      .max(2048)
-      .refine((value) => !value || /^https?:\/\//i.test(value), "the Chatterbox server address must start with http:// or https://")
-      .optional(),
-    model: optionalText, ...hearingConfigShape,
-    fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
-  }).optional(),
+  tts: ttsConfigSchema.optional(),
   decider: deciderConfigSchema.optional(),
   live: liveConfigSchema.optional(),
   /** Image provider credentials stay separate; choosing a router never reuses a cloud key. */
@@ -456,7 +439,7 @@ export interface AppConfig extends HelperConfig {
   vps?: VpsConfig;
   vpsServers?: VpsServer[];
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
+  tts?: TtsConfig;
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;
@@ -743,6 +726,7 @@ export function loadConfig(): AppConfig {
   if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
   if (process.env.OMB_GEMINI_API_KEY !== undefined) cfg.tts.geminiKey = process.env.OMB_GEMINI_API_KEY;
+  if (process.env.OMB_CARTESIA_API_KEY !== undefined) cfg.tts.cartesiaKey = process.env.OMB_CARTESIA_API_KEY;
   cfg.decider = { ...cfg.decider };
   if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY; if (process.env.OMB_CUSTOM_DECIDER_KEY !== undefined) cfg.decider.customKey = process.env.OMB_CUSTOM_DECIDER_KEY;
   if (process.env.OMB_OPENROUTER_DECIDER_KEY !== undefined) cfg.decider.openrouterKey = process.env.OMB_OPENROUTER_DECIDER_KEY; if (process.env.OMB_WORKERS_AI_TOKEN !== undefined) cfg.decider.workersAiToken = process.env.OMB_WORKERS_AI_TOKEN;
@@ -788,6 +772,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
     [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"],
+    [patch.tts?.cartesiaKey, "OMB_CARTESIA_API_KEY"],
     [patch.decider?.key, "OMB_JEV_API_KEY"], [patch.decider?.customKey, "OMB_CUSTOM_DECIDER_KEY"],
     [patch.decider?.openrouterKey, "OMB_OPENROUTER_DECIDER_KEY"], [patch.decider?.workersAiToken, "OMB_WORKERS_AI_TOKEN"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],

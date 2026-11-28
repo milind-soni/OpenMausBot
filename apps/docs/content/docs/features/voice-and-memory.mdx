@@ -6,7 +6,7 @@ icon: AudioLines
 
 ## Spoken replies
 
-Pick a voice engine in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive. Four engines are available:
+Pick a voice engine in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive. Voice engines include:
 
 - **ElevenLabs** — cloud voices, needs an API key.
 - **Fish Audio** — cloud voices from the Fish Audio library, needs its own API key.
@@ -22,6 +22,16 @@ The harness rewrites code-heavy Markdown into speech-friendly text before synthe
 3. Pick one of the voices returned by your Fish Audio account, then use **Try** before enabling spoken replies.
 
 Fish Audio and ElevenLabs keys are stored separately, so switching engines does not replace the other provider's credential. The picker combines popular public voices with voices owned by your Fish Audio account. Only use a voice when you have permission to do so.
+
+### Cartesia
+
+1. Create a key in [Cartesia API Keys](https://play.cartesia.ai/keys).
+2. In an agent profile's **Voice** settings, choose **Cartesia**, paste the key, and save it.
+3. Search for a stock voice or a clone available to your account, then use **Try** to hear it.
+
+Cartesia generates spoken replies, voice notes, and the bot's audio in **Take turns** calls. **Live** calls and microphone recognition use their own settings. Text selected for speech is sent to Cartesia and uses your Cartesia account's credits.
+
+For a self-hosted workspace, `tts.cartesiaModel` in `config.json` overrides the default `sonic-3.6` model. Set `tts.cartesiaLanguage` to a supported language code, such as `nl` for Dutch, to specify the language of the text sent for speech.
 
 ### Chatterbox (local)
 

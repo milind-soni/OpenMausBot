@@ -83,17 +83,42 @@ describe("VoiceSettings", () => {
     expect(onPatch).not.toHaveBeenCalled();
   });
 
-  it("lays the eight voice services out four to a row, OpenAI beside the other online services", async () => {
+  it("offers Cartesia beside the other voice providers", async () => {
     fixture.api.mockResolvedValue({ voices: [] });
     await render(bot("pepper"), vi.fn());
     const radios = [...host.querySelectorAll<HTMLElement>('[role="radiogroup"] [role="radio"]')];
-    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "OpenAI", "Grok (xAI)", "Gemini", "Built-in Mac voices", "Chatterbox (local)", "DeepSeek"]);
+    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "OpenAI", "Grok (xAI)", "Gemini", "Built-in Mac voices", "Chatterbox (local)", "DeepSeek", "Cartesia"]);
     expect(radios.map((radio) => radio.className.match(/col-span-\d/)?.[0])).toEqual([
-      "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1",
+      "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1",
     ]);
   });
 });
 
+
+describe("Cartesia voice settings", () => {
+  it("saves Cartesia's key in its own field and picks an owned voice", async () => {
+    fixture.config = { tts: { provider: "cartesia", configured: false, voice: "" } };
+    fixture.api.mockResolvedValue({ tts: { provider: "cartesia", configured: true } });
+    const onPatch = vi.fn();
+    await render(bot("pepper"), onPatch);
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Cartesia key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "fixture-cartesia-key");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('input[aria-label="Cartesia key"] + button')!.click());
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { cartesiaKey: "fixture-cartesia-key" } }) });
+    expect(input.value).toBe("");
+    fixture.config = { tts: { provider: "cartesia", configured: true, voice: "" } };
+    fixture.api.mockResolvedValue({ voices: [{ id: "cartesia-voice", label: "My Cartesia clone" }] });
+    await render(bot("pepper"), onPatch);
+    await act(async () => trigger().click());
+    const clone = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find((option) => option.textContent?.includes("My Cartesia clone"))!;
+    await act(async () => clone.click());
+    expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "cartesia-voice" });
+    expect(fixture.api).not.toHaveBeenCalledWith("/api/tts/voices/add", expect.anything());
+  });
+});
 
 describe("OpenAI voice settings", () => {
   const openaiRadio = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) => radio.textContent === "OpenAI")!;
