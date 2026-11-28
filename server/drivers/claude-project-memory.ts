@@ -1,7 +1,7 @@
 // Claude Code delivers the working folder's project memory — CLAUDE.md, or AGENTS.md when no CLAUDE.md sits in the
 // working folder or any folder above it (code.claude.com/docs/en/memory) — as an attachment that follows the first
 // message of a session. A new session's first message always differs, because the volatile half of the prompt rides it
-// (prompt-split.ts), so every new session wrote the whole memory to the provider's cache again (#7540). An isolated
+// (prompt-split.ts), so every new session wrote the whole memory to the provider's cache again. An isolated
 // launch folds the same files the CLI would read into the system prompt it starts with and lists them in
 // claudeMdExcludes, so the memory shares the system prompt's cached prefix instead of following the first message.
 //

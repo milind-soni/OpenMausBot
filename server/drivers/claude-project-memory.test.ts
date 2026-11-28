@@ -1,4 +1,4 @@
-// The project memory fold (#7540): the walk mirrors Claude Code's own loader, whose fallback and scope rules decide
+// The project memory fold: the walk mirrors Claude Code's own loader, whose fallback and scope rules decide
 // what a session's system prompt may carry.
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

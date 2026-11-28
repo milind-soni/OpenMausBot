@@ -1682,7 +1682,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    // The memory shares the system prompt's cached prefix instead of following the first message (#7540).
+    // The memory shares the system prompt's cached prefix instead of following the first message.
     expect(seen.systemPromptFile).toBe(`You are Testy.\n\nInstructions from ${join(botFolder, "AGENTS.md")}:\n\nKeep replies short.`);
     expect(seen.settings.claudeMdExcludes).toEqual([...personalMemory(), join(botFolder, "AGENTS.md")]);
     const content = seen.prompt.message.content;
