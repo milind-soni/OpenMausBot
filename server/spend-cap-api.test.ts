@@ -246,7 +246,7 @@ describe("spend cap and prices through real turns", () => {
     await expect.poll(() => titleCalls("Plan the spring offsite").length, { timeout: 15_000 }).toBe(1);
 
     expect((await put({ budgets: { monthlyUsd: 0.01 } })).status).toBe(200);
-    expect((await (await api("/api/usage")).json()).budget.exceeded).toBe(true);
+    expect(await (await api("/api/usage")).json()).toMatchObject({ budget: { exceeded: true } });
     const task = await api(`/api/bots/${bot.id}/tasks`, json({}));
     const { threadId } = (await task.json() as any).task;
     expect((await api(`/api/bots/${bot.id}/messages`, json({ text: "Draft the venue shortlist", threadId }))).status).toBe(409);
