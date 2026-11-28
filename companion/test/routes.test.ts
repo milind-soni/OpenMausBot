@@ -95,6 +95,7 @@ describe("what the app may do", () => {
     ["PATCH", "/api/groups/room-1/tasks/th_1"],
     ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
+    ["GET", "/api/threads/th_1/goals"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
     ["GET", "/api/threads/th_1/messages/msg_2/tool"],
     ["GET", "/api/threads/th_1/messages/msg_2/app"],
