@@ -1,5 +1,5 @@
 // OpenCode over ACP; Zen, Go, OpenRouter and local providers are models it discovers, not separate drivers.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
@@ -413,7 +413,12 @@ export function ensureOpenCodeInjectModel(
     models,
   };
   config.provider = providers;
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  // The provider entry carries its apiKey, so this file is the server user's alone: the mode applies only when
+  // the write creates it, so an existing file is chmodded too.
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {}
   return native;
 }
 

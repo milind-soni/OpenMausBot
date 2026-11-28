@@ -3,7 +3,7 @@
 // not configure JSON-RPC sessions: -m/--model, --auto, -r/--reasoning-effort, and
 // --disable-builtin-skills are still validated, but session settings come from JSON-RPC requests."
 // So model and autonomy are set over the wire in configureSession (verified on droid 0.196.0).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { userHome } from "../../env-path.ts";
@@ -43,6 +43,15 @@ export function droidInjectId(host: string, model: string): string {
   return `${INJECT_ID_PREFIX}${safe}`;
 }
 
+/** A custom model carries its apiKey, so the settings file it lands in is the server user's alone. The mode
+ *  applies only when the write creates the file, so an existing one is chmodded too. */
+function writeFactorySettings(path: string, settings: FactorySettings & Record<string, unknown>): void {
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {}
+}
+
 /** Upsert a BYOK custom model so session/set_model can reach the local host. */
 export function ensureDroidInjectModel(
   modelId: string,
@@ -72,7 +81,7 @@ export function ensureDroidInjectModel(
     if (!match.id) {
       match.id = id;
       settings.customModels = custom;
-      writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+      writeFactorySettings(path, settings);
     }
     return match.id;
   }
@@ -85,7 +94,7 @@ export function ensureDroidInjectModel(
     provider: "generic-chat-completion-api",
   });
   settings.customModels = custom;
-  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+  writeFactorySettings(path, settings);
   return id;
 }
 
