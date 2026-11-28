@@ -90,7 +90,7 @@ import {
   roomSteersQueued,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions"; import { mentionPicksFor, restoreMentionPicks } from "@/lib/mention-picks";
+import { departmentChoices, mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions"; import { mentionPicksFor, restoreMentionPicks } from "@/lib/mention-picks";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
@@ -355,7 +355,7 @@ export function Composer({
     if (!mention || mention.start === dismissedAt || isPlaceId(bot?.id)) return []; // a My Cloud bot's chat names none of this computer's
     const pool: MentionChoice[] = group
       ? [
-          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
+          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }, ...departmentChoices(members ?? [])] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : bots
@@ -825,7 +825,7 @@ export function Composer({
           <MentionTextarea
           wrapperClassName={stacked ? "basis-full" : undefined} ghost={suggestion.text ? <SuggestedReplyGhost text={suggestion.text} onUse={suggestion.accept} /> : undefined}
           inputRef={inputRef}
-          peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
+          peers={[...(group ? [...(members ?? []), ...(group.dm ? [] : departmentChoices(members ?? []))] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
           dir="auto"
           rows={1}

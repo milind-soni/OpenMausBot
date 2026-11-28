@@ -76,6 +76,20 @@ describe("roomResponders", () => {
     expect(roomResponders("@Milind take this", members, { kind: "member", botId: "atlas" })).toEqual([members[1]]);
   });
 
+  it("routes a department tag to each member of that department", () => {
+    const maya = { id: "maya", name: "Maya", section: "Research" };
+    const theo = { id: "theo", name: "Theo", section: "Research" };
+    const nora = { id: "nora", name: "Nora", section: "Design" };
+    const off = { id: "off", name: "Off", section: "Research", hidden: true };
+    const room = [maya, theo, nora, off, ...members];
+    const lead = { kind: "member", botId: "atlas" } as const;
+    expect(roomResponders("@Research status", room, lead)).toEqual([maya, theo]);
+    expect(roomResponders("@Nora and @research", room, lead)).toEqual([nora, maya, theo]);
+    expect(roomResponders("@Maya and @Research", room, lead)).toEqual([maya, theo]);
+    expect(roomResponders("@General status", room, lead)).toEqual(members);
+    expect(roomResponders("@Researchers status", room, lead)).toEqual([members[0]]);
+  });
+
   it("supports everyone and mentions-only room policies", () => {
     expect(roomResponders("hello", members, { kind: "everyone" })).toEqual(members);
     expect(roomResponders("hello", members, { kind: "mentions" })).toEqual([]);

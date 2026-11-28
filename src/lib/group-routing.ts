@@ -1,5 +1,6 @@
 import type { Bot, ConfigStatus, Group, GroupDefaultResponder } from "@/state/store";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
+import { departmentMentions } from "../../shared/department-mention";
 import { resolveMentions } from "../../shared/room-mentions";
 import { t } from "./i18n";
 
@@ -55,7 +56,7 @@ export function openTaskWorking(group: Pick<Group, "threadId" | "working" | "tas
 
 /** Who answers this line, as the room reads it. `ambiguous`: it @-tags a name several members share and none of them
  * was picked from the @ list, so the room refuses it and nobody answers. */
-export function roomRouteForComposer<T extends { id: string; name: string; hidden?: boolean }>(
+export function roomRouteForComposer<T extends { id: string; name: string; section?: string; hidden?: boolean }>(
   text: string,
   members: T[],
   group: Pick<Group, "defaultResponder">,
@@ -75,7 +76,8 @@ export function roomRouteForComposer<T extends { id: string; name: string; hidde
   }
   const mentioned = resolveMentions(text, available, picked);
   if (mentioned.ambiguous.length) return { responders: [], ambiguous: true };
-  if (mentioned.bots.length) return { responders: mentioned.bots, ambiguous: false };
+  const tagged = [...new Set([...mentioned.bots, ...departmentMentions(text, available)])];
+  if (tagged.length) return { responders: tagged, ambiguous: false };
   const fallback = effectiveDefaultResponder(group, available);
   if (fallback.kind === "everyone" || fallback.kind === "auto") return { responders: available, ambiguous: false };
   const lead = fallback.kind === "member" ? available.find((member) => member.id === fallback.botId) : undefined;
