@@ -7889,6 +7889,7 @@
   "botIdentity.soul.keepSaved": "Keep the saved version",
   "botIdentity.soul.contextHelp": "In this bot’s context on every turn.",
   "botIdentity.soul.mirroredTo": "Mirrored to",
+  "botIdentity.soul.openLarge": "Open large",
   "botIdentity.dialog.title": "Bot instructions",
   "botIdentity.dialog.close": "Close bot instructions",
   "botIdentity.dialog.empty": "No instructions yet",

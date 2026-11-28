@@ -7500,6 +7500,7 @@
   "botIdentity.soul.keepSaved": "Manter a versão salva",
   "botIdentity.soul.contextHelp": "Fica no contexto deste bot em todas as sessões.",
   "botIdentity.soul.mirroredTo": "Espelhado em",
+  "botIdentity.soul.openLarge": "Abrir ampliado",
   "botIdentity.dialog.title": "Instruções do bot",
   "botIdentity.dialog.close": "Fechar instruções do bot",
   "botIdentity.dialog.empty": "Nenhuma instrução ainda",
