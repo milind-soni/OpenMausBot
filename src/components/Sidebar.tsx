@@ -1352,7 +1352,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
-          {!q && density !== "icons" && <SidebarRecentConversations bots={sideLists.bots} groups={sideLists.groups} routineRuns={state.routineRuns} viewerEmail={viewerEmail} welcoming={welcoming} selectedId={state.activeView === "chat" ? state.selectedId : null} onOpen={(target) => { if (openThread(dispatch, target, state, showThreads) && phone) onClose(); }} />}
+          {!q && density !== "icons" && <SidebarRecentConversations bots={sideLists.bots} groups={sideLists.groups} routineRuns={state.routineRuns} viewerEmail={viewerEmail} welcoming={welcoming} selectedId={state.activeView === "chat" && state.newChat?.botId !== state.selectedId ? state.selectedId : null} onOpen={(target) => { if (openThread(dispatch, target, state, showThreads) && phone) onClose(); }} />}
           {sectionIds.map((id, index) => {
             const sectionName = userSectionName(id), editable = oneList?.mirror ? null : sectionName;
             const sectionChiefItems = sectionName

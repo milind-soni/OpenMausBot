@@ -45,10 +45,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render(bots: Bot[]) {
+async function render(bots: Bot[], state: Partial<typeof initialState> = {}) {
   await act(async () => root.render(createElement(BotEditorStore, {
     value: {
-      state: { ...initialState, connected: true, bots, groups: [room], selectedId: "Scout", activeView: "chat" },
+      state: { ...initialState, connected: true, bots, groups: [room], selectedId: "Scout", activeView: "chat", ...state },
       dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {},
     },
     children: createElement(Sidebar, { open: true, onClose }),
@@ -99,4 +99,15 @@ it.each([false, true])("shows cross-department activity and opens the exact conv
   expect(order()).toEqual([]);
   await act(async () => toggle.click());
   expect(order()).toEqual(["Scout-main", "Builder-main", "launch-plan"]);
+});
+
+it("marks the displayed room thread and clears the previous selection while drafting", async () => {
+  const scout = bot("Scout", "Research", 10);
+  await render([scout], { newChat: { botId: "Scout", session: 1, held: [] } });
+  expect(rows().some((row) => row.hasAttribute("aria-current"))).toBe(false);
+  await render([scout], { selectedId: room.id, forkPanel: {
+    kind: "group", ownerId: room.id, threadId: "launch-plan", messages: [], activeLeafId: null,
+    loading: false, loadId: "load", loadFailed: false,
+  } });
+  expect(rows().find((row) => row.dataset.sidebarRecentThread === "launch-plan")?.getAttribute("aria-current")).toBe("page");
 });

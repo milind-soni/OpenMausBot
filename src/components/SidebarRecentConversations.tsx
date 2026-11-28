@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useStoreSelector } from "@/state/store-select";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { hiddenFromSidebar } from "@/lib/default-bot";
@@ -21,6 +22,7 @@ export function SidebarRecentConversations({ bots, groups, routineRuns, viewerEm
   selectedId: string | null;
   onOpen: (target: ThreadTarget) => void;
 }) {
+  const openRoomThread = useStoreSelector((state) => state.forkPanel?.kind === "group" && state.forkPanel.ownerId === selectedId ? state.forkPanel.threadId : null);
   const [expanded, setExpanded] = useState(true);
   const entries = useMemo(() => {
     const runThreads = new Set(routineRuns?.map((run) => run.threadId));
@@ -45,7 +47,7 @@ export function SidebarRecentConversations({ bots, groups, routineRuns, viewerEm
       <span className="truncate">{label}</span>
     </button>
     {expanded && entries.map(({ owner, task }) => {
-      const current = selectedId === owner.id && task.threadId === owner.threadId;
+      const current = selectedId === owner.id && task.threadId === (openRoomThread ?? owner.threadId);
       const title = task.title ? localizedTaskTitle(task.title) : t("task.untitledChat");
       return <button key={`${owner.id}:${task.threadId}`} type="button" data-sidebar-recent-thread={task.threadId}
         aria-current={current ? "page" : undefined} title={`${title} · ${owner.name}`}
