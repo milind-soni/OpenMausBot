@@ -10200,6 +10200,7 @@
   "serverError.engineCheck.timeout": "{name} não respondeu em {seconds} segundos.",
   "chat.notice.acpEmpty": "{provider} terminou sem responder.",
   "chat.notice.acpEndedAfterTools": "{provider} ficou pensando após a última ferramenta e terminou a sessão sem dar a resposta final. Peça para continuar ou resumir o que fez.",
+  "chat.notice.acpToolCallFragment": "A resposta de {provider} terminou em uma chamada de ferramenta que ela nunca executou, então a sessão não foi concluída.",
   "chat.notice.acpNoReason": "{provider} parou sem informar o motivo.",
   "chat.notice.acpNodeTooOld": "{provider} precisa do Node.js {needed} ou mais recente, mas este computador tem o Node.js {found}. Atualize o Node.js em nodejs.org e envie sua mensagem de novo.",
   "chat.notice.acpMcpAppsFailed": "Não foi possível configurar os apps conectados, então {provider} não conseguiu começar esta resposta. Tente de novo ou troque a IA deste bot.",

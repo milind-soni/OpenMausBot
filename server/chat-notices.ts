@@ -91,6 +91,7 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
   "chat.notice.acpEmpty": "{provider} finished without replying.",
   "chat.notice.acpEndedAfterTools": "{provider} thought right past the last tool, then finished the turn without a last reply. Ask it to continue or summarize what it did.",
+  "chat.notice.acpToolCallFragment": "{provider}'s reply ended on a tool call it never ran, so the turn was not completed.",
   "chat.notice.acpNoReason": "{provider} stopped without saying why.",
   "chat.notice.acpNodeTooOld": "{provider} needs Node.js {needed} or newer, but this computer has Node.js {found}. Update Node.js from nodejs.org, then send your message again.",
   "chat.notice.acpMcpAppsFailed": "Connected apps couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
