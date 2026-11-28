@@ -609,7 +609,7 @@
   "whatsNew.apps.body": "你的机器人构建的应用现在有了自己的家：在“{screen}”的“{section}”下。把机器人做出的任何页面保存为应用，在独立窗口中打开，并安装到你的电脑上。",
   "whatsNew.apps.bodyHere": "你的机器人构建的应用现在有了自己的家：在“{screen}”的“{section}”下。把机器人做出的任何页面保存为应用，随时在那里打开。",
   "whatsNew.apps.open": "打开应用",
-  "whatsNew.apps.videoLabel": "已发布应用：机器人构建的应用，每张一个卡片；鼠标悬停即可打开。",
+  "whatsNew.apps.videoLabel": "已发布应用：机器人构建的应用，每张一个卡片；点击卡片即可打开。",
   "whatsNew.publish.title": "发布你的机器人",
   "whatsNew.publish.body": "把一个机器人作为模板分享，别人可以把它添加到自己的 MausBot。在机器人的 ⋯ 菜单里选择“{item}”，再选择“{publish}”。",
   "teamsNew.title": "有你的团队，MausBot 更好用",
