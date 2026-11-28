@@ -315,16 +315,19 @@ export class TeamMemory {
 
   search(section: string | null | undefined, query: string, limit = 12, range?: { since?: number; until?: number }): TeamMemoryEntry[] {
     const terms = [...new Set(recallTerms(query))];
-    const score = (entry: TeamMemoryEntry) => {
+    const matches = (entry: TeamMemoryEntry) => {
       const words = new Set(recallTerms([entry.name, entry.detail, entry.key, ...entry.aliases].join(" ")));
-      return terms.filter(term => words.has(term)).length;
+      return terms.every(term => words.has(term));
     };
-    return this.list(section).filter(entry => entry.status === "accepted"
-      && (!terms.length || score(entry) === terms.length)
+    return this.entries(section).filter(entry => entry.status === "accepted"
       && (range?.since === undefined || entry.updatedAt >= range.since)
-      && (range?.until === undefined || entry.updatedAt <= range.until))
-      .sort((a, b) => score(b) - score(a) || b.updatedAt - a.updatedAt).slice(0, Math.min(25, Math.max(1, limit)))
-      .map(({ history: _history, replaces: _replaces, ...entry }) => entry);
+      && (range?.until === undefined || entry.updatedAt <= range.until)
+      && (!terms.length || matches(entry)))
+      .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, Math.min(25, Math.max(1, limit)))
+      .map(entry => {
+        const { history: _history, replaces: _replaces, ...snapshot } = structuredClone(entry);
+        return { ...snapshot, revision: teamMemoryRevision(entry) };
+      });
   }
 
   promptSelection(section: string | null | undefined): { text: string; loadedIds: string[]; total: number } {
