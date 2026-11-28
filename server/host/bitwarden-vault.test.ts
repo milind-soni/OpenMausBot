@@ -34,7 +34,7 @@ function setup(options: { credentials?: typeof CREDENTIALS | null; now?: () => n
 describe("Bitwarden through its command line tool", () => {
   it("signs in with the API key, unlocks with the master password, and lists names and sites, never a value", async () => {
     const { vault, fake } = setup();
-    expect(await vault.refresh(CREDENTIALS)).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    expect(await vault.refresh(CREDENTIALS)).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 5 });
     expect(fake.calls).toEqual(["status", "config server https://vault.bitwarden.com", "login --apikey", "unlock --passwordenv BW_PASSWORD --raw", "status [session]",
       "sync [session]", "list items [session]"]);
     expect(fake.secretsInArgs, "a secret in an argument").toEqual([]);
@@ -42,7 +42,31 @@ describe("Bitwarden through its command line tool", () => {
     for (const value of [GITHUB_PASSWORD, STRIPE_KEY, NOTE, OAUTH_SECRET, "JBSWY3DPEHPK3PXP", CREDENTIALS.password]) expect(text).not.toContain(value);
     expect(linkedSites(vault, "pepper")).toEqual([{ site: "github.com", hosts: ["github.com"], exactHost: false, username: "deploy-bot" }]);
     // A secret by name: a Secure Note's text, and a Login's custom field; never a custom field named like a built-in one.
-    expect(linkedSecrets(vault).map((secret) => [secret.name, secret.fields, secret.provider])).toEqual([["Acme OAuth", ["client_secret"], "bitwarden"], ["Stripe", [], "bitwarden"]]);
+    // The two "Deploy" logins have no URI, so no site to fill on; they list as secrets, where a name reads the password.
+    expect(linkedSecrets(vault).map((secret) => [secret.name, secret.fields, secret.provider])).toEqual([["Acme OAuth", ["client_secret"], "bitwarden"], ["Deploy", [], "bitwarden"], ["Deploy", [], "bitwarden"], ["Stripe", [], "bitwarden"]]);
+  });
+
+  it("lists a vault whose logins have no web address: the count and the names still show them, never a bare 0", async () => {
+    // A login fills no site without an http(s) URI — androidapp://, an empty URI list — and a name still reads its
+    // password, so it joins the secrets the way a custom field's item does. Only an item with nothing a name can read
+    // stays unlisted.
+    const items: FakeBwItem[] = [
+      { id: "i-app", name: "Bank app", type: 1, login: { uris: [{ uri: "androidapp://com.acme.bank" }], username: "me@acme.test", password: "fake-bank-pass" } },
+      { id: "i-nouri", name: "Door code", type: 1, login: { username: "front", password: "fake-door-pass" } },
+      { id: "i-web", name: "Mail", type: 1, login: { uris: [{ uri: "https://mail.example.com/login" }], username: "me", password: "fake-mail-pass" } },
+      { id: "i-nopass", name: "Passkey only", type: 1, login: { uris: [{ uri: "https://id.example.com" }], username: "me" } },
+      { id: "i-wifi", name: "Wifi", type: 2, notes: "fake-wifi-secret" },
+    ];
+    const fake = fakeBw({ ...CREDENTIALS, email: "bot@acme.test", items });
+    const vault = new BitwardenLogins({ credentials: () => CREDENTIALS, run: fake.run });
+    expect(await vault.refresh(CREDENTIALS)).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 4 });
+    expect(linkedSites(vault, "pepper")).toEqual([{ site: "example.com", hosts: ["mail.example.com"], exactHost: false, username: "me" }]);
+    expect(linkedSecrets(vault).map((secret) => [secret.name, secret.provider])).toEqual([["Bank app", "bitwarden"], ["Door code", "bitwarden"], ["Wifi", "bitwarden"]]);
+    const read = async (label: string) => { const use = findLinkedSecret([vault], label, "pepper"); return use ? readLinkedSecret(use) : null; };
+    expect(await read("Bank app")).toBe("fake-bank-pass");
+    expect(await read("Door code")).toBe("fake-door-pass");
+    expect(await read("bw://i-app")).toBe("fake-bank-pass");
+    expect(findLinkedSecret([vault], "Passkey only", "pepper")).toBeNull();
   });
 
   it("fills a login on its site with its password and 2FA key, read from Bitwarden at fill time", async () => {
@@ -72,10 +96,28 @@ describe("Bitwarden through its command line tool", () => {
     expect(await read("bw://Acme OAuth/client_secret")).toBe(OAUTH_SECRET);
     expect(await read("bw://Stripe/secret key")).toBe(STRIPE_KEY);
     expect(await read("bw://Stripe/password"), "the built-in field wins over a custom one of the same name").toBe("fake-stripe-dashboard-pass");
-    for (const label of ["bw://Deploy/password", "bw://Nothing/password", "bw://GitHub/nothing", "bw://Acme OAuth/totp", "Deploy", "GitHub"]) {
+    for (const label of ["bw://Deploy/password", "bw://Nothing/password", "bw://GitHub/nothing", "bw://Acme OAuth/totp", "GitHub"]) {
       expect(findLinkedSecret([vault], label, "pepper"), label).toBeNull();
     }
+    expect(await read("Deploy"), "two of a name: the first's password, like a named custom field's").toBe("fake-deploy-1");
     expect(await read("bw://i-dup-2/password"), "two of a name: by id").toBe("fake-deploy-2");
+  });
+
+  it("answers a custom field emptied since the listing as gone, never as the login password", async () => {
+    // The list's entry names the field a bare-name read takes; the item is fetched again at read time, and the entry
+    // is only refreshed once a minute. A field deleted or emptied in Bitwarden in that window leaves nothing to read:
+    // the login password is a different secret the name never asked for, and reading it would mark it used.
+    const items: FakeBwItem[] = [
+      { id: "i-key", name: "Api key", type: 1, login: { uris: [{ uri: "https://api.example.com" }], username: "me", password: "fake-api-login-pass" },
+        fields: [{ name: "key", value: "fake-api-key-1", type: 1 }] },
+    ];
+    const fake = fakeBw({ ...CREDENTIALS, email: "bot@acme.test", items });
+    const vault = new BitwardenLogins({ credentials: () => CREDENTIALS, run: fake.run });
+    await vault.refresh();
+    const read = () => readLinkedSecret(findLinkedSecret([vault], "Api key", "pepper")!);
+    items[0]!.fields = [];
+    await expect(read()).rejects.toThrow("Api key is no longer in Bitwarden");
+    expect(linkedSecrets(vault).find((secret) => secret.name === "Api key"), "not marked used").not.toHaveProperty("lastUsedAt");
   });
 
   it("parses bw:// references and checks the server address", () => {

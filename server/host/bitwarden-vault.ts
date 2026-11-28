@@ -137,7 +137,12 @@ function entryOf(item: BwItem): ItemEntry {
 const listedAsSecret = (entry: ItemEntry) => (entry.type === SECURE_NOTE && entry.has.notes) || entry.main !== undefined;
 
 function valueOf(item: BwItem, entry: ItemEntry, field: string | undefined, now: number): string | undefined {
-  if (!field) return item.type === SECURE_NOTE && item.notes?.trim() ? item.notes : customValue(item, entry.main);
+  if (!field) {
+    const own = item.type === SECURE_NOTE && item.notes?.trim() ? item.notes : customValue(item, entry.main);
+    if (entry.main !== undefined) return own;
+    // A login has no custom field of its own to read: its name reads the password, like `bw://<name>` does.
+    return own ?? (item.type === LOGIN ? item.login?.password ?? undefined : undefined);
+  }
   const builtIn = BUILT_IN.find((one) => sameText(one, field));
   if (builtIn === "password") return item.login?.password ?? undefined;
   if (builtIn === "username") return item.login?.username ?? undefined;
@@ -168,6 +173,8 @@ export class BitwardenLogins implements VaultProvider {
   private account: string | undefined;
   private logins: LoginEntry[] = [];
   private entries = new Map<string, ItemEntry>();
+  /** Logins that filled no site — an empty or non-http(s) URI list — so they list as secrets, not nowhere. */
+  private unplaced = new Set<string>();
   private refreshedAt: number | null = null;
   private syncedAt: number | null = null;
   private error: BitwardenProblem | undefined;
@@ -186,7 +193,7 @@ export class BitwardenLogins implements VaultProvider {
     if (!credentials) return { connected: false };
     return {
       connected: true, server: hostOf(credentials.serverUrl), ...(this.account ? { account: this.account } : {}),
-      items: this.logins.length + [...this.entries.values()].filter(listedAsSecret).length, ...(this.error ? { error: this.error.message } : {}),
+      items: this.logins.length + this.listedSecrets().length, ...(this.error ? { error: this.error.message } : {}),
     };
   }
 
@@ -220,6 +227,7 @@ export class BitwardenLogins implements VaultProvider {
     this.account = undefined;
     this.logins = [];
     this.entries = new Map();
+    this.unplaced = new Set();
     this.refreshedAt = null;
     this.syncedAt = null;
     this.error = undefined;
@@ -237,18 +245,23 @@ export class BitwardenLogins implements VaultProvider {
       const items = (Array.isArray(listed) ? listed as BwItem[] : []).filter((item) => typeof item?.id === "string" && (item.type === LOGIN || item.type === SECURE_NOTE)).slice(0, MAX_ITEMS);
       const logins: LoginEntry[] = [];
       const entries = new Map<string, ItemEntry>();
+      const unplaced = new Set<string>();
       for (const item of items) {
         const entry = entryOf(item);
         entries.set(item.id, entry);
         if (item.type !== LOGIN || !item.login?.password) continue;
         const hosts = new Set((item.login.uris ?? []).flatMap((uri) => normalizeLoginHost(uri.uri) ?? []));
+        let placed = false;
         for (const [site, siteHosts] of bySite(hosts)) {
           logins.push({ id: `${ID_PREFIX}${item.id}:${site}`, itemId: item.id, site, hosts: siteHosts, exactHost: false,
             username: item.login.username ?? "", hasTotp: Boolean(parseTotpKey(item.login.totp)) });
+          placed = true;
         }
+        if (!placed) unplaced.add(item.id);
       }
       this.logins = logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.entries = entries;
+      this.unplaced = unplaced;
       this.refreshedAt = this.now();
       this.error = undefined;
       return this.status();
@@ -343,8 +356,14 @@ export class BitwardenLogins implements VaultProvider {
         return { kind: "login", id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp,
           source: "bitwarden", bots: "all", createdAt: 0, ...(used === undefined ? {} : { lastUsedAt: used }) };
       }),
-      ...[...this.entries.values()].filter(listedAsSecret).sort((a, b) => a.name.localeCompare(b.name)).map((entry): LinkedItem => ({ kind: "secret", ...this.secretOf(entry) })),
+      ...this.listedSecrets().sort((a, b) => a.name.localeCompare(b.name)).map((entry): LinkedItem => ({ kind: "secret", ...this.secretOf(entry) })),
     ];
+  }
+
+  /** The entries the list shows as secrets: a name reads a Secure Note's text or a custom field — or, for a login
+   * that filled no site, its password. */
+  private listedSecrets(): ItemEntry[] {
+    return [...this.entries.values()].filter((entry) => listedAsSecret(entry) || this.unplaced.has(entry.itemId));
   }
 
   /** The item a `bw://` reference names, by id or by name: null for one that names no item, more than one (two items of
