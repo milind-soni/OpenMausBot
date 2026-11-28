@@ -109,6 +109,19 @@ describe("what a Chief of Staff reads about its team", () => {
     });
   });
 
+  it("lists a bot shared with different people only when it is in a department the Chief is in charge of", async () => {
+    const chief = bot("chief", { chiefOfStaff: true, section: "Work", managedSections: ["Editing"] });
+    const shared = { visibility: { people: ["ada@example.test"] } } as Partial<BotRecord>;
+    const { get } = await serve(chief, async () => TEAMS, {
+      teams: ["", "Work", "Editing", "Private"],
+      bots: [chief, bot("editor", { section: "Editing", ...shared }), bot("payroll", { section: "Private", ...shared }),
+        bot("archived", { section: "Editing", hidden: true, ...shared })],
+    });
+    const { body } = await get("/api/internal/team-setup-catalog");
+    expect(body.teams).toEqual(["Work", "Editing"]);
+    expect((body.bots as { id: string }[]).map((entry) => entry.id)).toEqual(["chief", "editor"]);
+  });
+
   it("leaves every other route to the next handler", async () => {
     const { get } = await serve(bot("chief", { chiefOfStaff: true }), async () => TEAMS);
     expect(await get("/api/internal/team-setup-requests")).toEqual({ status: 404, body: { from: "next routes" } });

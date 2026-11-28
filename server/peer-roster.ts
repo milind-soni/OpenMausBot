@@ -80,6 +80,14 @@ export function canManage(from: RosterMember, target: RosterMember): boolean {
   return canReach(from, target) && hasAuthority(from, target);
 }
 
+/** May change `target`'s setup (profile, default model, skills): what canManage allows, and for a Chief of Staff also a
+ * bot shared with different people in a department it is in charge of. Reach between the two stays as canReach says. */
+export function canManageSetup(from: RosterMember, target: RosterMember): boolean {
+  if (canManage(from, target)) return true;
+  return from.chiefOfStaff === true && from.id !== target.id && !target.hidden && !target.defaultBot &&
+    !ownedChief(from) && !ownedChief(target) && hasTeamAuthority(from, target.section);
+}
+
 /** Why `from` may not manage `target` when the department rule alone decided; otherwise null. */
 export function departmentRefusal(from: RosterMember, target: RosterMember): string | null {
   if (!canReach(from, target) || ownedChief(from) || ownedChief(target) || hasTeamAuthority(from, target.section)) return null;
