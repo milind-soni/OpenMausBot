@@ -102,6 +102,8 @@ export const sendSchema = z.strictObject({
   token: z.string().regex(ANY_TOKEN),
   pairing: z.string().regex(PAIRING).optional(),
   collapseId: z.string().regex(COLLAPSE_ID).optional(),
+  /** Android: the phone has made the bot its own channel (`bot_messages.<botId>`), so its messages can have their own sound. */
+  botChannel: z.literal(true).optional(),
   notification: z.strictObject({
     kind: z.string().regex(KIND),
     title: oneLine(200),
@@ -197,8 +199,10 @@ export function pushCategory(kind: string): string {
   return CATEGORY[kind] ?? CATEGORY_UPDATE;
 }
 
-export function pushChannel(kind: string): string {
-  return BLOCKING_KINDS.has(kind) ? CHANNEL_BLOCKING : ROUTINE_KINDS.has(kind) ? CHANNEL_ROUTINES : CHANNEL_MESSAGES;
+export function pushChannel(kind: string, botId?: string): string {
+  if (BLOCKING_KINDS.has(kind)) return CHANNEL_BLOCKING;
+  if (ROUTINE_KINDS.has(kind)) return CHANNEL_ROUTINES;
+  return botId ? `${CHANNEL_MESSAGES}.${botId}` : CHANNEL_MESSAGES;
 }
 
 /** `body` repeats `omb` because expo-notifications (SDK 58) hands an app only a remote notification's `body` as its data. */
@@ -229,7 +233,7 @@ export function fcmPayload(request: PushSendRequest, token: string, collapseId: 
       data: {
         title: notification.title,
         tag: collapseId,
-        channelId: pushChannel(notification.kind),
+        channelId: pushChannel(notification.kind, request.botChannel ? notification.botId : undefined),
         categoryId: pushCategory(notification.kind),
         threadIdentifier: notification.threadId,
         body: JSON.stringify(ombPayload(request)),

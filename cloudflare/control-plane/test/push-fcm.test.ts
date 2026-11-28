@@ -204,6 +204,23 @@ describe("phone push relay, FCM", () => {
     expect(second.message.data.tag).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it("puts a bot's message on the bot's own channel when the phone has one, and approvals and routines on theirs", async () => {
+    const account = await serviceAccount();
+    const environment = testEnv({ FCM_SERVICE_ACCOUNT: account.json });
+    const providers = fakeProviders();
+    const worker = createWorker(fetch, providers.fetch);
+    const { credential } = await installation(worker, environment, "fcm-bot-channel@example.test");
+    await registerFcm(worker, environment, credential);
+    const done = { ...notification, kind: "done", title: "Scout finished" };
+    expect((await send(worker, environment, credential, { botChannel: true, notification: done })).status).toBe(202);
+    expect((await send(worker, environment, credential, { botChannel: true })).status).toBe(202);
+    expect((await send(worker, environment, credential, { botChannel: true, notification: { ...notification, kind: "routine-failed" } })).status).toBe(202);
+    expect((await send(worker, environment, credential, { notification: done })).status).toBe(202);
+    const channels = providers.fcm().map((one) => (JSON.parse(one.text) as { message: { data: Record<string, string> } }).message.data.channelId);
+    expect(channels).toEqual(["bot_messages.bot_1", "approval_question", "routine_failed", "bot_messages"]);
+    expect((await send(worker, environment, credential, { botChannel: false, notification: done })).status).toBe(400);
+  });
+
   it("drops a token FCM calls unregistered or foreign, for every installation", async () => {
     const account = await serviceAccount();
     const environment = testEnv({ FCM_SERVICE_ACCOUNT: account.json });
