@@ -72,6 +72,19 @@ describe("the saved logins store", () => {
     warn.mockRestore();
   });
 
+  it("refuses to save over a file it could not open, so one unreadable key cannot erase what it holds", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    new VaultStore({ dataDir: dir }).create({ ...at("example.com"), username: "a", password: PASSWORD, source: "card", bots: ["b1"] });
+    const sealed = readFileSync(join(dir, LOGINS_FILE));
+    writeFileSync(join(dir, LOGINS_KEY_FILE), `${"0".repeat(64)}\n`);
+    const store = new VaultStore({ dataDir: dir });
+    expect(store.list()).toEqual([]);
+    expect(() => store.create({ ...at("other.com"), username: "b", password: PASSWORD, source: "card", bots: ["b1"] })).toThrow(/could not be opened/);
+    // The bytes on disk are untouched, so the logins are still there for the key that fits.
+    expect(readFileSync(join(dir, LOGINS_FILE))).toEqual(sealed);
+    warn.mockRestore();
+  });
+
   it("gives a login saved for one host its site, so it fills on www and other subdomains, and keeps the file readable by the previous release", () => {
     writeFileSync(join(dir, LOGINS_KEY_FILE), `${KEY}\n`, { mode: 0o600 });
     writeFileSync(join(dir, LOGINS_FILE), encryptBrowserState(JSON.stringify({ version: 1, logins: [
