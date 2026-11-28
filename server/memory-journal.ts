@@ -1,7 +1,7 @@
 // Kept outside the workspace on purpose: an audit trail the audited bot can rewrite is not an audit trail.
 // A journal write must never fail the change it records.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -45,6 +45,9 @@ export const JOURNAL_DIR = join(DATA_DIR, "memory-journal");
 export const DIFF_CAP = 8_000;
 export const BEFORE_CAP = 512 * 1024;
 const MAX_JOURNAL_READ_BYTES = 8 * 1024 * 1024;
+/** Past this size the oldest rows go: they sit outside the read window already, so nothing reachable is lost. */
+export const DEFAULT_JOURNAL_MAX_BYTES = 32 * 1024 * 1024;
+const MIN_JOURNAL_MAX_BYTES = 1024;
 const MAX_ROWS = 500;
 const LCS_CELL_CAP = 4_000_000;
 const CONTEXT = 2;
@@ -159,6 +162,44 @@ export function unifiedDiff(before: string, after: string, path: string, cap = D
 }
 
 
+/** The journal's byte cap: `OMB_MEMORY_JOURNAL_MAX_BYTES` (at least 1 KB), else 32 MiB. */
+export function journalMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_JOURNAL_MAX_BYTES;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= MIN_JOURNAL_MAX_BYTES ? value : DEFAULT_JOURNAL_MAX_BYTES;
+}
+
+/** Drops the oldest rows once the file passes `maxBytes`, keeping the newest rows the read window can still reach. */
+export function trimMemoryJournal(botId: string, maxBytes = journalMaxBytes()): boolean {
+  const file = journalFile(botId);
+  let size: number;
+  try { size = statSync(file).size; } catch { return false; }
+  if (size <= maxBytes) return false;
+  const keep = Math.min(MAX_JOURNAL_READ_BYTES, maxBytes);
+  let text: string;
+  try {
+    const fd = openSync(file, "r");
+    try {
+      const offset = Math.max(0, size - keep);
+      const buffer = Buffer.alloc(size - offset);
+      let length = 0;
+      while (length < buffer.length) {
+        const count = readSync(fd, buffer, length, buffer.length - length, offset + length);
+        if (!count) break;
+        length += count;
+      }
+      text = buffer.subarray(0, length).toString("utf8");
+    } finally { closeSync(fd); }
+  } catch { return false; }
+  // The first line of a tail read is usually cut mid-row; everything after it is a whole record.
+  const firstBreak = text.indexOf("\n");
+  const kept = firstBreak >= 0 ? text.slice(firstBreak + 1) : "";
+  if (!kept.trim()) return false;
+  writeFileAtomic(file, kept, { mode: 0o600 });
+  return true;
+}
+
 const writeQueues = new Map<string, Promise<void>>();
 
 function enqueue(botId: string, entry: MemoryJournalEntry): void {
@@ -167,6 +208,7 @@ function enqueue(botId: string, entry: MemoryJournalEntry): void {
     .then(async () => {
       mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
       await appendFile(journalFile(botId), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+      trimMemoryJournal(botId);
     })
     .catch((error: unknown) => {
       console.error(`memory-journal: could not append for ${botId}:`, error instanceof Error ? error.message : error);
