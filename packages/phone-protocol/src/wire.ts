@@ -435,10 +435,7 @@ export type CardAnswerer = (
 /** Opens every compaction summary written without a model (recent excerpts only); the chat labels stored records by it. */
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
-/** How the server accepted a user line; never what its text claims. `client` is a submission from a user-facing
- * client and names that entry point, not the person at the keyboard: UI automation can share it. `bot` is another bot
- * handing or coordinating the line, `routine` a routine run, `integration` a webhook, app event, app message or external
- * interface, and `api` the Bot API. A stored line without one reads as `unknown` (older or unverified). */
+/** How the server accepted a user line, never what its text claims: `client` (a user-facing client's entry point, which UI automation can share), `bot` (another bot handed or coordinated it), `routine`, `integration` (a webhook, app event, app message or external interface) or `api` (the Bot API). A stored line without one reads as unknown; bot lines carry none. */
 export type MessageOrigin = "client" | "bot" | "routine" | "integration" | "api" | "unknown";
 
 /** One transcript line, serialized as stored. */
@@ -513,16 +510,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * context folded in mid-turn, never a new request. The text is stored
    * enveloped exactly as injected. */
   aside?: boolean;
-  /** A user-role message that arrived through the server's HTTP API
-   * ("api"), or a request a person spoke on a Live call ("call"). */
-  via?: "api" | "call";
-  /** A `via: "api"` line sent with a Bot API key its owner marked as acting for them: their request, at the bot's level. */
-  apiAsOwner?: true;
-  /** Server-assigned on user lines only (MessageOrigin). Bot lines carry none. */
-  origin?: MessageOrigin;
-  /** The Live call a "call" line was spoken on (LiveCallState.callId). Set
-   * only on user messages with `via: "call"`; a turn's own messages point
-   * at their request through `requestMessageId` instead. */
+  /** A user-role message that arrived through the server's HTTP API ("api"), or a request a person spoke on a Live call ("call"). */
+  via?: "api" | "call"; /** A `via: "api"` line sent with a Bot API key its owner marked as acting for them: their request, at the bot's level. */ apiAsOwner?: true; /** Server-assigned on user lines only. */ origin?: MessageOrigin;
+  /** The Live call a "call" line was spoken on (LiveCallState.callId); user messages with `via: "call"` only. A turn's own messages point at their request through `requestMessageId`. */
   callId?: string;
   /** A user line an external interface relayed through the guarded send
    * route (the Slack worker): nobody typed it in one of this workspace's

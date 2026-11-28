@@ -78,17 +78,17 @@ describe("message origin", () => {
     expect(inputOrigin({ automated: true })).toBe("unknown");
   });
 
-  it("reads a user line stored without an origin as unknown", async () => {
+  it("leaves a user line stored without an origin unset, which readers take as unknown", async () => {
     const store = new Store(() => sonnet);
     const bot = store.createBot({ name: "Scout" }, { seedMessages: false });
     store.importTranscript(bot.threadId, [
       { id: "legacy-line", at: 1_000, parentId: null, role: "user", kind: "text", text: "an older record" },
     ], "legacy-line");
 
-    expect(store.messagesFor(bot.threadId).find((message) => message.id === "legacy-line")?.origin).toBe("unknown");
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === "legacy-line")?.origin).toBeUndefined();
     const base = await serve(store);
     const exported = await (await fetch(`${base}/api/threads/${bot.threadId}/export?format=json`)).json() as { messages: Array<{ id: string; origin?: string }> };
-    expect(exported.messages.find((message) => message.id === "legacy-line")?.origin).toBe("unknown");
+    expect(exported.messages.find((message) => message.id === "legacy-line")?.origin).toBeUndefined();
   });
 
   it("gives a message ID the same origin in the live event and the JSON export", async () => {
