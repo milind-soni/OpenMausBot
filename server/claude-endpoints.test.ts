@@ -7,6 +7,7 @@ import {
   claudeEndpointUpdateSchema,
   claudeEndpointInfo,
   claudeEndpointKeepWarmOptIn,
+  cacheKeepWarmUnavailableReason,
   isClaudeEndpoint,
   newClaudeEndpoint,
   updateClaudeEndpoint,
@@ -145,6 +146,16 @@ describe("custom Claude endpoint", () => {
     expect(claudeEndpointKeepWarmOptIn(reverted.instances[off.instanceId])).toBe(false);
     expect((reverted.instances[off.instanceId].config as Record<string, unknown>)).not.toHaveProperty("cacheKeepWarm");
     expect(claudeEndpointKeepWarmOptIn(reverted.instances.claude)).toBe(false);
+    expect(claudeEndpointKeepWarmOptIn(undefined)).toBe(false);
+
+    const refusal = "keep-warm runs only on a Claude subscription sign-in or an endpoint opted in with a verified one-hour cache";
+    const opted = on.instances[on.instanceId];
+    const plain = off.instances[off.instanceId];
+    expect(cacheKeepWarmUnavailableReason("subscription", plain)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("subscription", undefined)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("api", opted)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("api", plain)).toBe(refusal);
+    expect(cacheKeepWarmUnavailableReason(undefined, undefined)).toBe(refusal);
   });
 
   it("keeps a discovered catalog when only a model mapping changes", () => {

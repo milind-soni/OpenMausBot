@@ -67,7 +67,18 @@ export function isClaudeEndpoint(entry: InstanceConfig | undefined): boolean {
 
 /** True when the person opted this custom endpoint into prompt-cache keep-warm by vouching for its one-hour cache. */
 export function claudeEndpointKeepWarmOptIn(entry: InstanceConfig | undefined): boolean {
-  return isClaudeEndpoint(entry) && rawConfig(entry).cacheKeepWarm === true;
+  return entry !== undefined && isClaudeEndpoint(entry) && rawConfig(entry).cacheKeepWarm === true;
+}
+
+/** Null when keep-warm may run; otherwise the reason it may not. */
+export function cacheKeepWarmUnavailableReason(
+  billing: string | undefined,
+  entry: InstanceConfig | undefined,
+): string | null {
+  // A metered API key's cache lives five minutes by default; a custom endpoint the person
+  // vouched for with a verified one-hour cache may still opt in (instance-level, off by default).
+  if (billing === "subscription" || claudeEndpointKeepWarmOptIn(entry)) return null;
+  return "keep-warm runs only on a Claude subscription sign-in or an endpoint opted in with a verified one-hour cache";
 }
 
 export type { ClaudeEndpointInfo };
