@@ -33,6 +33,17 @@ describe("workspace backup data boundary", () => {
     expect(restoredWorkspaceConfig(portable, { helper: { instanceId: "openrouter" } }).helper).toEqual({ instanceId: "openrouter" });
   });
 
+  it("carries the follow-up title preference and keeps the destination's provider selection", () => {
+    const source = { instanceId: "anthropic", model: "source-sonnet" };
+    const destination = { instanceId: "anthropic", model: "destination-sonnet" };
+    const portable = portableWorkspaceConfig({ threadTitles: { model: source, followUp: true } });
+    expect(portable).toEqual({ threadTitles: { followUp: true } });
+    expect(restoredWorkspaceConfig(portable, {}).threadTitles).toEqual({ followUp: true });
+    expect(restoredWorkspaceConfig(portable, { threadTitles: { model: destination, followUp: false } }).threadTitles)
+      .toEqual({ model: destination, followUp: true });
+    expect(restoredWorkspaceConfig({}, { threadTitles: { followUp: true } })).not.toHaveProperty("threadTitles");
+  });
+
   it("keeps the destination's own computer-sharing switch, whatever the backup says", () => {
     const portable = portableWorkspaceConfig({ features: { browser: true, sharedComputers: true } });
     expect(restoredWorkspaceConfig(portable, { features: { sharedComputers: false } }).features).toEqual({ browser: true, sharedComputers: false });

@@ -284,8 +284,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       }
       const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes) : null;
       if (parsedLimit && !parsedLimit.ok) return json(res, 400, { error: parsedLimit.error });
-      // Echoing the current title is not a rename: newer clients send it so an older server keeps the title.
-      const titleChange = renaming && body.title !== existing.title;
+      // Clients echo a cached title when pinning for compatibility with older servers.
+      const titleChange = !pinning && renaming && body.title !== existing.title;
       const notYours = titleChange ? cloudThreadRefusal(auth, m[2]) : null;
       if (notYours) return json(res, 403, { error: notYours });
       if (titleChange && groupThreadIsWorking(group.id, m[2])) {

@@ -10,6 +10,7 @@ import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { SkillReview } from "../skill-review.ts";
+import type { ThreadTitleGate } from "../host/thread-titles.ts";
 import { isProjectEmoji, type BotRecord, type Store, type TaskRecord } from "../store.ts";
 import { parseSurface } from "../surface.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
@@ -28,7 +29,7 @@ type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 export interface TaskRouteDeps {
   store: Pick<Store,
     | "bot" | "bots" | "taskByThread" | "project" | "projectBotForTask" | "patchTask" | "patchProject" | "tasks"
-    | "switchTaskModel" | "switchTask" | "retitleTask" | "reorderProjects" | "refreshTaskPermissions" | "messagesTail"
+    | "switchTaskModel" | "switchTask" | "retitleTask" | "taskTitleChanges" | "reorderProjects" | "refreshTaskPermissions" | "messagesTail"
     | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "forkTask" | "createProject">;
   /** On a Cloud home only the owner changes how a bot asks for approval. */
   cloudHome: boolean;
@@ -45,6 +46,7 @@ export interface TaskRouteDeps {
   threadStarters: Pick<ThreadStarters, "set">;
   phoneSecretSubmissions: Pick<PhoneSecretSubmissionRegistry, "hasBot" | "hasThread">;
   titleRegenerations: Pick<Set<string>, "has" | "add" | "delete">;
+  automaticTitles: Pick<ReturnType<typeof import("../host/thread-titles.ts").createAutomaticThreadTitles>, "generating" | "drop">;
   directTurnGenerationByThread: ReadonlyMap<string, string>;
   actorKey(auth: RequestAuth & { kind: "session" }): string;
   cloudOwnerSession(auth: RequestAuth): boolean;
@@ -65,8 +67,8 @@ export interface TaskRouteDeps {
   checkedTaskModelSwitch(current: BotRecord, raw: unknown, updateBotDefault: boolean, resetApprovalToAsk: boolean, requireAvailableModel?: boolean):
     | { ok: true }
     | ({ ok: false; status: number } & ServerErrorBody);
-  threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string };
-  generateThreadTitle(provider: ProviderInstance, text: string, source: ThreadTitleSource): Promise<string | null>;
+  threadTitleGate(bot: BotRecord, ownOnly?: boolean): ThreadTitleGate;
+  generateThreadTitle(provider: Pick<ProviderInstance, "generateText">, text: string, source: ThreadTitleSource): Promise<string | null>;
   settleDirectFollowup(generation: string | undefined): void;
   clearTurnDigestState(threadId: string): void;
   revokeInternalCapabilitiesForThread(threadId: string): void;
@@ -81,7 +83,7 @@ export interface TaskRouteDeps {
 /** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
 export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTasks(botId: string, threadIds: string[]): ReturnType<TaskRouteDeps["store"]["deleteTasks"]> } {
   const {
-    store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
+    store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations, automaticTitles,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
     supportsApprovalMode, threadBusy, broadcast, notificationListed, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
@@ -428,17 +430,23 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (!current) return json(res, 404, { error: "no such task" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
-      const gate = threadTitleGate(current);
+      const messages = store.messagesTail(m[2], 200).messages;
+      const gate = threadTitleGate(current, messages.some((message) => message.via === "call"));
       if (!gate.ok) return json(res, 409, { error: gate.refusal });
-      if (titleRegenerations.has(m[2])) return json(res, 409, { error: "a new title is already being generated for this thread" });
-      const excerpt = titleConversationExcerpt(store.messagesTail(m[2], 200).messages);
+      if (titleRegenerations.has(m[2]) || automaticTitles.generating(m[2])) return json(res, 409, { error: "a new title is already being generated for this thread" });
+      const excerpt = titleConversationExcerpt(messages);
       if (!excerpt) return json(res, 409, { error: "this thread has no messages to take a title from yet" });
-      const startedFrom = store.taskByThread(m[1], m[2])!.title;
+      const started = store.taskByThread(m[1], m[2])!, startedFrom = started.title;
+      const titleChange = store.taskTitleChanges.get(started);
+      automaticTitles.drop(m[2]);
       titleRegenerations.add(m[2]);
       try {
         const title = await generateThreadTitle(gate.instance, excerpt, "conversation");
         if (!title) return json(res, 502, { error: "couldn't generate a title — try again, or rename the thread" });
-        const task = store.retitleTask(m[1], m[2], startedFrom, title) ?? store.taskByThread(m[1], m[2]);
+        let task = store.taskByThread(m[1], m[2]);
+        if (task === started && store.taskTitleChanges.get(task) === titleChange) {
+          task = store.retitleTask(m[1], m[2], startedFrom, title, true) ?? task;
+        }
         if (!task) return json(res, 404, { error: "no such task" });
         return json(res, 200, { task: wireTask(task, store.bot(m[1])!.modelSelection) });
       } finally {

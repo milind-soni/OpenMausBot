@@ -122,8 +122,8 @@ export interface WireTask extends InboxTask, HandoffStatusField {
   origin?: ForkOrigin;
   title: string;
   createdAt: number;
-  /** The first message already drove a title attempt for this thread, so a
-   * later one does not rename a thread the person may have retitled. */
+  /** Whether the title is eligible for automatic updates. Absent on older threads. */
+  titleMode?: "automatic" | "manual";
   titleFromFirstMessage?: true;
   /** Team Cloud only: this is the bot's main chat, everyone's who sees the bot. Its title is SHARED_CHAT_TITLE on every
    * person's copy, whatever is stored, and it can't be renamed. */
@@ -824,8 +824,8 @@ export interface GroupTask {
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;
-  /** The first message already drove a title attempt for this thread, so a
-   * later one does not rename a room the person may have retitled. */
+  /** Whether the title is eligible for automatic updates. Absent on older threads. */
+  titleMode?: WireTask["titleMode"];
   titleFromFirstMessage?: true;
   /** Whether a turn is actively running in this thread. */
   working?: boolean;

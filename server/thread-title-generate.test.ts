@@ -7,6 +7,31 @@ const titleWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
   spy.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("title generation:"));
 
 describe("generateThreadTitle deadlines", () => {
+  it("times out while waiting for a slot and never calls the provider after expiry", async () => {
+    vi.useFakeTimers();
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const slots = createJobSlots(1);
+      let free!: () => void;
+      const busy = slots.run(() => new Promise<void>((resolve) => { free = resolve; }));
+      await vi.advanceTimersByTimeAsync(0);
+      const provider = { generateText: vi.fn(async () => "Title") };
+      const result = generateThreadTitle(provider, "request", "first-message", slots);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await result).toBeNull();
+      expect(slots.waiting).toBe(0);
+      free();
+      await busy;
+      expect(provider.generateText).not.toHaveBeenCalled();
+    } finally {
+      warnings.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the current title on a KEEP reply", async () => {
+    expect(await generateThreadTitle({ generateText: async () => "KEEP" }, "request", "follow-up", createJobSlots(1))).toBeNull();
+  });
   it("keeps an explicit regeneration alive at 10000 ms and returns a title that arrives at 12000 ms", async () => {
     vi.useFakeTimers();
     const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -63,7 +88,7 @@ describe("generateThreadTitle deadlines", () => {
     }
   });
 
-  it.each(["first-message", "call"] as const)("answers null after 10000 ms for %s and holds the slot until the engine call ends", async (source) => {
+  it.each([["first-message", 30_000], ["call", 10_000]] as const)("bounds %s at %i ms and holds the slot until the call ends", async (source, timeoutMs) => {
     vi.useFakeTimers();
     const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -75,15 +100,15 @@ describe("generateThreadTitle deadlines", () => {
         return new Promise<string>((resolve) => { end = resolve; });
       } };
       const title = generateThreadTitle(provider, "plan the trip", source, slots);
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(timeoutMs);
       expect(await title).toBeNull();
       expect(aborted).toBe(true);
       expect(slots.running).toBe(1);
-      expect(titleWarnings(warnings)).toEqual([]);
+      expect(titleWarnings(warnings)).toEqual(source === "call" ? [] : ["title generation: timeout budgetMs=30000"]);
       end("Trip plan");
       await vi.advanceTimersByTimeAsync(0);
       expect(slots.running).toBe(0);
-      expect(titleWarnings(warnings)).toEqual([]);
+      expect(titleWarnings(warnings)).toEqual(source === "call" ? [] : ["title generation: timeout budgetMs=30000"]);
     } finally {
       warnings.mockRestore();
       vi.useRealTimers();

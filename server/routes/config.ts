@@ -152,6 +152,18 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
         return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
       }
+      if (patch.threadTitles?.model) {
+        const checked = checkedModelSelection(patch.threadTitles.model, undefined, true);
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
+        const target = registry.get(checked.selection.instanceId);
+        if (!target?.enabled) return json(res, 400, { error: "Enable the engine before selecting it for thread titles." });
+        const refusal = policyModelRefusal(target);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        if (!target.generateText) return json(res, 400, { error: "This engine cannot generate thread titles." });
+        const model = target.models.options.find((option) => option.id === checked.selection.model);
+        if (model?.orgBlocked || model?.needsCliUpdate) return json(res, 400, { error: "This model is unavailable for thread titles." });
+        patch.threadTitles.model = checked.selection;
+      }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;

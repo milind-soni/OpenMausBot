@@ -12,7 +12,10 @@ const PORTABLE_CONFIG_KEYS = [
 export function portableWorkspaceConfig(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid workspace configuration in backup.");
   const config = parseStoredConfig(value as Parameters<typeof parseStoredConfig>[0]);
-  return Object.fromEntries(PORTABLE_CONFIG_KEYS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]]));
+  return {
+    ...Object.fromEntries(PORTABLE_CONFIG_KEYS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
+    ...(config.threadTitles?.followUp === undefined ? {} : { threadTitles: { followUp: config.threadTitles.followUp } }),
+  };
 }
 
 // Computer sharing opens routes and a desktop connector here: a restore never turns it on or off.
@@ -22,7 +25,10 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
   if (!destination || typeof destination !== "object" || Array.isArray(destination)) throw new Error("Invalid destination workspace configuration; connections were not changed.");
   const merged = { ...destination } as Record<string, unknown>;
   for (const key of PORTABLE_CONFIG_KEYS) delete merged[key];
+  delete merged.threadTitles;
   const restored = { ...merged, ...portableWorkspaceConfig(portable) };
+  const model = (destination as { threadTitles?: { model?: unknown } }).threadTitles?.model;
+  if (model !== undefined) restored.threadTitles = { ...(restored.threadTitles as object | undefined), model };
   const own = (destination as { features?: Record<string, unknown> }).features ?? {};
   const features: Record<string, unknown> = { ...(restored.features as Record<string, unknown> | undefined) };
   for (const key of DESTINATION_FEATURES) {

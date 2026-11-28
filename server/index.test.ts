@@ -2266,8 +2266,9 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("replaces a first-message snippet title with a generated one once the one-shot answers", async () => {
+  it("replaces a first-message snippet title after the bot replies, using both excerpts", async () => {
     writeFileSync(oneShotTextFile, "Fix login timeout\n");
+    rmSync(oneShotTextDump, { force: true });
     const created = await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       requireAvailableModel: true,
@@ -2279,13 +2280,71 @@ describe("harness HTTP API", () => {
         text: "every login hangs after the session expires",
       });
       expect(sent.status).toBe(202);
+      await releaseTurn(bot.id);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === bot.id,
         );
         return state?.tasks?.find((task: { threadId: string }) => task.threadId === sent.body.threadId)?.title;
       }, { timeout: 5_000 }).toBe("Fix login timeout");
+      const { prompt } = JSON.parse(readFileSync(oneShotTextDump, "utf8"));
+      expect(prompt).toContain("every login hangs after the session expires");
+      expect(prompt).toContain("Bot: released");
     } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      rmSync(oneShotTextFile, { force: true });
+    }
+  });
+
+  it("validates and saves the title model without losing the follow-up setting", async () => {
+    try {
+      expect((await api("PATCH", "/api/config", { threadTitles: { model: { instanceId: "missing", model: "missing" } } })).status).toBe(400);
+      const model = { instanceId: "claude", model: "claude-sonnet-5" };
+      expect((await api("PATCH", "/api/config", { threadTitles: { model } })).status).toBe(200);
+      const configured = await api("PATCH", "/api/config", { threadTitles: { followUp: true } });
+      expect(configured.status).toBe(200);
+      expect(configured.body.threadTitles).toMatchObject({ model, followUp: true });
+      expect((await api("GET", "/api/config")).body.threadTitles).toMatchObject({ model, followUp: true });
+      expect((await api("PATCH", "/api/config", { threadTitles: { model: null } })).body.threadTitles).toMatchObject({ model: null, followUp: true });
+    } finally {
+      await api("PATCH", "/api/config", { threadTitles: { model: null, followUp: false } });
+    }
+  });
+
+  it("only updates a generated title on follow-up when enabled, and keeps a manual rename", async () => {
+    writeFileSync(oneShotTextFile, "Login | timeout fix\n");
+    const created = await api("POST", "/api/bots", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const title = async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id)
+      .tasks.find((task: { threadId: string }) => task.threadId === bot.threadId).title;
+    try {
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Fix the login timeout" })).status).toBe(202);
+      await releaseTurn(bot.id);
+      await expect.poll(title, { timeout: 5_000 }).toBe("Login | timeout fix");
+      writeFileSync(oneShotTextFile, "Billing | tax export\n");
+      rmSync(oneShotTextDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Now fix the tax export" })).status).toBe(202);
+      await releaseTurn(bot.id);
+      expect(existsSync(oneShotTextDump)).toBe(false);
+      expect(await title()).toBe("Login | timeout fix");
+      expect((await api("PATCH", "/api/config", { threadTitles: { followUp: true } })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Now fix the tax export" })).status).toBe(202);
+      await releaseTurn(bot.id);
+      await expect.poll(title, { timeout: 5_000 }).toBe("Billing | tax export");
+      const generated = JSON.parse(readFileSync(oneShotTextDump, "utf8"));
+      expect(generated.prompt).toContain("Current title: Login | timeout fix");
+      expect(generated.prompt).toContain("Bot: released");
+      expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { title: "Billing | tax export" })).status).toBe(200);
+      writeFileSync(oneShotTextFile, "Unwanted title\n");
+      rmSync(oneShotTextDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Also check invoices" })).status).toBe(202);
+      await releaseTurn(bot.id);
+      expect(existsSync(oneShotTextDump)).toBe(false);
+      expect(await title()).toBe("Billing | tax export");
+    } finally {
+      await api("PATCH", "/api/config", { threadTitles: { followUp: false } }).catch(() => undefined);
       await api("POST", `/api/bots/${bot.id}/interrupt`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`);
       rmSync(oneShotTextFile, { force: true });
@@ -2305,11 +2364,13 @@ describe("harness HTTP API", () => {
       rmSync(oneShotTextDump, { force: true });
       const sent = await api("POST", `/api/bots/${bot.id}/messages`, { text: firstMessage });
       expect(sent.status).toBe(202);
+      await releaseTurn(bot.id);
       await expect.poll(() => existsSync(oneShotTextDump), { timeout: 5_000 }).toBe(true);
       const seen = JSON.parse(readFileSync(oneShotTextDump, "utf8"));
       const outputAt = seen.argv.indexOf("--output-format");
       expect(outputAt).toBeGreaterThan(-1);
-      expect(seen.argv[outputAt + 1]).toBe("text");
+      expect(seen.argv[outputAt + 1]).toBe("json");
+      expect(seen.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("512");
       expect(seen.prompt).toContain("Name the conversation");
       await new Promise((resolve) => setTimeout(resolve, 150));
       const state = (await api("GET", "/api/bots?messages=0")).body.bots.find(
@@ -2341,6 +2402,7 @@ describe("harness HTTP API", () => {
         text: "every login hangs after the session expires",
       });
       expect(sent.status).toBe(202);
+      writeFileSync(fakeClaudeRelease, "release");
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=0")).body.groups.find(
           (candidate: { id: string }) => candidate.id === room.id,
@@ -2348,6 +2410,42 @@ describe("harness HTTP API", () => {
         return state?.tasks?.find((task: { threadId: string }) => task.threadId === room.threadId)?.title;
       }, { timeout: 5_000 }).toBe("Fix login timeout");
     } finally {
+      rmSync(fakeClaudeRelease, { force: true });
+      await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${member.id}`);
+      rmSync(oneShotTextFile, { force: true });
+    }
+  });
+
+  it("keeps a room's manual title when follow-up renames are enabled", async () => {
+    writeFileSync(oneShotTextFile, "Login | timeout fix\n");
+    const created = await api("POST", "/api/bots", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
+    expect(created.status).toBe(201);
+    const member = created.body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Titles", memberIds: [member.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } } })).body.group;
+    const title = async () => (await api("GET", "/api/bots?messages=0")).body.groups.find((candidate: { id: string }) => candidate.id === room.id)
+      .tasks.find((task: { threadId: string }) => task.threadId === room.threadId).title;
+    try {
+      expect((await api("PATCH", "/api/config", { threadTitles: { followUp: true } })).status).toBe(200);
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Fix the login timeout" })).status).toBe(202);
+      writeFileSync(fakeClaudeRelease, "release");
+      await expect.poll(title, { timeout: 5_000 }).toBe("Login | timeout fix");
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.groups.find((candidate: { id: string }) => candidate.id === room.id)?.working, { timeout: 10_000 }).toBe(false);
+      rmSync(fakeClaudeRelease, { force: true });
+      const pinned = await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { pinned: true, title: "Fix the login timeout" });
+      expect(pinned.body.task).toMatchObject({ pinned: true, title: "Login | timeout fix" });
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { title: "My room title" })).status).toBe(200);
+      writeFileSync(oneShotTextFile, "Unwanted title\n");
+      rmSync(oneShotTextDump, { force: true });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Now check the tax export" })).status).toBe(202);
+      writeFileSync(fakeClaudeRelease, "release");
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.groups.find((candidate: { id: string }) => candidate.id === room.id)?.working, { timeout: 10_000 }).toBe(false);
+      expect(existsSync(oneShotTextDump)).toBe(false);
+      expect(await title()).toBe("My room title");
+    } finally {
+      rmSync(fakeClaudeRelease, { force: true });
+      await api("PATCH", "/api/config", { threadTitles: { followUp: false } }).catch(() => undefined);
       await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${member.id}`);
@@ -2385,6 +2483,7 @@ describe("harness HTTP API", () => {
       rmSync(oneShotTextDump, { force: true });
       const sent = await api("POST", `/api/groups/${room.id}/messages`, { text });
       expect(sent.status).toBe(202);
+      writeFileSync(fakeClaudeRelease, "release");
       await expect.poll(() => existsSync(oneShotTextDump), { timeout: 5_000 }).toBe(true);
       const seen = JSON.parse(readFileSync(oneShotTextDump, "utf8"));
       expect(seen.prompt).toContain(firstMessage);
@@ -2396,6 +2495,7 @@ describe("harness HTTP API", () => {
       expect(state.tasks.find((task: { threadId: string }) => task.threadId === room.threadId).title)
         .toBe(firstMessage);
     } finally {
+      rmSync(fakeClaudeRelease, { force: true });
       await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${member.id}`);

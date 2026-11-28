@@ -155,7 +155,11 @@ describe("tasks", () => {
     const bot = store.createBot();
     const task = store.createTask(bot.id)!;
     store.renameTask(bot.id, task.threadId, "Payroll audit");
-    expect(store.retitleTask(bot.id, task.threadId, "Payroll audit", "Quarterly payroll export")).toMatchObject({ title: "Quarterly payroll export" });
+    expect(store.retitleTask(bot.id, task.threadId, "Payroll audit", "Automatic rename")).toBeNull();
+    expect(store.retitleTask(bot.id, task.threadId, "Payroll audit", "Quarterly payroll export", true)).toMatchObject({ title: "Quarterly payroll export", titleMode: "manual" });
+    const startedFrom = store.taskTitleChanges.get(task);
+    store.renameTask(bot.id, task.threadId, "Quarterly payroll export");
+    expect(store.taskTitleChanges.get(task)).not.toBe(startedFrom);
     store.renameTask(bot.id, task.threadId, "Export checks");
     expect(store.retitleTask(bot.id, task.threadId, "Quarterly payroll export", "Payroll export review")).toBeNull();
     expect(store.taskByThread(bot.id, task.threadId)!.title).toBe("Export checks");

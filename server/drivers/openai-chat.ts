@@ -82,6 +82,11 @@ interface NativeLog {
   incoming(completion: Completion): unknown;
 }
 const LIVENESS_MISSES = 3;
+function finalResponseText(output: ResponseItem[]): string {
+  return output.filter(({ type, role, phase }) => type === "message" && role === "assistant" && (phase == null || phase === "final_answer"))
+    .map(({ content }) => Array.isArray(content) ? content.map((part) => part?.type === "output_text" && typeof part.text === "string" ? part.text : "").join("") : "")
+    .filter(Boolean).join("\n\n");
+}
 
 interface RuntimeOptions<Config> {
   input: DriverCreateInput<Config>;
@@ -252,7 +257,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
-    onUsage?: TextGenerationOptions["onUsage"], variant?: string, threadId?: string,
+    variant?: string, threadId?: string, { onUsage, maxOutputTokens }: Pick<TextGenerationOptions, "onUsage" | "maxOutputTokens"> = {},
   ): Promise<Completion> => {
     const timeoutController = new AbortController();
     let idleTimer: NodeJS.Timeout | null = null;
@@ -275,10 +280,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const requestBody = options.requestBody(served, messages, stream, variant, threadId, model);
       const effort = selectedReasoningEffort(requestBody, route, variant, options.selectedReasoning?.(model, variant));
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort })
+        ? { ...responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: tools.length > 0 && routes.summaries(model), effort }), max_output_tokens: maxOutputTokens }
         : {
           ...requestBody,
           ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
+          ...(maxOutputTokens === undefined ? {} : { [isOpenAIAddress(options.apiUrl) ? "max_completion_tokens" : "max_tokens"]: maxOutputTokens }),
           ...(tools.length ? { tools } : {}),
         });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
@@ -309,6 +315,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       if (route === "responses") {
         const reply = await readResponsesStream(response.body, { reasoning: Boolean(options.reasoning), onBytes: resetIdleTimer, onDelta: (text, kind) => onDelta?.(text, kind), fail: failure });
         activeSignal.throwIfAborted();
+        onUsage?.({ model, input: reply.usage?.input, output: reply.usage?.output, cachedInput: reply.usage?.cachedInput });
         return reply;
       }
 
@@ -342,9 +349,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         activeSignal.throwIfAborted();
         return {
           text: options.contentText ? options.contentText(message?.content) : typeof message?.content === "string" ? message.content : "",
-          reasoning: options.reasoning && typeof reasoning === "string"
-            ? reasoning
-            : "",
+          reasoning: options.reasoning && typeof reasoning === "string" ? reasoning : "",
           usage: usageFrom(tokenUsage),
           toolCalls: calls.finish(finishReason, false),
           finishReason,
@@ -353,9 +358,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         };
       }
 
-      if (!response.body) {
-        throw new Error(options.noBodyError ?? `${options.httpErrorLabel} returned no response body`);
-      }
+      if (!response.body) throw new Error(options.noBodyError ?? `${options.httpErrorLabel} returned no response body`);
       let text = "";
       let reasoning = "";
       let protocolReasoning = "";
@@ -391,9 +394,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         const reasoningPart = delta?.reasoning_content ?? delta?.reasoning;
         if (typeof reasoningPart === "string") protocolReasoning += reasoningPart;
-        const reasoningDelta = options.reasoning && typeof reasoningPart === "string"
-          ? reasoningPart
-          : "";
+        const reasoningDelta = options.reasoning && typeof reasoningPart === "string" ? reasoningPart : "";
         const contentDelta = options.contentText ? options.contentText(delta?.content) : typeof delta?.content === "string" ? delta.content : "";
         if (reasoningDelta) {
           reasoning += reasoningDelta;
@@ -457,7 +458,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
-    onUsage?: TextGenerationOptions["onUsage"], variant?: string, threadId?: string,
+    variant?: string, threadId?: string,
   ): Promise<Completion> => {
     for (;;) {
       const attemptedRoute = routes.routeFor(model, tools.length > 0); let replied = false;
@@ -465,7 +466,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return await completeOn(attemptedRoute, messages, model, stream, signal, onDelta && ((text, kind) => {
           replied = true;
           onDelta(text, kind);
-        }), tools, onUsage, variant, threadId);
+        }), tools, variant, threadId);
       } catch (error) {
         if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
         if (routes.routeFor(model, tools.length > 0) === attemptedRoute && !routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
@@ -648,7 +649,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (streamKind === "assistant_text") answerStreamed = true;
                 const shown = holdback && streamKind === "assistant_text" ? holdback.feed(text) : text;
                 if (shown) delta(shown, streamKind);
-              }, tools.definitions, undefined, turn.variant, turn.threadId);
+              }, tools.definitions, turn.variant, turn.threadId);
               // A reply cut off at the token limit may be a call cut short; running half of one is worse than saying so.
               const written = holdback && !completion.toolCalls.length && completion.finishReason !== "length" ? textToolCalls(completion.text, tools.definitions) : null;
               unreadable = written?.kind === "unreadable" && !askedAgain;
@@ -978,13 +979,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal, onUsage, model: named, checkModel } = {}) => {
+    generateText: async (prompt, { signal, onUsage, model: named, checkModel, maxOutputTokens, finalTextOnly } = {}) => {
       const model = named ?? options.generateModel?.() ?? options.models().default;
       signal?.throwIfAborted();
       checkModel?.(model);
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
+      const route = finalTextOnly && routes.routeFor(model, true) === "responses" ? "responses" : "chat";
+      const { text, reasoning, toolCalls, responseOutput } = await completeOn(route,
+        [{ role: "user", content: prompt }], model, false, signal, undefined, [], undefined, undefined, { onUsage, maxOutputTokens });
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
-      return text.trim() ? text : reasoning;
+      if (finalTextOnly && responseOutput) return finalResponseText(responseOutput);
+      return finalTextOnly || text.trim() ? text : reasoning;
     },
     dispose: async () => {
       const turns = [...active.values()];
