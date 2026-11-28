@@ -216,8 +216,8 @@ shape.
   set is `503 push_unavailable`.
 - `unregister` `{ "v": 1, "platform"?: …, "token": "…" }` deletes it. `204`.
 - `send` `{ "v": 1, "token": "…", "pairing"?: "…", "collapseId"?: "…",
-  "notification": { "kind", "title", "botId", "botName", "threadId",
-  "roomId"?, "roomName"? } }` pushes to a token **this** installation
+  "botChannel"?: true, "notification": { "kind", "title", "botId", "botName",
+  "threadId", "roomId"?, "roomName"? } }` pushes to a token **this** installation
   registered, else `404 push_device_unknown` (the harness then registers and
   retries once). The schema is strict: `kind` is `[a-z-]`, ids are
   `[\w-]{1,120}`, `title` is one line of at most 200 characters, names at most
@@ -303,7 +303,9 @@ a data-only message the phone's notification library presents itself:
 JSON> }, "android": { "priority": "HIGH", "ttl": "86400s" } } }`. There is no
 `message` key, so the notification shows its title and nothing else.
 `channelId` is the app's `approval_question` for approvals, questions and
-sign-ins, `routine_failed` for routines and `bot_messages` for the rest.
+sign-ins, `routine_failed` for routines and `bot_messages` for the rest, or
+`bot_messages.<botId>`, the bot's own channel, when the send says
+`"botChannel": true` (the phone registered that it has one). APNs ignores it.
 
 Provider answers are mapped for the harness. A dead token is deleted for
 every installation that registered it and answers `410
