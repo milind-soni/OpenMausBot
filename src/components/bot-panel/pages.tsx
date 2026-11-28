@@ -9,9 +9,7 @@ import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/l
 import { fetchMemoryOverview, markMemoryReviewed, MEMORY_INDEX, saveMemoryDoc, saveThreadNotes, type LendingReview } from "@/lib/memory";
 import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
-import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
-import { skillImportLines } from "@/lib/skill-import";
 import { ApiError, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { connectAppFromBot } from "../AppGrantPrompt";
@@ -22,7 +20,7 @@ import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
 import { SavedWorkflowsCard } from "../skill-burger/SavedWorkflowsCard";
 import { isBurgerSource } from "../../../shared/skill-burger/saved";
-import { canUseOnAllBots, onAllBots, SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
+import { canUseOnAllBots, onAllBots, SkillReviewDialog, skillSwitchOn, useManagedSkills, useSkillImport, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
@@ -242,9 +240,7 @@ export function SkillsPage({ bot }: PageContext) {
   const { request: api } = useBotEditor();
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const skills = useManagedSkills(bot);
-  const [source, setSource] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [imported, setImported] = useState<string[]>([]);
+  const { source, setSource, importing, imported, submit, canPick } = useSkillImport(bot.id, skills, t("botPanel.skills.importFailed"));
   const libraryOn = skillsLibraryEnabled(state.config), skillBurger = useFeature("skillBurger");
   const own = skills.skills.filter((skill) => skill.origin !== "project" && !isBurgerSource(skill.source));
   const project = skills.skills.filter((skill) => skill.origin === "project");
@@ -261,23 +257,6 @@ export function SkillsPage({ bot }: PageContext) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
     } finally {
       skills.setWorking("");
-    }
-  };
-  const importSkill = async () => {
-    const trimmed = source.trim();
-    if (!trimmed || importing) return;
-    setImporting(true);
-    skills.setError("");
-    setImported([]);
-    try {
-      const result = await api<{ imported?: SkillImportSummary[] }>(`/api/bots/${bot.id}/skills`, { method: "POST", body: JSON.stringify({ source: trimmed }) });
-      setImported(skillImportLines(result.imported ?? []));
-      setSource("");
-      await skills.refresh();
-    } catch (cause) {
-      skills.setError(errorText(cause, t("botPanel.skills.importFailed")));
-    } finally {
-      setImporting(false);
     }
   };
   const browse = () => {
@@ -337,12 +316,17 @@ export function SkillsPage({ bot }: PageContext) {
           value={source}
           placeholder={t("botPanel.skills.importPlaceholder")}
           label={t("skills.import.label")}
-          action={importing ? t("skills.import.importing") : t("common.add")}
-          disabled={importing}
+          action={t(importing === "url" ? "skills.import.importing" : "common.add")}
+          disabled={Boolean(importing)}
           onChange={setSource}
-          onSubmit={() => void importSkill()}
+          onSubmit={() => void submit("url")}
         />
-        {imported.map((line) => <NoteRow key={line}>{line}</NoteRow>)}
+        {canPick && (
+          <LinkRow data-panel-link="choose-skill-folder" icon={FolderOpen} disabled={Boolean(importing)} onClick={() => void submit("folder")}>
+            {t(importing === "folder" ? "skills.import.importing" : "templateImport.chooseFolder")}
+          </LinkRow>
+        )}
+        {imported?.map((line) => <NoteRow key={line}>{line}</NoteRow>)}
         <LinkRow data-panel-link="browse-skills" onClick={browse}>{t("botPanel.skills.browse")}</LinkRow>
       </Card>
       {skills.reviewing && (

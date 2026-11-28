@@ -179,10 +179,11 @@ export function LinkRow({ children, onClick, icon: Icon = ChevronRight, ...rest 
   children: ReactNode;
   onClick: () => void;
   icon?: LucideIcon;
+  disabled?: boolean;
   "data-panel-link"?: string;
 }) {
   return (
-    <button type="button" {...rest} onClick={onClick} className="flex w-full items-center gap-2 px-3.5 py-[11px] text-left text-[13px] text-ink-secondary hover:text-ink">
+    <button type="button" {...rest} onClick={onClick} className="flex w-full items-center gap-2 px-3.5 py-[11px] text-left text-[13px] text-ink-secondary enabled:hover:text-ink disabled:opacity-50">
       <span className="min-w-0 flex-1">{children}</span>
       <Icon size={14} className="shrink-0" aria-hidden="true" />
     </button>

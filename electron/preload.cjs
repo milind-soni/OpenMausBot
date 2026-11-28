@@ -454,6 +454,7 @@ const bridge = {
     import: (input) => ipcRenderer.invoke("browser-cookies:import", input),
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
+  pickSkillFolder: () => ipcRenderer.invoke("desktop:pick-skill-folder"),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
   saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
