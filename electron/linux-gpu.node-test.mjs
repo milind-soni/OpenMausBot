@@ -16,23 +16,28 @@ test("Intel, AMD and other drivers use the GPU on X11", () => {
 });
 
 test("Intel iGPU on Wayland disables GPU (avoids Vulkan crash)", () => {
-  // Intel vendor ID 0x8086 at renderD128
-  const exists = only("/sys/class/drm/renderD128/device/vendor");
-  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x8086" : "";
+  const device = "/sys/bus/pci/devices/0000:00:02.0";
+  const exists = only(device);
+  const readFile = (p) => p === device + "/vendor" ? "0x8086" : "1";
   assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), true);
   // Also triggered by WAYLAND_DISPLAY alone
   assert.equal(linuxDisablesGpu({ env: { WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), true);
 });
 
+test("a discrete Intel adapter or secondary integrated adapter does not disable acceleration", () => {
+  const env = { XDG_SESSION_TYPE: "wayland" };
+  assert.equal(linuxDisablesGpu({ env, exists: only("/sys/bus/pci/devices/0000:03:00.0"), readFile: () => "0x8086" }), false);
+  assert.equal(linuxDisablesGpu({ env, exists: only("/sys/bus/pci/devices/0000:00:02.0"), readFile: (p) => p.endsWith("/vendor") ? "0x8086" : "0" }), false);
+});
 test("AMD on Wayland uses the GPU", () => {
-  const exists = only("/sys/class/drm/renderD128/device/vendor");
-  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x1002" : "";
+  const exists = only("/sys/bus/pci/devices/0000:00:02.0");
+  const readFile = (p) => p === "/sys/bus/pci/devices/0000:00:02.0/vendor" ? "0x1002" : "";
   assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), false);
 });
 
 test("Intel on X11 uses the GPU", () => {
-  const exists = only("/sys/class/drm/renderD128/device/vendor");
-  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x8086" : "";
+  const exists = only("/sys/bus/pci/devices/0000:00:02.0");
+  const readFile = (p) => p === "/sys/bus/pci/devices/0000:00:02.0/vendor" ? "0x8086" : "";
   assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" }, exists, readFile }), false);
 });
 

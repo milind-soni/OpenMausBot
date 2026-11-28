@@ -17,19 +17,14 @@ function isWayland(env) {
 }
 
 function isIntelIgpu(exists, readFile) {
-  // Check render nodes for Intel vendor ID (0x8086)
-  for (let i = 128; i < 144; i++) {
-    const vendorPath = `/sys/class/drm/renderD${i}/device/vendor`;
-    if (exists(vendorPath)) {
-      try {
-        const vendor = readFile(vendorPath, "utf8").trim();
-        if (vendor === "0x8086") return true;
-      } catch {
-        // Ignore read errors
-      }
-    }
+  const device = "/sys/bus/pci/devices/0000:00:02.0";
+  if (!exists(device)) return false;
+  try {
+    return readFile(`${device}/vendor`, "utf8").trim() === "0x8086" &&
+      readFile(`${device}/boot_vga`, "utf8").trim() === "1";
+  } catch {
+    return false;
   }
-  return false;
 }
 
 // The main window's page is told so its glass pop-ups drop the backdrop blur, which is redrawn on the CPU here.
