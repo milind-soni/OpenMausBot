@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PlanFetch } from "../plan-usage.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
-import { defaultNativeSignInStore, nativeAccessToken, readNativeAccessToken, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
+import { clearNativeTokenWakeHolds, defaultNativeSignInStore, ensureNativeAccessToken, nativeAccessToken, readNativeAccessToken, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
 import { antigravityNativePlanUsage } from "./antigravity-usage-limits.ts";
 
 const NOW = Date.parse("2026-11-23T04:40:00Z");
@@ -59,6 +59,103 @@ describe("which stored sign-in's access token is used", () => {
   it("is none when the stored token has expired or there is none, so a file the CLI stopped writing soon shows nothing", async () => {
     expect(await readNativeAccessToken("native", {}, NOW, store(dead("file-access")).value)).toBeNull();
     expect(await readNativeAccessToken("native", {}, NOW, store(null).value)).toBeNull();
+  });
+});
+
+describe("waking a stale native-CLI sign-in so plan usage can still read it", () => {
+  const profileFile = join(antigravityProfileDirectory("native"), "antigravity-acp", "antigravity-oauth-token");
+  const store = (file: () => string | null) => {
+    const readText = vi.fn(async (path: string) => path === profileFile ? file() : null);
+    const value: NativeSignInStore = { readText };
+    return { value, readText };
+  };
+  const live = (accessToken = "fresh-access") => stored("2026-11-23T05:30:00Z", accessToken);
+  const dead = stored("2026-11-23T04:30:00Z", "stale-access");
+
+  afterEach(() => clearNativeTokenWakeHolds());
+
+  it("does not start the CLI when the access token is still live, or when the file is gone", async () => {
+    const wake = vi.fn(async () => { throw new Error("should not wake"); });
+    expect(await ensureNativeAccessToken("native", {}, NOW, { store: store(() => live("native-access")).value, wake })).toBe("native-access");
+    expect(await ensureNativeAccessToken("native", {}, NOW, { store: store(() => null).value, wake })).toBeNull();
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("asks the CLI to refresh its own file when the access token has expired, then reads the new token", async () => {
+    let file: string | null = dead;
+    const wake = vi.fn(async () => { file = live(); });
+    expect(await ensureNativeAccessToken("native", { HOME: "/Users/person" }, NOW, { store: store(() => file).value, wake, clock: () => NOW })).toBe("fresh-access");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith("native", { HOME: "/Users/person" });
+    expect(JSON.stringify(wake.mock.calls)).not.toMatch(/native-refresh|stale-access|fresh-access/);
+  });
+
+  it("holds a failed wake for a minute, then retries", async () => {
+    const wake = vi.fn(async () => { throw new Error("cli missing"); });
+    const value = store(() => dead).value;
+    expect(await ensureNativeAccessToken("native", {}, NOW, { store: value, wake, clock: () => NOW })).toBeNull();
+    expect(await ensureNativeAccessToken("native", {}, NOW + 59_000, { store: value, wake, clock: () => NOW + 59_000 })).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(await ensureNativeAccessToken("native", {}, NOW + 60_000, { store: value, wake, clock: () => NOW + 60_000 })).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one in-flight wake across concurrent reads", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let file: string | null = dead;
+    const wake = vi.fn(async () => { await gate; file = live(); });
+    const value = store(() => file).value;
+    const first = ensureNativeAccessToken("native", {}, NOW, { store: value, wake, clock: () => NOW });
+    const second = ensureNativeAccessToken("native", {}, NOW, { store: value, wake, clock: () => NOW });
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
+    release();
+    expect(await first).toBe("fresh-access");
+    expect(await second).toBe("fresh-access");
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the wake registered until the hold decision, so a read during the post-wake reread does not wake again", async () => {
+    let releaseReread!: () => void;
+    const rereadGate = new Promise<void>((resolve) => { releaseReread = resolve; });
+    let reads = 0;
+    const value: NativeSignInStore = {
+      readText: async () => {
+        reads += 1;
+        // The post-wake reread (3rd read) hangs, simulating the window between the wake settling and the hold
+        // being installed, where a concurrent read used to find neither a pending wake nor a hold.
+        if (reads === 3) await rereadGate;
+        return dead;
+      },
+    };
+    const wake = vi.fn(async () => undefined);
+    const first = ensureNativeAccessToken("native", {}, NOW, { store: value, wake });
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
+    const second = ensureNativeAccessToken("native", {}, NOW, { store: value, wake });
+    releaseReread();
+    expect(await first).toBeNull();
+    expect(await second).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+
+  it("times a failed wake's hold from when the wake finishes, not when it started", async () => {
+    let clockNow = NOW;
+    const clock = () => clockNow;
+    const wake = vi.fn(async () => { clockNow += 65_000; throw new Error("slow cli"); });
+    const value = store(() => dead).value;
+    expect(await ensureNativeAccessToken("native", {}, clockNow, { store: value, wake, clock })).toBeNull();
+    // The hold must start at NOW + 65_000 (completion), so NOW + 124_999 is still held and NOW + 125_000 retries.
+    expect(await ensureNativeAccessToken("native", {}, clockNow + 59_999, { store: value, wake, clock })).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(1);
+    clockNow += 60_000;
+    expect(await ensureNativeAccessToken("native", {}, clockNow, { store: value, wake, clock })).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns nothing when the CLI runs but the file stays stale", async () => {
+    const wake = vi.fn(async () => undefined);
+    expect(await ensureNativeAccessToken("native", {}, NOW, { store: store(() => dead).value, wake })).toBeNull();
+    expect(wake).toHaveBeenCalledTimes(1);
   });
 });
 
