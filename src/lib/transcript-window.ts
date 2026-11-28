@@ -74,11 +74,11 @@ export function windowAfterPrepend({ start, end }: TranscriptWindowBounds, added
   return capWindowEnd(moved, total);
 }
 
-/** `window` widened to draw rows `first` to `last`, or null when that would draw more than `SELECTION_HOLD_MAX` rows. */
-export function holdRows({ start, end }: TranscriptWindowBounds, total: number, { first, last }: { first: number; last: number }): TranscriptWindowBounds | null {
+/** `window` widened to draw rows `first` to `last`, or null when that would draw more than `max` rows. */
+export function holdRows({ start, end }: TranscriptWindowBounds, total: number, { first, last }: { first: number; last: number }, max = SELECTION_HOLD_MAX): TranscriptWindowBounds | null {
   const from = Math.max(0, Math.min(start, first));
   const to = Math.min(total, Math.max(end ?? total, last + 1));
-  if (to - from > SELECTION_HOLD_MAX) return null;
+  if (to - from > max) return null;
   return { start: from, end: end === null || to >= total ? null : to };
 }
 

@@ -116,14 +116,16 @@ export function createSignInSettle(deps: SignInSettleDeps) {
     if (bot) answered(bot, node.threadId, node.cards ?? []);
   };
 
-  /** The bot asked for a sign-in, then went on with that site in the same turn: the sign-in went through. */
-  const verified = (botId: string, threadId: string, since: number): void => {
+  /** The bot asked for a sign-in, then went on with that site — in the asking turn or a later one: the sign-in went
+   * through, so the card stops waiting on the person. A newer request for the site supersedes the older card, so the
+   * one this settles is the site's only open ask. */
+  const verified = (botId: string, threadId: string): void => {
     const bot = store.bot(botId);
     if (!bot) return;
     const path = store.activePath(threadId);
     path.forEach((message, index) => {
       const card = message.signIn;
-      if (message.kind !== "signin" || !card || isHandoff(card) || message.at < since || card.stopped || !signInWaits(card)) return;
+      if (message.kind !== "signin" || !card || isHandoff(card) || card.stopped || !signInWaits(card)) return;
       const site = card.site.toLowerCase();
       const used = path.slice(index + 1).some((row) => row.kind === "activity" && row.tool?.ok === true && (row.tool.input ?? "").toLowerCase().includes(site));
       if (!used) return;

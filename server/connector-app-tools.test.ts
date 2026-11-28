@@ -45,10 +45,22 @@ describe("a call to one", () => {
     expect(update?.frame(1)).toMatchObject({ params: { arguments: { tools: [{ tool_slug: "GMAIL_UPDATE_DRAFT", arguments: {
       user_id: "me", draft_id: "r123", recipient_email: "support@example.test", subject: "Re: Account", body: "Revised reply", thread_id: "t123",
     } }] } } });
-    expect(appToolCall("gmail.create_draft", input)?.frame(2)).toMatchObject({ params: { arguments: { tools: [{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: {
-      thread_id: "t123", subject: "Re: Account", body: "Revised reply",
-    } }] } } });
     expect(appToolsFor({ connectorTools: { gmail: { tools: ["GMAIL_CREATE_EMAIL_DRAFT"] } } }, ["gmail"])).toEqual(["gmail.create_draft"]);
+  });
+
+  it("drafts a reply with its thread id and no subject, so Composio keeps it in that thread", () => {
+    const reply = appToolCall("gmail.create_draft", { to: "ada@example.test", body: "Sounds good", thread_id: " t99 " });
+    expect(reply?.slug).toBe("GMAIL_CREATE_EMAIL_DRAFT");
+    const item = (reply!.frame(1) as { params: { arguments: { tools: Array<Record<string, unknown>> } } }).params.arguments.tools[0]!;
+    expect(item.tool_slug).toBe("GMAIL_CREATE_EMAIL_DRAFT");
+    expect(item.arguments).toEqual({ user_id: "me", recipient_email: "ada@example.test", body: "Sounds good", thread_id: "t99" });
+    expect((appToolEntries(["gmail.create_draft"], "dotted")[0]!.inputSchema as { required: string[] }).required).toEqual(["to", "body"]);
+  });
+
+  it("still sends the subject a new draft names", () => {
+    expect(appToolCall("gmail.create_draft", { to: "ada@example.test", subject: "Quote", body: "Here it is" })?.frame(1)).toMatchObject({
+      params: { arguments: { tools: [{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: { user_id: "me", recipient_email: "ada@example.test", subject: "Quote", body: "Here it is" } }] } },
+    });
   });
 
   it("runs its Composio tool through the multi-execute tool, by either name, with the arguments it takes", () => {

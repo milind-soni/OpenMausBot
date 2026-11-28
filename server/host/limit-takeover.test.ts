@@ -107,15 +107,28 @@ describe("which AI carries on while one is limited", () => {
     clock.noteUsage({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "opencode", name: "OpenCode", driver: "opencode", ok: true, error: null,
       ...parseOpenCodeUsage({ usage: { rolling: { percent: 100, resetsAt: new Date(NOW + HOUR).toISOString() }, weekly: { percent: 50, resetsAt: new Date(NOW + 48 * HOUR).toISOString() } } }) }] });
     const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model),
-      chosen: () => [on("claude", "claude-opus-5-5")] });
+      holdScope: (id, model) => clock.holdScope(id, model), chosen: () => [on("claude", "claude-opus-5-5")] });
     expect(instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle")), "a free model has its own allowance").toBeNull();
-    expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))).toEqual({ scope: "engine", resetsAt: NOW + HOUR });
+    // The Go subscription's meter holds the Go models only: model scope, so the instance's other providers still serve.
+    expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))).toEqual({ scope: "model", resetsAt: NOW + HOUR });
     const chosen = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), chosen: () => [on("opencode", "opencode/big-pickle")] }).instance;
     expect(chosen.backups("kai", on("claude", "claude-opus-5-5"))[0], "a free model the person chose still carries on for another AI").toEqual(on("opencode", "opencode/big-pickle"));
     clock.noteRefusal("opencode", NOW + HOUR / 2);
     const free = instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle"));
     expect(free?.resetsAt, "a refused free model waits for the refusal's reset, not the Go meter's later one").toBe(clock.blockedUntil("opencode", "opencode/big-pickle"));
     expect(free?.resetsAt).toBeLessThan(NOW + HOUR);
+    expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))?.scope, "an engine-wide refusal still holds the account").toBe("engine");
+  });
+
+  it("carries a full Go meter over to a Zen model of the same OpenCode instance", () => {
+    const openCode = engine("opencode", "opencode", ["opencode-go/kimi-k2", "opencode/big-pickle"]);
+    const clock = new LimitResetClock({ accounts: () => [{ id: "opencode", name: "OpenCode", driver: "opencode", environment: {} }], now: () => NOW });
+    clock.noteUsage({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "opencode", name: "OpenCode", driver: "opencode", ok: true, error: null,
+      ...parseOpenCodeUsage({ usage: { rolling: { percent: 100, resetsAt: new Date(NOW + HOUR).toISOString() }, weekly: { percent: 50, resetsAt: new Date(NOW + 48 * HOUR).toISOString() } } }) }] });
+    const taken = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model),
+      holdScope: (id, model) => clock.holdScope(id, model), chosen: () => [] }).instance
+      .takeoverAtStart(KAI, on("opencode", "opencode-go/kimi-k2"), [on("opencode", "opencode/big-pickle")]);
+    expect(taken).toEqual({ to: on("opencode", "opencode/big-pickle"), scope: "model", resetsAt: NOW + HOUR });
   });
 
   it("carries on only with a backup the person chose, one that bills each use included", () => {

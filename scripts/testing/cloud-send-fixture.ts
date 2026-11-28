@@ -70,6 +70,8 @@ export interface CloudSendFixture {
   desktopInstallation: { id: string; token: string; userId: string } | null;
   /** This computer's server's private port, asked as main asks it (cloud-logins.mjs). */
   handoff(what: ConnectionAsk): Promise<any>;
+  /** A message on this computer's server's private port, as main sends one (a My Cloud session for a bot opened in place). */
+  tellDesktop(message: object): void;
   /** The one-time move (one-home.mjs), as main runs it in the app that is open now. */
   oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
   /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, its export of a held one, the Admin
@@ -605,6 +607,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       listen();
     },
     handoff: (what) => asks.request(port, what as ConnectionAsk),
+    tellDesktop: (message) => port.postMessage(message),
     async picture(bytes) {
       const response = await fetch(`${desktopBase}/api/attachments`, { method: "POST", headers: { "x-openmausbot-desktop-owner": ownerCapability, "content-type": "image/png" }, body: bytes });
       return `/api/attachments/${((await response.json()) as { path: string }).path.split(/[\\/]/).pop()}`;

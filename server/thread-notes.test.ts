@@ -3,9 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { memoryOverview, parseMemoryPath, readMemoryDoc, threadNotesPath } from "./memory-store.ts";
+import { memoryOverview, parseMemoryPath, readMemoryDoc, threadNotesPath, writeMemoryDoc } from "./memory-store.ts";
 import {
   THREAD_NOTES_MAX_LINES,
+  THREAD_NOTES_MAX_BYTES,
+  THREAD_READ_BUDGET,
   createThreadScope,
   reachThreads,
   readThreadNotes,
@@ -192,6 +194,44 @@ describe("reaching another conversation on request", () => {
     const other = freshBot();
     updateThreadNotes(botId, "sm", { action: "append", text: "Supermouse: liability capped" });
     expect(reach(other, { query: "liability" })).toEqual({ total: 0, threads: [] });
+  });
+
+  it("keeps a cursor through every message when legal notes exceed the page budget", () => {
+    const botId = freshBot(), notes = "A clause for this conversation. ".repeat(300).trim();
+    expect(notes.length).toBeGreaterThan(THREAD_READ_BUDGET);
+    expect(Buffer.byteLength(notes, "utf8")).toBeLessThan(THREAD_NOTES_MAX_BYTES);
+    writeMemoryDoc(botId, threadNotesPath("sm"), notes);
+    const messages = [line("m1", "user", "first ".repeat(100)), line("m2", "bot", "second ".repeat(100)), line("m3", "user", "third ".repeat(100))];
+    const seen: string[] = [];
+    let before: string | undefined;
+    for (let index = 0; index <= messages.length; index += 1) {
+      const page = reach(botId, { threadId: "sm", before, messages: () => messages });
+      if (!("messages" in page) || !page.messages) throw new Error("expected a conversation page");
+      expect(page.messages.length).toBeGreaterThan(0);
+      expect(page.notesTruncated).toBe(true);
+      expect(page.notes!.length + page.messages.reduce((sum, message) => sum + message.text.length, 0)).toBeLessThanOrEqual(THREAD_READ_BUDGET);
+      seen.push(...page.messages.map((message) => message.messageId!));
+      if (page.earlier === null) break;
+      before = page.earlier!;
+    }
+    expect(seen).toEqual(["m3", "m2", "m1"]);
+    expect(readThreadNotes(botId, "sm")).toBe(notes);
+  });
+
+  it("does not consume an older message when the remaining budget cannot hold its first character", () => {
+    const botId = freshBot();
+    writeMemoryDoc(botId, threadNotesPath("sm"), "n".repeat(7_500));
+    const messages = [line("m1", "user", "🙂"), line("m2", "bot", "x".repeat(499) + "🙂")];
+    const page = reach(botId, { threadId: "sm", messages: () => messages });
+    expect(page).toMatchObject({ messages: [{ messageId: "m2", text: "x".repeat(499), truncated: true }], earlier: "m2", notesTruncated: false });
+    expect(reach(botId, { threadId: "sm", before: "m2", messages: () => messages })).toMatchObject({ messages: [{ messageId: "m1", text: "🙂", truncated: false }], earlier: null });
+  });
+
+  it("bounds the notes even when there are no messages to show", () => {
+    const botId = freshBot();
+    writeMemoryDoc(botId, threadNotesPath("sm"), "n".repeat(9_000));
+    const page = reach(botId, { threadId: "sm", messages: () => [] });
+    expect(page).toMatchObject({ notes: "n".repeat(THREAD_READ_BUDGET), notesTruncated: true, messages: [], earlier: null });
   });
 
   it("reads no notes while the bot's memory is off", () => {

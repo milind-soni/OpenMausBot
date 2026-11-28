@@ -14,6 +14,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
 import { piSessionDir } from "./pi-session.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { agentsStartupMs } from "./chat-mcp-tools.ts";
 import {
   applyPiLocalCatalog,
   decodePiFrame,
@@ -203,7 +204,7 @@ describe("buildMcpServers", () => {
     });
     expect(servers).toEqual({
       composio: { command: "node", args: ["c"], env: { A: "1" } },
-      agents: { command: "node", args: ["a"], env: { B: "2" } },
+      agents: { command: "node", args: ["a"], env: { B: "2" }, startupMs: agentsStartupMs() },
       phone: { command: "node", args: ["p"], env: {} },
     });
   });

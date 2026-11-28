@@ -49,6 +49,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
   /** Why the account signed in can't be left now, else null. */
   holding(): "moving" | null;
+  /** A move to My Cloud, its way home, or a bot's move is under way: the session is read every minute for it. */
+  underWay(): boolean;
   kick(): Promise<void>;
   away(): boolean;
   view(): OneHomeView | null;

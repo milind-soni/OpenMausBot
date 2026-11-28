@@ -69,7 +69,7 @@ export { formatTime } from "@/lib/clock-time";
 import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once"; import { createNewChat, reduceNewChat, type MakeNewChatAction, type NewChat } from "./new-chat";
 import { liveCallFromFrame, nextLiveCallLookup } from "./live-call";
 import { isNoAiRefusal, useChatErrorClear } from "./chat-error";
-import { openLiveEvents, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events";
+import { openLiveEvents, placeFrames, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events"; import { keptPlaceBots } from "@/lib/place-chat";
 import { unlessRefused } from "@/lib/admin-scope";
 import { olderRunsSince, ROUTINE_RUNS_WINDOW_MS, trimRoutineRuns, withOlderRoutineRuns } from "./routine-runs";
 import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } from "./queue-receipts";
@@ -876,15 +876,15 @@ function reduceApp(state: AppState, action: Action): AppState {
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
-      const selectedId = hydratedSelectedId(state.selectedId, action.bots, action.groups, action.resumeId);
+      const placed = keptPlaceBots(state.bots), selectedId = hydratedSelectedId(state.selectedId, [...action.bots, ...placed], action.groups, action.resumeId); // a bot open in place is My Cloud's
       const hydrated = {
         ...state,
-        bots: action.bots.map((sent) => {
+        bots: [...action.bots.map((sent) => {
           const bot = sent.messages ? sent : { ...sent, messages: [] };
           const previous = state.bots.find((candidate) => candidate.id === bot.id);
           return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
             action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
-        }),
+        }), ...placed],
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
           const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
@@ -3183,11 +3183,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         forgetLiveTurns();
         return hydrate();
       },
-      onFrame: (frame) => {
+      onFrame: placeFrames((frame) => { // a bot open in place feeds the store the same way (src/lib/place-chat.ts)
         publishLiveFrame(frame as ServerFrame);
         const queued = withoutScreenPixels(frame as ServerFrame); // the store reads only a screen frame's botId
         if (hydrated) store.enqueueFrame(queued, frame.kind === "live.call"); else pendingFrames.push(queued);
-      },
+      }),
     });
     return () => {
       alive = false;

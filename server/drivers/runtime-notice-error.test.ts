@@ -57,6 +57,9 @@ describe("runtime notice provenance", () => {
     const text = runtimeErrorText(verdict.stop)!;
     expect(text.key).toBe("chat.notice.acpQuietUsageLimit");
     expect(chatNotice("chat.notice.acpQuietUsageLimit", text.params)).toBe(verdict.stop?.message);
+    // The failed call's log row names the provider and model that hit the limit, so the hold can be scoped to it.
+    const named = quietVerdict({ name: "Custom ACP", next: { kind: "provider-error", message: "HTTP 429" }, logged: { signal: { kind: "provider-error", message: "HTTP 429", model: "opencode-go/kimi-k3" }, at: 0 }, now: 600_000, quietMs: 600_000, noSignsSince: null, stuckAfterMs: 600_000 });
+    expect(named.stop).toMatchObject({ acpUsageLimit: true, acpUsageLimitModel: "opencode-go/kimi-k3" });
     const stuck = quietVerdict({ name: "Custom ACP", next: { kind: "no-signs" }, logged: null, now: 600_000, quietMs: 600_000, noSignsSince: 0, stuckAfterMs: 100_000 });
     expect(stuck.stop).toMatchObject({ acpPromptStall: true });
     expect(runtimeErrorText(stuck.stop)?.key).toBe("chat.notice.acpQuietStuck");

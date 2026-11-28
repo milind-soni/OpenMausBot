@@ -670,8 +670,10 @@ export function renderAvatarSvg(definition: AvatarDefinition, options: RenderOpt
   const label = esc(frame.name);
 
   return (
+    // MausBot: no <title>. A <title> builds a browser tooltip of its own, so hovering a bot's avatar showed the body's
+    // name ("Star", "Mug") instead of the name and title shown beside the row. aria-label already
+    // names the image for assistive tech, so the duplicate title only costs the tooltip.
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"${dims} role="img" aria-label="${label}" overflow="visible">` +
-    `<title>${label}</title>` +
     `<defs>${defsMarkup}</defs>` +
     `<g transform="${mat(frame.root)}" fill="${frame.color}">` +
     body +

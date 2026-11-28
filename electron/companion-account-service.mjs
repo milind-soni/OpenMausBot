@@ -770,7 +770,12 @@ export function createCompanionAccountService({
       // Waiting: the control plane ended the address or had no room. Asked again on every watchdog tick while an
       // old phone still needs it, as a desktop that kept its address does.
       const waiting = document[COMPANION_TUNNEL_WAITING_FIELD] === true;
-      if ((!savedAddress(document) && !waiting) || autoRetryTimer !== null) return null;
+      if ((!savedAddress(document) && !waiting) || autoRetryTimer !== null) {
+        // A sign-in that stored the account but never its installation credential stays that way on its own, and the
+        // relay token keeps answering signed_out without it: finish the provisioning, like a stored address does.
+        if (autoRetryTimer === null && !storedAccount(document).installationCredential) return retryWork();
+        return null;
+      }
       return (await currentNeed()) === true ? retryWork() : null;
     }
     const need = await currentNeed();
