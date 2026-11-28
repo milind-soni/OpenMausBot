@@ -49,6 +49,10 @@ describe("mention display ranges", () => {
     expect(matches("@everyone @Everyone! @everyone_else @everyone2", true)).toEqual(["@everyone", "@Everyone"]);
     expect(matches("@everyone")).toEqual([]);
   });
+  it("decorates @all like @everyone, but not a bot whose name starts with it", () => {
+    expect(matches("@all @All! @allie @all_x", true)).toEqual(["@all", "@All"]);
+    expect(mentionRanges("@All-Star", [{ name: "All-Star" }], true)).toEqual([{ start: 0, end: 9 }]);
+  });
   it("rejects Unicode letters, numbers, combining marks and underscores after names", () => {
     expect(matches("@調査担当者 @everyone調査 @Atlasé @Atlas２ @Atlas𐐀 @Atlas𝟙 @Atlas\u0301 @Atlas_else", true)).toEqual([]);
     expect(matches("@everyoneé @everyone２ @everyone𐐀 @everyone𝟙 @everyone\u0301", true)).toEqual([]);
@@ -123,6 +127,15 @@ describe("mention picker choices", () => {
   it("filters before display and closes after a completed exact tag", () => {
     expect(mentionChoicesForQuery(choices, "si").map((choice) => choice.name)).toEqual(["Six"]);
     expect(mentionChoicesForQuery(choices, "Six ")).toEqual([]);
+  });
+
+  it("finds a row by another spelling and closes after it is typed", () => {
+    const everyone = { id: "__everyone__", name: "everyone", aliases: ["all"] };
+    expect(mentionChoicesForQuery([everyone, ...choices], "al")).toEqual([everyone]);
+    expect(mentionChoicesForQuery([everyone, ...choices], "all ")).toEqual([]);
+    expect(mentionChoicesForQuery([everyone, ...choices], "ev")).toEqual([everyone, choices[0]]);
+    const allHands = { id: "all-hands", name: "All Hands" };
+    expect(mentionChoicesForQuery([everyone, allHands], "all ")).toEqual([everyone, allHands]);
   });
 
   it("filters by name only, so a title never opens a row the insert would not match", () => {

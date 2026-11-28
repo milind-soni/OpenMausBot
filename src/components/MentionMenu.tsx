@@ -13,7 +13,7 @@ import { PersonFace } from "./TeamOwner";
 import { DEVS_TAG } from "../../shared/devs-mention";
 
 /** One row of the @ list: a bot, a teammate on a Team Cloud, a whole team, everyone, or the MausBot team (@devs). */
-export type MentionChoice = { id: string; name: string; bot?: Bot; person?: TeamPerson; team?: { count: number }; all?: { count: number }; devs?: true };
+export type MentionChoice = { id: string; name: string; aliases?: readonly string[]; bot?: Bot; person?: TeamPerson; team?: { count: number }; all?: { count: number }; devs?: true };
 
 /** The last row of every @ list: a message that tags it is a bug report the app sends to the MausBot team. */
 export const DEVS_CHOICE: MentionChoice = { id: "__devs__", name: DEVS_TAG, devs: true };

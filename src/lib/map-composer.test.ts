@@ -31,6 +31,15 @@ describe("Team map message targets", () => {
     expect(mapMessageTargets("@Research and @theo", bots, teams).botIds).toEqual(["maya", "theo"]);
   });
 
+  it("reads @all as @everyone, unless a bot's name starts with it", () => {
+    const everyone = ["maya", "theo", "theodora", "nora", "solo"];
+    expect(mapMessageTargets("@all start your task", bots, teams).botIds).toEqual(everyone);
+    expect(mapMessageTargets("@All, start", bots, teams).tags.map((tag) => tag.kind)).toEqual(["everyone"]);
+    const allStar = { id: "all-star", name: "All-Star" };
+    expect(mapMessageTargets("@All-Star start", [...bots, allStar], teams).botIds).toEqual(["all-star"]);
+    expect(mapMessageTargets("@allie start", bots, teams).unknown).toEqual(["allie"]);
+  });
+
   it("ignores hidden bots, unknown names, e-mail addresses and paths", () => {
     const result = mapMessageTargets("@Ghost @Bob mail me@example.com or see /a/@Theo", bots, teams);
     expect(result.botIds).toEqual([]);

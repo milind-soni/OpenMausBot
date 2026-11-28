@@ -3,6 +3,7 @@ import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
 import { devsTagAt } from "../../shared/devs-mention";
+import { everyoneTagAt } from "../../shared/everyone-mention";
 import { blankCode } from "../../shared/skill-command";
 
 /** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
@@ -24,10 +25,16 @@ export function mentionQueryAt(text: string, caret: number): { start: number; qu
   return { start: at, query };
 }
 
-export function mentionChoicesForQuery<T extends { name: string }>(pool: readonly T[], query: string): T[] {
+/** `aliases`: other words that find a row, such as `all` for everyone. */
+export function mentionChoicesForQuery<T extends { name: string; aliases?: readonly string[] }>(pool: readonly T[], query: string): T[] {
   const normalized = query.trim().toLowerCase();
-  if (query.endsWith(" ") && pool.some((choice) => choice.name.toLowerCase() === normalized)) return [];
-  return pool.filter((choice) => !normalized || choice.name.toLowerCase().includes(normalized));
+  const words = (choice: T) => [choice.name, ...(choice.aliases ?? [])].map((word) => word.toLowerCase());
+  const typed = query.toLowerCase();
+  const done = pool.some((choice) => choice.name.toLowerCase() === normalized)
+    || (pool.some((choice) => choice.aliases?.some((alias) => alias.toLowerCase() === normalized))
+      && !pool.some((choice) => choice.name.toLowerCase().startsWith(typed)));
+  if (query.endsWith(" ") && done) return [];
+  return pool.filter((choice) => !normalized || words(choice).some((word) => word.includes(normalized)));
 }
 
 export type MentionRowDetail =
@@ -68,19 +75,18 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
     const rest = text.slice(at + 1);
     const peer = candidates.find(({ name }) => rest.slice(0, name.length).toLowerCase() === name.toLowerCase()
       && !isMentionNameContinuation(rest.slice(name.length)));
-    const all = everyone && rest.slice(0, 8).toLowerCase() === "everyone"
-      && !isMentionNameContinuation(rest.slice(8));
-    const you = !all && personNames.length ? personTagAt(rest, personNames, botNames) : undefined;
+    const all = everyone ? everyoneTagAt(rest, botNames) : undefined;
+    const you = all === undefined && personNames.length ? personTagAt(rest, personNames, botNames) : undefined;
     if (you !== undefined) {
       ranges.push({ start: at, end: at + you + 1, you: true });
       at += you;
       continue;
     }
-    const length = all ? 8 : peer?.name.length ?? devsTagAt(rest, botNames);
+    const length = all ?? peer?.name.length ?? devsTagAt(rest, botNames);
     if (length === undefined) continue;
     // Only palette values enter CSS.
-    const color = !all && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
-    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(!all && peer?.person ? { person: true as const } : {}) });
+    const color = all === undefined && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
+    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(all === undefined && peer?.person ? { person: true as const } : {}) });
     at += length;
   }
   return ranges;

@@ -46,6 +46,7 @@ import { openPageFor } from "@/lib/open-page";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { ComposerAdvancedTools } from "./ComposerAdvancedTools";
 import { approvalModeFor } from "../../shared/approval-mode";
+import { EVERYONE_ALIASES, EVERYONE_TAG } from "../../shared/everyone-mention";
 import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
 import {
@@ -355,7 +356,7 @@ export function Composer({
     if (!mention || mention.start === dismissedAt || isPlaceId(bot?.id)) return []; // a My Cloud bot's chat names none of this computer's
     const pool: MentionChoice[] = group
       ? [
-          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
+          ...(!group.dm ? [{ id: "__everyone__", name: EVERYONE_TAG, aliases: EVERYONE_ALIASES }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : bots

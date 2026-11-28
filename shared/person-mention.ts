@@ -10,7 +10,7 @@ export function personTagNames(profileName?: string | null): string[] {
   return name && folded !== PERSON_TAG && !RESERVED.has(folded) ? [PERSON_TAG, name] : [PERSON_TAG];
 }
 
-function tagMatches(rest: string, name: string): boolean {
+export function tagMatches(rest: string, name: string): boolean {
   return rest.slice(0, name.length).toLowerCase() === name.toLowerCase()
     && !isMentionNameContinuation(rest.slice(name.length));
 }

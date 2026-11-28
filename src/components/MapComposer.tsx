@@ -12,6 +12,7 @@ import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { useMenuMotion } from "./MenuMotion";
 import { randomUuid } from "@/lib/random-uuid";
+import { EVERYONE_ALIASES, EVERYONE_TAG } from "../../shared/everyone-mention";
 
 /** Message bots from the Team map: tag bots, a team or @everyone; each bot it goes to gets it as a normal message in its own
  * chat. @everyone goes to the Chief, which passes it on (mapDelivery). */
@@ -45,7 +46,7 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
   const choices = useMemo(() => {
     if (!mention || mention.start === dismissedAt) return [];
     const pool: MentionChoice[] = [
-      ...(visible.length > 1 ? [{ id: "__everyone__", name: "everyone", all: { count: visible.length } }] : []),
+      ...(visible.length > 1 ? [{ id: "__everyone__", name: EVERYONE_TAG, aliases: EVERYONE_ALIASES, all: { count: visible.length } }] : []),
       ...teams.filter((team) => team.count > 0).map((team) => ({ id: `team:${team.key}`, name: team.name, team: { count: team.count } })),
       ...visible.map((bot) => ({ id: bot.id, name: bot.name, bot })),
     ];

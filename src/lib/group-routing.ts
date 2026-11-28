@@ -1,5 +1,6 @@
 import type { Bot, ConfigStatus, Group, GroupDefaultResponder } from "@/state/store";
-import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
+import { everyoneTagAt } from "../../shared/everyone-mention";
+import { isMentionBoundary } from "../../shared/mention-boundary";
 import { resolveMentions } from "../../shared/room-mentions";
 import { t } from "./i18n";
 
@@ -62,14 +63,10 @@ export function roomRouteForComposer<T extends { id: string; name: string; hidde
   picked: readonly string[] = [],
 ): { responders: T[]; ambiguous: boolean } {
   const available = members.filter((member) => !member.hidden);
-  const everyone = "everyone";
+  const names = available.map((member) => member.name);
   let everyoneAt = -1;
   while ((everyoneAt = text.indexOf("@", everyoneAt + 1)) !== -1) {
-    if (
-      isMentionBoundary(text, everyoneAt)
-      && text.slice(everyoneAt + 1, everyoneAt + 1 + everyone.length).toLowerCase() === everyone
-      && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
-    ) {
+    if (isMentionBoundary(text, everyoneAt) && everyoneTagAt(text.slice(everyoneAt + 1), names) !== undefined) {
       return { responders: available, ambiguous: false };
     }
   }

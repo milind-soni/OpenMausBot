@@ -44,6 +44,10 @@ describe("room routing with picks", () => {
 
   it("keeps @everyone and a unique name as they were", () => {
     expect(roomResponders("@everyone standup", room, { kind: "mentions" }, [chief.id])).toEqual(room);
+    expect(roomResponders("@all standup", room, { kind: "mentions" }, [chief.id])).toEqual(room);
+    expect(roomResponders("@allie standup", room, { kind: "mentions" })).toEqual([]);
+    const allStar = { id: "all-star", name: "All-Star", title: "" };
+    expect(roomResponders("@All-Star look", [...room, allStar], { kind: "mentions" })).toEqual([allStar]);
     expect(roomResponders("@Scout look", room, { kind: "member", botId: analyst.id })).toEqual([scout]);
     expect(roomResponders("hello", room, { kind: "member", botId: analyst.id }, [chief.id])).toEqual([analyst]);
   });
