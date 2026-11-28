@@ -25,6 +25,7 @@ directories:
 # electron-builder makes copied directories group-writable by default. The
 # Linux CUA trust boundary requires root-owned package ancestors to be 0755.
 afterPack: ./scripts/after-pack.mjs
+artifactBuildCompleted: ./scripts/appimage-update.mjs
 
 # The app is three self-contained pieces, none needing node_modules at
 # runtime: the Electron main/preload (plain .mjs/.cjs), the built UI

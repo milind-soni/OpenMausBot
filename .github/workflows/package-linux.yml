@@ -36,7 +36,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core cpio dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox rpm squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core binutils cpio dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox rpm squashfs-tools x11-utils xdotool xvfb zsync
       - run: pnpm install --frozen-lockfile
       - name: Clean generated output
         run: pnpm clean
@@ -45,8 +45,12 @@ jobs:
       - name: Prove overlay-free X11 input routing
         run: dbus-run-session -- xvfb-run -a pnpm smoke:cua-x11-input
       - name: Package from the verified offline CUA stage
+        env:
+          OMB_APPIMAGE_UPDATE: "1"
         run: pnpm package:linux:offline
       - name: Verify package contents and metadata
+        env:
+          OMB_APPIMAGE_UPDATE: "1"
         run: node scripts/verify-linux-package.mjs
       - name: Match a normal Ubuntu package parent on the ephemeral runner
         run: |
@@ -102,6 +106,7 @@ jobs:
           deb="release/OpenMausBot-${version}-amd64.deb"
           rpm="release/OpenMausBot-${version}-x86_64.rpm"
           test -f "$appimage"
+          test -s "$appimage.zsync"
           test -f "$deb"
           test -f "$rpm"
           cp "$appimage" release/OpenMausBot.AppImage
@@ -112,6 +117,7 @@ jobs:
             cd release
             sha256sum \
               "$(basename "$appimage")" \
+              "$(basename "$appimage.zsync")" \
               "$(basename "$deb")" \
               "$(basename "$rpm")" \
               OpenMausBot.AppImage \
@@ -139,6 +145,7 @@ jobs:
           path: |
             release/OpenMausBot-*-amd64.deb
             release/OpenMausBot-*-x86_64.AppImage
+            release/OpenMausBot-*-x86_64.AppImage.zsync
             release/OpenMausBot-amd64.deb
             release/OpenMausBot-*-x86_64.rpm
             release/OpenMausBot-x86_64.rpm
