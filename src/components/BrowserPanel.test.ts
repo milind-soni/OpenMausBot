@@ -537,6 +537,25 @@ describe("a sign-in that stops at a passkey", () => {
   });
 });
 
+describe("the profile note the chrome engine's panel shows", () => {
+  const note = () => host.querySelector("div[role=status]");
+
+  it("says Chrome keeps its own profile while the chrome engine runs, until the person dismisses it", async () => {
+    await render();
+    expect(note()?.textContent).toContain(t("browser.panel.chromeProfileNote"));
+    await act(async () => button(t("browser.panel.dismissProfileNote")).click());
+    expect(note()).toBeNull();
+    expect(host.textContent).not.toContain(t("browser.panel.chromeProfileNote"));
+  });
+
+  it("says nothing of profiles on agent-browser, whose sign-ins carry over", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    expect(note()).toBeNull();
+    expect(host.textContent).not.toContain(t("browser.panel.chromeProfileNote"));
+  });
+});
+
 describe("the browser panel before the browser is installed", () => {
   async function renderUninstalled(scopes: string[]) {
     fixture.state = { config: { browserProfiles: [], browserEngine: { kind: "unavailable", installable: true } }, computerControl: {} };

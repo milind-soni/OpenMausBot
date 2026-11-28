@@ -3988,6 +3988,8 @@
   "browser.panel.asleep": "This browser closed after it sat unused, to save memory.",
   "browser.panel.wake": "Open it again",
   "browser.panel.waking": "Opening…",
+  "browser.panel.chromeProfileNote": "Chrome runs with its own profile: sign-ins saved under the built-in browser don’t carry over.",
+  "browser.panel.dismissProfileNote": "Dismiss the profile note",
   "browser.passkey.title": "This browser can’t use your passkey",
   "browser.passkey.body": "{provider} is asking for a passkey from your phone or computer. A bot’s browser can’t reach it, so this step won’t finish here. What works instead:",
   "browser.passkey.appsGoogle": "For Gmail, Calendar or Drive, connect Google as an app. {name} then works without signing in here.",
