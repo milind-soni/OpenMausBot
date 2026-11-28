@@ -417,6 +417,7 @@ const support: AcpSupport = {
   displayName: "Hermes",
   access: "custom",
   models: EMPTY,
+  effortLevels: ["none", "low", "medium", "high", "xhigh"],
   resolveModels: (env: Record<string, string | undefined>, config: any, _instanceId: string, _fresh?: boolean, allowEnv?: readonly string[]) => resolveHermesModels(env, config, allowEnv),
   resolveTurnModel: (model, env) => {
     // Never inherit a broad or stale compatibility grant from the parent; bind one concrete model.
@@ -466,13 +467,34 @@ const support: AcpSupport = {
     }
     // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);
-    if (!native) return;
-    await applySetting(
-      request,
-      "session/set_model",
-      { sessionId, modelId: native },
-      `model "${native}"`,
-    );
+    if (native) {
+      await applySetting(
+        request,
+        "session/set_model",
+        { sessionId, modelId: native },
+        `model "${native}"`,
+      );
+    }
+    // Hermes' ACP maps `reasoning_effort` onto the live agent's reasoning config.
+    if (turn.effort) {
+      await applySetting(
+        request,
+        "session/set_config_option",
+        { sessionId, configId: "reasoning_effort", value: turn.effort },
+        `effort "${turn.effort}"`,
+      );
+    } else {
+      // Reset a pooled session to Hermes' default. Only an older build refusing the option (method/params rejected) is harmless;
+      // a timeout or transport failure would leave the previous turn's effort active, so it fails the turn.
+      try {
+        await request("session/set_config_option", { sessionId, configId: "reasoning_effort", value: "" });
+      } catch (e) {
+        const code = (e as { code?: unknown }).code;
+        if (code !== -32601 && code !== -32602) {
+          throw new Error(`Hermes rejected default effort via session/set_config_option: ${(e as Error).message}`);
+        }
+      }
+    }
   },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
