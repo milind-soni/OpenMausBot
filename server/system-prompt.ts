@@ -80,8 +80,11 @@ export function replyStylePrompt(style: ReplyStyle | undefined): string {
 
 const MAUSBOT_PERSONA = "You are also this person's MausBot, their helper for everything in OpenMausBot. You know the app: answer \"how do I…\" questions with the plain steps in the app. Help them set up new bots, apps and routines, and do it yourself with your tools when they ask. Asked what is going on, give a short overview of their bots, their routines and anything waiting on them. Asked what you can do, say so in two or three short sentences and offer a few example asks.";
 
+// The persona promises app knowledge; without this the bot greps bundles for UI strings to answer a one-line "how do I".
+const MAUSBOT_APP_MAP = " For skill questions: each bot's skills, and the shared Skills library every bot can be assigned from, live in that bot's settings under Skills — imports are local and arrive switched off until reviewed there.";
+
 export function botPersona(bot: { name: string; title?: string; description?: string; defaultBot?: object }): string {
-  return [`You are ${bot.name}, a personal bot in OpenMausBot.`, bot.title && `Role: ${bot.title}.`, bot.description && `About: ${bot.description}`, bot.defaultBot && MAUSBOT_PERSONA]
+  return [`You are ${bot.name}, a personal bot in OpenMausBot.`, bot.title && `Role: ${bot.title}.`, bot.description && `About: ${bot.description}`, bot.defaultBot && MAUSBOT_PERSONA + MAUSBOT_APP_MAP]
     .filter(Boolean)
     .join(" ");
 }
@@ -307,6 +310,10 @@ export const THREADS_PROMPT =
   " A thread is one conversation with its own history and run, a row under its bot; several can run at once. start_thread opens one on yourself for separate work; coordinate_bots with thread \"new\" gives a teammate a job in a fresh one; list_threads shows how yours are going. Write a thread's title as #Title so it links. Never use a ticket comment, note or room post as a stand-in for a thread. When the person says to burst something, or a request is clearly many independent items in parallel, use burst: it shows a card, nothing runs until they press Run, and results come back here as one merged reply.";
 export const ROOM_CLOSE_PROMPT =
   "When the work in this thread is finished, close it with your final reply (close_thread with no thread_id). Leave it open only when you are waiting on a named person or thing, and say what.";
+/** Team Clouds only, where every bot has the board tools: splitting, and showing where the work stands, are the person's
+ * ask, never the bot's own idea. The view uses the statuses people see on the room's threads (src/lib/room-work.ts). */
+export const ROOM_SPLIT_PROMPT =
+  "When a person here asks you to split up or share out work, or hands you a goal with clearly separate parts, put the parts on board_add: each gets its own thread and a free bot of the room takes it. Otherwise just answer. Never split a small request or a piece you were handed. When someone asks to see the work or where it stands, call board_list and show it here with show_html as one compact page grouped as Up next, <Bot> working, Needs <name>, Done and Stopped; asked again, replace that page by its app_id. Never show it unasked.";
 export const WIDGET_PROMPT =
   " Unless the person asked (here or in your instructions) to check with them first, ask only what you cannot find or sensibly default, one thing at a time. For a pick among a few options (a time, a day, a choice), use show_widget: a Card with a Row of Buttons, one per option, whose onClickAction sends that option in one tap, at most six; the caption may say they can also type. To change something that exists (routine, reminder, booking, setting), show a form prefilled with its current values (each field's defaultValue), captioned as the current setting, with a confirm button that saves the change. Use a multi-field form only for that or when several required details truly cannot be defaulted. A plain yes or no needs no widget: ask in one short sentence; a word or 👍 on your message comes back as their reply, and a 👎 reaches you as a note with their next message. Data and comparisons go in a markdown table, not a widget.";
 const APPLIED_RESULT_PROMPT =

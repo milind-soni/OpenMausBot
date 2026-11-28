@@ -135,6 +135,7 @@ let keyListeners: Set<(event: Partial<KeyboardEvent>) => void>;
 let observers: number;
 let resized: (() => void)[];
 let dispatched: unknown[];
+let intersections: ((entries: { isIntersecting: boolean }[]) => void)[];
 
 function mount(initial: Partial<Props> = {}) {
   let props: Props = { ownerId: "bot", threadId: "thread", messages: rows(10), pinOn: [false], ...initial };
@@ -146,6 +147,7 @@ function mount(initial: Partial<Props> = {}) {
   const commit = () => {
     result.scrollRef.current = scroller as unknown as HTMLDivElement;
     result.transcriptRef.current = transcriptOf(result.windowedMessages) as unknown as HTMLDivElement;
+    result.topSentinelRef.current = {} as HTMLDivElement;
     scroller.rows = result.windowedMessages.length;
     scroller.content = result.windowedMessages.reduce((sum, row) => sum + heightOf(row), 0);
     scroller.scrollTop = Math.min(scroller.scrollTop, scroller.bottom);
@@ -191,6 +193,7 @@ beforeEach(() => {
   observers = 0;
   resized = [];
   dispatched = [];
+  intersections = [];
   forgetTranscriptPositions();
   resetLiveReplies();
   store.state.focusMessage = null;
@@ -212,7 +215,9 @@ beforeEach(() => {
     disconnect() {}
   });
   vi.stubGlobal("IntersectionObserver", class {
-    constructor() {}
+    constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+      intersections.push(callback);
+    }
     observe() {}
     disconnect() {}
   });
@@ -730,6 +735,52 @@ describe("a long conversation read from its end to its start and back", () => {
     scrollTo(view, scroller.bottom);
     expect(view.current.following).toBe(true);
     expect(view.current.windowedMessages).toHaveLength(120);
+  });
+
+  it("keeps stepping up when the top sentinel reports between a step's commit and the observer's next subscription", () => {
+    const view = mount({ messages: rows(600) });
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    const observedBeforeStep = intersections.at(-1)!;
+    scrollTo(view, 100);
+    expect(view.current.hiddenCount).toBe(480 - TRANSCRIPT_WINDOW_STEP);
+
+    view.act(() => observedBeforeStep([{ isIntersecting: true }]));
+    const afterReport = view.current.hiddenCount;
+    scrollTo(view, scroller.scrollTop + 100);
+    scrollTo(view, 50);
+    expect(view.current.hiddenCount).toBeLessThan(afterReport);
+  });
+
+  it("never lets go of a row on screen when rows that draw nothing make the whole window shorter than the view", () => {
+    // Turns of a question, 110 folded tool steps and a short answer; the newest answer is five views tall.
+    heightOf = (row) => {
+      const index = Number(row.id.slice(1));
+      return index === 599 ? 2_000 : index % 112 === 0 || index % 112 === 111 ? 50 : 0;
+    };
+    const view = mount({ messages: rows(600) });
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    const onScreen = () => {
+      let below = 0;
+      return view.current.windowedMessages.filter((row) => {
+        const top = below;
+        below += heightOf(row);
+        return heightOf(row) > 0 && top < scroller.scrollTop + scroller.clientHeight && below > scroller.scrollTop;
+      }).map((row) => row.id);
+    };
+    /** Moves the view by `by` and checks the window step that follows keeps every row on screen at that moment. */
+    const wheel = (by: number) => {
+      scroller.scrollTop = Math.max(0, Math.min(scroller.bottom, scroller.scrollTop + by));
+      const shown = onScreen();
+      view.act(() => {
+        view.current.scrollHandlers.onWheel({ deltaY: by } as never);
+        view.current.scrollHandlers.onScroll();
+      });
+      expect(view.current.windowedMessages.map((row) => row.id)).toEqual(expect.arrayContaining(shown));
+    };
+    for (let step = 0; step < 200 && view.current.hiddenCount > 0; step++) wheel(-100);
+    expect(view.current.hiddenCount).toBe(0);
+    for (let step = 0; step < 200 && view.current.laterCount > 0; step++) wheel(100);
+    expect(view.current.laterCount).toBe(0);
   });
 
   it("keeps a window of held pages bounded as older pages arrive from the server", () => {

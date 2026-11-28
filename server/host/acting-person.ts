@@ -13,7 +13,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import { answeredByPerson } from "../cloud-lending.ts";
 import type { WorkOrigin } from "../peer-provenance.ts";
-import { needsInputQuestion } from "../runtime-coordinator.ts";
+import { handoffQuestion } from "../runtime-coordinator.ts";
 
 export const HANDED_PEOPLE_FILE = "handed-people.json";
 
@@ -172,7 +172,7 @@ export function createActingPeople(deps: ActingPeopleDeps) {
 
 export type ActingPeople = ReturnType<typeof createActingPeople>;
 
-type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean; approvalAsk?: string };
+type HandedBack = { ok: boolean; text: string; question?: string | null; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean; approvalAsk?: string };
 type Place = { child: string | null; parent: string | null };
 
 /** Work in one person's private chat, for a requester whose chat is not that one: its words stay with that person. */
@@ -187,10 +187,11 @@ export function privateHandBack<T extends HandedBack>(outcome: T, place: Place &
   const where = `${place.bot}'s chat with ${place.person}`;
   const question = `${place.bot} has a question for ${place.person}, in ${where}.`;
   const { evidence: _evidence, ...rest } = outcome;
-  const asks = needsInputQuestion(outcome.text) !== undefined;
+  const asks = handoffQuestion(outcome) !== undefined;
   return {
     ...rest,
     text: asks ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,
+    ...(outcome.question === undefined ? {} : { question: asks ? question : null }),
     ...(outcome.cards ? { cards: { ...outcome.cards, question } } : {}),
     ...(outcome.approvalAsk ? { approvalAsk: question } : {}),
     ...(asks || outcome.cards || outcome.approvalAsk ? { privateQuestion: true } : {}),

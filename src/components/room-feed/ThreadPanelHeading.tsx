@@ -5,6 +5,7 @@ import { copyTranscriptToClipboard, downloadMarkdownTranscript, formatTranscript
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { threadRowCloser } from "@/lib/room-thread-close";
+import { WORK_INK, type WorkStatus } from "@/lib/room-work";
 import type { Group, GroupTask, Message } from "@/state/store";
 import { useStoreRef } from "@/state/store-ref";
 import { PRESET_TURN_LIMITS, useConversationTurnLimit } from "../ConversationTurnLimit";
@@ -16,8 +17,8 @@ const ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left te
 
 /** The title of a room thread open beside its feed, and its menu: what the feed row's menu offers, and what the room's
  * header and menu offered for its one thread before the feed: find, the export (its lines are loaded here) and its
- * time per turn. */
-export function ThreadPanelHeading({ group, task, messages, working }: { group: Group; task: GroupTask; messages: readonly Message[]; working: boolean }) {
+ * time per turn. Under the title, where its piece of work stands when a bot split it off as one. */
+export function ThreadPanelHeading({ group, task, messages, working, work, onClose }: { group: Group; task: GroupTask; messages: readonly Message[]; working: boolean; work?: WorkStatus | null; onClose: () => void }) {
   const store = useStoreRef();
   const dispatch = store.dispatch;
   const [menu, setMenu] = useState<ThreadMenuAt | null>(null);
@@ -29,7 +30,6 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
     [task.threadId, task.title, task.pinned, task.archivedAt, working, closer]);
   const now = useRelativeNow();
   const actions = useMemo(() => roomThreadRowActions(group.id, dispatch), [group.id, dispatch]);
-  const close = () => dispatch({ type: "closeForkPanel" });
   const markdown = () => formatTranscriptMarkdown({ title: task.title, messages, isGroup: true });
   const limit = useConversationTurnLimit({ ...group, threadId: task.threadId });
   const limits: Array<{ key: string; minutes: number | null; label: string }> = [
@@ -40,10 +40,10 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
   const menuSheet = useThreadRowMenu({
     task: row, displayTitle: title, ownerId: group.id, menu, setMenu, actionRef: moreRef,
     onStartRename: () => { setMenu(null); setRenaming(true); },
-    onDelete: (thread) => { close(); actions.onDelete(thread); },
+    onDelete: (thread) => { onClose(); actions.onDelete(thread); },
     onPin: actions.onPin,
     onSetClosed: actions.onSetClosed,
-    onArchive: (thread, archivedAt) => { if (archivedAt !== null) close(); actions.onArchive(thread, archivedAt); },
+    onArchive: (thread, archivedAt) => { if (archivedAt !== null) onClose(); actions.onArchive(thread, archivedAt); },
     deletable: (group.tasks?.length ?? 1) > 1,
     extra: (done) => <>
       <button type="button" data-thread-find="" className={ITEM} onClick={() => { done(); requestChatFind(task.threadId); }}>
@@ -76,8 +76,12 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
       {closer
         ? <p data-thread-closed="" className="truncate text-[12px] leading-4 text-ink-tertiary">
           {t("room.thread.closedBy", { name: closer.name, when: threadUpdatedLabel(closer.at, now) })}
+          {work && <> · <span data-thread-work={work.kind} className={WORK_INK[work.kind]}>{work.label}</span></>}
         </p>
-        : <p dir="auto" className="truncate text-[12px] leading-4 text-ink-secondary">{group.name}</p>}
+        : <p className="truncate text-[12px] leading-4 text-ink-secondary">
+          <span dir="auto">{group.name}</span>
+          {work && <> · <span data-thread-work={work.kind} className={WORK_INK[work.kind]}>{work.label}</span></>}
+        </p>}
     </div>
     {closer && <button type="button" data-thread-reopen="" className="ui-button ui-button-sm shrink-0" onClick={() => actions.onSetClosed(task, false)}>{t("task.reopenThread")}</button>}
     <button ref={moreRef} type="button" aria-label={t("task.actions", { title })} title={t("task.actions", { title })} aria-expanded={Boolean(menu)}

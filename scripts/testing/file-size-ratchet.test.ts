@@ -16,14 +16,14 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15253,
+  "server/index.ts": 15217,
   "src/state/store.tsx": 3258,
   "electron/main.mjs": 3124,
-  "server/store.ts": 2255,
+  "server/store.ts": 2254,
   "src/components/Sidebar.tsx": 1654,
-  "server/drivers/claude.ts": 1989,
-  "server/drivers/acp/core.ts": 1541,
-  "server/drivers/codex.ts": 1583,
+  "server/drivers/claude.ts": 1954,
+  "server/drivers/acp/core.ts": 1538,
+  "server/drivers/codex.ts": 1577,
   "server/routines.ts": 1553,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
@@ -40,8 +40,8 @@ const LINES: Record<string, number> = {
   "server/container-computer.ts": 1156,
   "src/components/ModelPicker.tsx": 1017,
   "src/components/PhoneSetupFlow.tsx": 1085,
-  "server/cli.ts": 1053,
-  "src/components/AttachmentPreview.tsx": 1025,
+  "server/cli.ts": 1052,
+  "src/components/AttachmentPreview.tsx": 1017,
   "server/meetings/meetbot.ts": 1047,
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };

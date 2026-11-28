@@ -139,6 +139,36 @@ describe("routines.json saves", () => {
     manager.close();
   });
 
+  it("write a busy scheduler pass's waiting marks once per pass, not once per run", async () => {
+    const file = join(dir, "routines.json");
+    let now = Date.now();
+    const options = {
+      file,
+      now: () => now,
+      botState: () => "busy" as const,
+      createTask: () => ({ threadId: "thread-1" }),
+      startTurn: async () => {},
+    };
+    const manager = new RoutineManager(options);
+    const schedule = { type: "interval" as const, everyMinutes: 5, anchorAt: now };
+    const first = manager.create({ name: "First", prompt: "One.", botId: "bot-1", schedule });
+    const second = manager.create({ name: "Second", prompt: "Two.", botId: "bot-1", schedule });
+    now = Math.max(first.nextRunAt!, second.nextRunAt!) + 30_000;
+    await manager.tick();
+    const restart = new RoutineManager({ ...options, startTurn: async () => {} }).listRuns();
+    expect(restart).toHaveLength(2);
+    expect(restart.every((run) => run.status === "queued" && run.deferredAt != null)).toBe(true);
+    vi.mocked(fs.renameSync).mockClear();
+    // A minute later (the routines' next occurrence is minutes away), each queued run's wait crosses its next minute: the pass writes both marks together, once.
+    now += 60_000;
+    await manager.tick();
+    expect(writesOf("routines.json")).toBe(1);
+    const waited = new RoutineManager({ ...options, startTurn: async () => {} }).listRuns();
+    expect(waited).toHaveLength(2);
+    expect(waited.every((run) => run.status === "queued" && (run.busyMs ?? 0) >= 60_000 && run.deferredAt != null)).toBe(true);
+    manager.close();
+  });
+
   it("save a long run's progress once per window, so a crash loses at most that window", async () => {
     const { manager, routine, restart, onDisk, deliver } = setup();
     manager.runNow(routine.id);

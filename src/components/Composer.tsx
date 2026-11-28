@@ -1,6 +1,6 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
-import { useComposerDictation } from "@/lib/use-composer-dictation";
+import { useComposerDictation } from "@/lib/use-composer-dictation"; import { isPlaceId } from "@/lib/place-chat";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { isNewChatThread } from "@/state/new-chat";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
@@ -39,7 +39,7 @@ import {
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
 import { SlashCommandMenu } from "./SlashCommandMenu"; import { ComposerFailedSends } from "./ComposerFailedSends";
 import { MentionTextarea } from "./MentionTextarea"; import { useSuggestedReply } from "./use-suggested-reply"; import { SUGGESTION_HINT_ID, SuggestedReplyGhost } from "./SuggestedReplyGhost";
-import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
+import { ComposerAttachments, localPathForFile, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { openPageFor } from "@/lib/open-page";
@@ -315,8 +315,8 @@ export function Composer({
 
   const slash = composerSlashTrigger(text, caret);
   const locale = activeLocale();
-  const slashSkills = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
-  const canLearn = skillAuthoringEnabled(state.config) &&
+  const slashSkills = useSlashSkills(group || isPlaceId(bot?.id) ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const canLearn = skillAuthoringEnabled(state.config) && !isPlaceId(bot?.id) &&
     (group ? (members ?? []).some((member) => supportsAgents(state.instances, member)) : supportsAgents(state.instances, bot));
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
@@ -352,14 +352,14 @@ export function Composer({
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
-    if (!mention || mention.start === dismissedAt) return [];
+    if (!mention || mention.start === dismissedAt || isPlaceId(bot?.id)) return []; // a My Cloud bot's chat names none of this computer's
     const pool: MentionChoice[] = group
       ? [
           ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : bots
-          .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
+          .filter((member) => member.id !== bot?.id && !member.hidden && !isPlaceId(member.id) && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
@@ -501,20 +501,21 @@ export function Composer({
     return () => window.clearTimeout(timeout);
   }, [busy, pendingCount, steering]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null), placed = isPlaceId(bot?.id), filesThere = () => setAttachmentNotice(t("together.inPlace.files")); // a My Cloud bot open in place takes no files here
   const modeBot = group ? undefined : bot;
   const pinPlace = (surface: Place | null) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } });
   const place = modeBot && !remoteClient && advanced ? { bot: modeBot, task: composerTask, disabled: Boolean(modeBot.busy), onPin: pinPlace } : undefined;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
-  const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
+  const uploadImage = useCallback((file: File) => (placed ? Promise.resolve(null) : uploadDraftImage(draftId, file)), [draftId, placed]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
-    if (!picked?.length) return;
+    if (!picked?.length) return; if (placed) return filesThere();
     const escapesBefore = escapeBlurs.current;
     changeDraftAttachmentPending(draftId, true);
     try {
       const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
         allowImages: engineSupportsImages,
         getPath: pathForFile,
+        localPath: localPathForFile,
         uploadImage,
         imageSlots: imageSlotsLeft(attachments),
         imageBytes: imageBytesLeft(attachments),
@@ -637,7 +638,7 @@ export function Composer({
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const pastedFiles = clipboardFilesToAttach(e.clipboardData);
+    const pastedFiles = clipboardFilesToAttach(e.clipboardData); if (placed && (pastedFiles.length || clipboardHasImages(e.clipboardData))) { e.preventDefault(); filesThere(); return; }
     if (pastedFiles.length > 0) {
       e.preventDefault();
       void pickFiles(pastedFiles);
@@ -752,7 +753,7 @@ export function Composer({
         <PointedChips threadId={threadId} />{!group && bot && <SetupRequestChip bot={bot} threadId={threadId} />}
         <ComposerAttachments
           items={attachments}
-          onAdd={addAttachments}
+          onAdd={placed ? filesThere : addAttachments}
           onRemove={removeAttachment}
           onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
           onDisplayInChatBox={displayPasteInChatBox}
@@ -937,7 +938,7 @@ export function Composer({
           {stacked && (
             <ComposerAdvancedTools profile={profile} bot={modeBot} task={composerTask} locked={locked} remoteClient={remoteClient}
               onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} approval={approvalChoice}
-              callBotId={callShown && bot && !group ? bot.id : undefined}
+              callBotId={callShown && bot && !group && !placed ? bot.id : undefined}
               onPin={pinPlace} />
           )}
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ms-auto")}>
@@ -975,7 +976,7 @@ export function Composer({
             <Mic size={16} className="[&_rect]:fill-current" />
           </button>
         )}
-        {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
+        {callShown && bot && !group && !placed && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
           <ComposerSendButton compact={simpleDock} waits={!fork.command && busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}

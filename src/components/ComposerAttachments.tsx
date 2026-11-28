@@ -20,6 +20,11 @@ export function pathForFile(file: File): string {
   return window.ogb?.getPathForFile?.(file) ?? "";
 }
 
+/** A file's place for a bot on this same computer: the desktop app on its own server, never one paired to another. */
+export function localPathForFile(file: File): string {
+  return window.ogb?.remoteClient?.active === true ? "" : pathForFile(file);
+}
+
 export function ComposerAttachments({
   items,
   onAdd,
@@ -84,6 +89,7 @@ export function ComposerAttachments({
         const { attachments, problems } = await intakeFiles(files, {
           allowImages: callbacks.current.allowImages,
           getPath: pathForFile,
+          localPath: localPathForFile,
           uploadImage: callbacks.current.uploadImage,
           imageSlots: callbacks.current.imageSlots,
           imageBytes: callbacks.current.imageBytes,

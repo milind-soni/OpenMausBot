@@ -188,8 +188,8 @@ describe("deleting one browser session's saved logins", () => {
 
   it("removes only exact state/backup/candidate files and never calls state clear", async () => {
     const { directory, options } = fixture();
-    const removed = ["work-work.json", "work-work.json.enc", "work-work.json.previous", "work-work.json.enc.previous", ".tmp/work-work-candidate-123.json.enc", `${browserRestoreKey("work")}-work.json.enc`, `${browserRestoreKey("work")}-work.json.enc.previous`, `.tmp/${browserRestoreKey("work")}-work-candidate-123.json.enc`];
-    const preserved = ["work-client-work-client.json.enc", "personal-personal.json", "work-another.json", "notes.json", ".tmp/work-client-work-client-candidate-123.json.enc", `${browserRestoreKey("work-client")}-work-client.json.enc`];
+    const removed = ["work-work.json", "work-work.json.enc", "work-work.json.previous", "work-work.json.enc.previous", ".tmp/work-work-candidate-123.json.enc", `${browserRestoreKey("work")}-work.json.enc`, `${browserRestoreKey("work")}-work.json.enc.previous`, `.tmp/${browserRestoreKey("work")}-work-candidate-123.json.enc`, "home-backup-work-1764200000000.json.enc", "home-backup-work-1764300000000.json.enc"];
+    const preserved = ["home-backup-work-client-1764200000000.json.enc", "home-backup-work-123.json.enc", "work-client-work-client.json.enc", "personal-personal.json", "work-another.json", "notes.json", ".tmp/work-client-work-client-candidate-123.json.enc", `${browserRestoreKey("work-client")}-work-client.json.enc`];
     for (const name of [...removed, ...preserved]) writeFileSync(join(directory, name), "fixture state");
     expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(true);
     for (const name of removed) expect(existsSync(join(directory, name)), name).toBe(false);

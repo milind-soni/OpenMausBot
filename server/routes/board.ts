@@ -1,4 +1,4 @@
-// The Team Board's routes, for every member and admin of a Team Cloud with the board switched on (docs/team-board.md).
+// The Team Board's routes, for every member and admin of a Team Cloud (docs/team-board.md).
 // Anywhere else none of them exists: they answer 404 like any unknown path.
 //   GET    /api/board[?groupId=]          the items the caller can see, oldest first
 //   POST   /api/board/items               a new item, on a new room thread or on one the room has
@@ -7,7 +7,7 @@
 // Security: an item is shown, changed or removed only for someone who can see its room thread, and anything that writes
 // needs what writing in the room needs (chat on every bot of it); an item they cannot see answers as a missing one.
 import { atLeast } from "../../shared/bot-access.ts";
-import { BOARD_LIMITS, type BoardPersonMove } from "../../shared/board.ts";
+import { BOARD_LIMITS, type BoardListResponse, type BoardPersonMove } from "../../shared/board.ts";
 import type { VisibleSet } from "../bot-visibility.ts";
 import type { Board } from "../board/host.ts";
 import { BoardError, type BoardMove } from "../board/state.ts";
@@ -27,7 +27,7 @@ export interface BoardPerson {
 
 export interface BoardRouteDeps {
   board: Board;
-  /** A Team Cloud with `features.teamBoard` on. */
+  /** A Team Cloud. */
   on(): boolean;
   /** The signed-in person; null for a session that is no one. */
   person(auth: RequestAuth): BoardPerson | null;
@@ -72,7 +72,7 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
     try {
       if (path === BOARD_PATH && method === "GET") {
         const groupId = url.searchParams.get("groupId") || undefined;
-        return json(res, 200, { items: deps.board.list({ groupId }).filter((item) => seen(item.groupId, item.threadId)) });
+        return json(res, 200, { items: deps.board.list({ groupId }).filter((item) => seen(item.groupId, item.threadId)), you: person.person } satisfies BoardListResponse);
       }
       if (path === `${BOARD_PATH}/items` && method === "POST") {
         const body = record(await readBody(req));

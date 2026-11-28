@@ -71,6 +71,29 @@ describe("kept originals", () => {
     expect(keptOriginalsBytes(kept)).toBe(0);
   });
 
+  it("keeps concurrent uploads within the shared folder's total limit", async () => {
+    const uploads = Array.from({ length: 20 }, (_, index) => join(store, name(index + 20)));
+    for (const [index, upload] of uploads.entries()) writeFileSync(upload, Buffer.alloc(32, index));
+    await Promise.all(uploads.map((upload, index) => keepUploadedOriginal(upload, index % 2 ? `${kept}/.` : kept, 128)));
+    expect(keptOriginalsBytes(kept)).toBe(128);
+    expect(readdirSync(kept)).toHaveLength(4);
+    expect(keptOriginal(uploads.at(-1)!, store, kept)).toBe(join(kept, name(39)));
+    for (const copy of readdirSync(kept)) expect(readFileSync(join(kept, copy))).toEqual(readFileSync(join(store, copy)));
+  });
+
+  it("lets queued uploads keep their originals after a copy fails", async () => {
+    mkdirSync(kept, { recursive: true });
+    const first = join(store, name(40)), second = join(store, name(41));
+    writeFileSync(first, "first upload");
+    writeFileSync(second, "second upload");
+    const partial = `${join(kept, name(40))}.${process.pid}.partial`;
+    writeFileSync(partial, "unfinished copy");
+    await Promise.all([keepUploadedOriginal(first, kept), keepUploadedOriginal(second, kept)]);
+    expect(existsSync(partial)).toBe(false);
+    expect(keptOriginal(first, store, kept)).toBeNull();
+    expect(readFileSync(keptOriginal(second, store, kept)!, "utf8")).toBe("second upload");
+  });
+
   it("never fails the upload when the copy cannot be made", async () => {
     writeFileSync(join(root, "not-a-folder"), "");
     await expect(keepUploadedOriginal(join(store, name(9)), join(root, "not-a-folder", "kept"))).resolves.toBeUndefined();

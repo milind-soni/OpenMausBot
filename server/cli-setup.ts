@@ -47,7 +47,7 @@ export async function runSetupCli(cli: string, args: string[], environment: Reco
   delete env.CLAUDE_CODE_ENTRYPOINT;
   const command = resolveCli(cli, args);
   await new Promise<void>((done, reject) => {
-    const child = spawn(command.command, command.args, { env, stdio: "inherit" });
+    const child = spawn(command.command, command.args, { env, stdio: "inherit", windowsHide: true });
     child.once("error", () => reject(new Error(`Could not start ${cli}. Check that it is installed and on PATH.`)));
     child.once("exit", (code, signal) => {
       if (code === 0) done();

@@ -57,6 +57,12 @@ describe("usage limits a bot reads", () => {
       { account: "Antigravity", engine: "antigravityAgent", status: "unknown", checkedAt: AT, windows: [], why: "Usage could not be checked just now. Try again later." },
     ]);
     expect(read({ instances: [antigravity], status: () => ({ ...ready, authenticated: false }) })).toEqual([]);
+    expect(read({
+      instances: [antigravity],
+      configs: { antigravity: { driver: "antigravityAgent", config: { usageMeter: false } } },
+    })).toEqual([
+      { account: "Antigravity", engine: "antigravityAgent", status: "unsupported", checkedAt: null, windows: [], why: "This AI does not report usage limits to this app." },
+    ]);
     expect(read({ instances: [instance("claude")], report: report(row("claude")) })[0]!.windows[0]!.name).toBe("5-hour");
   });
 

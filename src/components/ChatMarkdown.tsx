@@ -35,7 +35,7 @@ import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { useRevealOriginalMenu } from "./RevealOriginalMenu"; import { isPlaceId } from "@/lib/place-chat";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -365,13 +365,13 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const save = useLocalFileSave(filePath, name, message);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
-  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active && !isPlaceId(message?.threadId); // a My Cloud path is never one on this computer
   // A text file outside the chat's folder keeps Show in folder, so where the desktop app checks, the preview waits for it.
   const preview = useHtmlPreview(filePath, shownName, message, shownPath, fileOutsideWorkspace === false || !(revealHere && canRevealHostPath(filePath)));
   const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
   const [revealProblem, setRevealProblem] = useState("");
   if (!message) {
-    return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
+    return <span title={t("chat.file.legacy")} className="max-w-full min-w-0 break-all [overflow-wrap:anywhere] text-ink-secondary">{children}</span>;
   }
   // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
   const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
@@ -393,13 +393,13 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
     ? t("common.saving")
     : save.state === "saved"
       ? t("common.saved")
-      : save.state === "failed" && !revealOnClick
+      : save.state === "failed" && (!revealOnClick || save.canOpenOutside)
         ? t("chat.retry")
         : null;
   const pathTitle = preview.opens ? preview.label : revealOnClick ? t("attach.showInFolder") : t("chat.file.saveCopy");
 
   return (
-    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
+    <span dir="ltr" className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(isPlaceId(message?.threadId) ? undefined : source)}>
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
@@ -409,9 +409,9 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
         onClick={(event) => void pathAction(event)}
         disabled={!preview.opens && (save.state === "saving" || probing)}
         title={pathTitle}
-        className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+        className="inline-flex max-w-full min-w-0 items-center gap-1 break-all [overflow-wrap:anywhere] text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
-        {children}
+        <span className="min-w-0 flex-1 break-all [overflow-wrap:anywhere]">{children}</span>
         {preview.opens ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
         ) : probing ? (
@@ -438,9 +438,13 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
           {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
-      {save.state === "failed" && save.outsideWorkspace && !revealOnClick && (
-        <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
-          <OutsideWorkspaceFile filePath={shownPath} />
+      {save.state === "failed" && save.outsideWorkspace && (!revealOnClick || save.canOpenOutside) && (
+        <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 text-[12px]">
+          <OutsideWorkspaceFile
+            filePath={shownPath}
+            onOpenOutside={save.canOpenOutside ? () => void save.save({ allowOutsideWorkspace: true }) : undefined}
+            openOutsideLabel={t("attach.saveOutsideFile")}
+          />
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}

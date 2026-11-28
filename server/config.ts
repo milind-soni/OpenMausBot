@@ -227,7 +227,7 @@ const featureConfigSchema = z.object({
   /** Room jobs to several members run side by side, each in a thread of its own. On unless false. */
   parallelRoomJobs: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional(), skillBurger: z.boolean().optional(), threadTabs: z.boolean().optional(), teamBoard: z.boolean().optional(), suggestedReplies: z.boolean().optional() }); // suggestedReplies: a faded next-line suggestion in an empty composer after a bot replies, written by the bot's own engine's smallest model, on unless false; skillBurger: Skill Burgers in chat, the side menu and the bot panel, and the tools that run them, on unless false; threadTabs: a bot's threads as tabs above its chat, off unless true; teamBoard: the Team Board on a Team Cloud (docs/team-board.md), off unless true; cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, on unless false (OMB_PHONE_PUSH=0 or 1 wins)
+}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional(), skillBurger: z.boolean().optional(), threadTabs: z.boolean().optional(), suggestedReplies: z.boolean().optional() }); // suggestedReplies: a faded next-line suggestion in an empty composer after a bot replies, written by the bot's own engine's smallest model, on unless false; skillBurger: Skill Burgers in chat, the side menu and the bot panel, and the tools that run them, on unless false; threadTabs: a bot's threads as tabs above its chat, off unless true; cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, on unless false (OMB_PHONE_PUSH=0 or 1 wins)
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -466,7 +466,7 @@ export interface AppConfig extends HelperConfig {
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   vpsIdle?: z.infer<typeof vpsIdleConfigSchema>; localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean; skillBurger?: boolean; threadTabs?: boolean; teamBoard?: boolean; suggestedReplies?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean; skillBurger?: boolean; threadTabs?: boolean; suggestedReplies?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -813,7 +813,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
   }
 }
 
-import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV } from "./credential-env.ts";
+import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV, onWorkspaceServer } from "./credential-env.ts";
 export { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV };
 
 export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
@@ -1182,7 +1182,8 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
         const raw = entry.config;
         const current = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
         const merged = { ...current };
-        for (const [k, v] of Object.entries(defaults)) {
+        const workspaceServer = onWorkspaceServer(current.url, cfg.openaiCompat.url || process.env.OPENAI_COMPAT_URL);
+        for (const [k, v] of Object.entries(defaults).filter(([key]) => key === "url" || workspaceServer)) {
           // An empty provider means "no upstream pin"; never fill it from the workspace.
           if (k === "provider" && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;

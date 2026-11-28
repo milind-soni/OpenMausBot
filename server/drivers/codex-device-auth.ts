@@ -15,12 +15,12 @@ function loginFailure(output: string): string {
     return "This server's Codex CLI needs updating for browser sign-in. Run npm install -g @openai/codex@latest on the server, then try again.";
   }
   if (/device.{0,40}(disabled|not enabled|not allowed)|enable.{0,40}device/i.test(output)) {
-    return "Enable device-code login in your ChatGPT security settings or ask your workspace admin to allow it, then try again.";
+    return "OpenAI did not allow device code sign-in. Turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.";
   }
   if (/expired|expiration|timed out/i.test(output)) {
     return "The ChatGPT sign-in code expired. Start sign-in again for a new code.";
   }
-  return "ChatGPT sign-in did not finish. Check the server's connection and that device-code login is enabled in ChatGPT, then try again.";
+  return "ChatGPT sign-in did not finish. If OpenAI said device code sign-in isn't allowed, turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.";
 }
 
 /** `loginFailure` as a fixed code: an expired code, device sign-in refused by the account's settings, else the command ended. */

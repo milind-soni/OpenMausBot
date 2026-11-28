@@ -120,6 +120,26 @@ describe("OpenAICompatDriver", () => {
     }
   });
 
+  it("keeps an added server at its own address off the workspace model and provider", () => {
+    process.env.OPENAI_COMPAT_URL = "https://first.example.test/v1";
+    const saved = { model: process.env.OPENAI_COMPAT_MODEL, provider: process.env.OPENAI_COMPAT_PROVIDER };
+    process.env.OPENAI_COMPAT_MODEL = "fugu";
+    process.env.OPENAI_COMPAT_PROVIDER = "first-provider";
+    try {
+      const added = OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:1234/v1", key: "fixture-added", catalog: "lmstudio" });
+      expect(added.model).toBeUndefined();
+      expect(added.provider).toBeUndefined();
+      const sameHost = OpenAICompatDriver.decodeConfig({ url: "https://first.example.test/v1/", key: "fixture-same" });
+      expect(sameHost).toMatchObject({ model: "fugu", provider: "first-provider" });
+      expect(OpenAICompatDriver.decodeConfig({})).toMatchObject({ url: "https://first.example.test/v1", model: "fugu", provider: "first-provider" });
+    } finally {
+      for (const [name, value] of [["OPENAI_COMPAT_MODEL", saved.model], ["OPENAI_COMPAT_PROVIDER", saved.provider]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it("lists only OpenAI's chat models, newest first", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [
       { id: "gpt-4.1", created: 1 },

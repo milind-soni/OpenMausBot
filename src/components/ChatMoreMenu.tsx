@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, LayoutTemplate, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, Star, UserPlus, UserRound, Users } from "lucide-react";
+import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, Star, UserPlus, UserRound, Users } from "lucide-react";
 import { currentTaskBot, openBotThread, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -27,12 +27,11 @@ import { UsageBars } from "./EngineUsage";
 import { useConversationSide } from "./TeamSideSwitch";
 import { tasksOfSide } from "@/state/team-side";
 import { openConversationDialog, shareChoices } from "./conversation-share/conversation-share";
-import { askBot } from "@/lib/template-share";
-import { TEMPLATE_SHARE_MESSAGE } from "../../shared/share-card";
+import { PUBLISH_ITEM, usePublishItem } from "./publish-template";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
- * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
+ * Simple bot panel draws the same items as rows, and its Share button holds Publish and the two that export. */
 export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
@@ -55,9 +54,9 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const canSetMain = ownerOrAdmin === true && !remoteClient && openTask !== undefined
     && !openTask.routineRunId && !openTask.private && !openTask.openedBy && !isArchived(openTask);
   const isMain = bot.threadId === profile.mainThreadId;
+  const publish = usePublishItem(profile);
   const shareItems: SidebarMenuItem[] = [
-    { key: TEMPLATE_ITEM, label: t("template.shareAsTemplate"), icon: <LayoutTemplate size={16} />,
-      onSelect: () => askBot(dispatch, profile.id, bot.threadId, TEMPLATE_SHARE_MESSAGE) },
+    ...(publish ? [publish] : []),
     ...(sharing.team ? [{ key: "share-team", label: t("conversationShare.withTeam"), icon: <Users size={16} />,
       onSelect: () => openConversationDialog({ kind: "team", botId: profile.id, threadId: bot.threadId }) }] : []),
     ...(sharing.person ? [{ key: "share-person", label: t("conversationShare.withPerson"), icon: <UserPlus size={16} />,
@@ -133,8 +132,9 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       key: "start-fresh",
       label: t("chat.startFresh"),
       icon: <RotateCcw size={16} />,
-      disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart,
+      disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart || Boolean(bot.switchingTo),
       title: t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint"),
+      trailing: <ShortcutHint id="start-fresh" />,
       onSelect: () => contextAction.run(`/api/bots/${profile.id}/start-fresh`, { threadId: bot.threadId }),
     },
     ...(canSetMain ? [{
@@ -233,8 +233,6 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
 }
 
 export const EXPORT_ITEMS = ["copy", "download"];
-/** Asks the bot to make a shareable template of itself. */
-export const TEMPLATE_ITEM = "as-template";
 
 /** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
  * the ⋯ of its header; anywhere else a menu of those two. */
@@ -243,15 +241,15 @@ export function ChatShareMenu({ bot, className }: { bot: Bot; className: string 
     : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
 }
 
-/** The Share button's items: the bot as a template, then this conversation copied or downloaded. */
+/** The Share button's items: Publish, then this conversation copied or downloaded. */
 const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => [
-  ...items.filter((item) => item.key === TEMPLATE_ITEM).map((item) => ({ ...item, separatorBefore: false })),
+  ...items.filter((item) => item.key === PUBLISH_ITEM).map((item) => ({ ...item, separatorBefore: false })),
   ...items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item, index) => ({
     ...item, heading: undefined, separatorBefore: index === 0, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
   })),
 ];
 
-/** The ⋯ in a team bot's Share dialog: the bot as a template, and this conversation copied or downloaded. */
+/** The ⋯ in a team bot's Share dialog: Publish, and this conversation copied or downloaded. */
 export function ExportMore({ bot }: { bot: Bot }) {
   const { items } = useChatMoreItems(bot);
   return (

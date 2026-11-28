@@ -689,8 +689,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       register(origin, tools);
     }
-    if (standIn) definitions.push(standIn.definition);
     const direct = directServers(configured.map(({ origin, tools }) => ({ name: origin.server, tools: tools.length })), room - definitions.length);
+    if (standIn) definitions.push(standIn.definition);
     const searched: typeof configured = [];
     for (const server of configured) {
       if (signal.aborted || closed) throw aborted();

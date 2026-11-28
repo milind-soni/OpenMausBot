@@ -131,6 +131,43 @@ describe("isStopCommand", () => {
     expect(isStopCommand("@everyone-else stop")).toBe(false);
   });
 
+  it.each([
+    "stop @Todo",
+    "stop @Now",
+    "stop @Please",
+    "stop @Stop",
+    "@Adaplease stop",
+    "@Ada.stop stop",
+    "@Ada+Todo stop",
+    "@all+Please stop",
+    "@everyoneplease stop",
+    "/@Ada stop",
+    "@everyone stop @Todo",
+  ])("keeps another name or a non-mention out of a typed stop: %s", (text) => {
+    expect(isStopCommand(text, "Ada")).toBe(false);
+  });
+
+  it.each([
+    ["@aDa stop", "Ada"],
+    ["(@Ada) STOP!", "Ada"],
+    ["**@Ada** stop!", "Ada"],
+    ["@Ada. stop", "Ada"],
+    ["@Ada-Bot stop", "Ada-Bot"],
+    ["@Ada.Bot stop", "Ada.Bot"],
+    ["@A+Bot stop", "A+Bot"],
+    ["@Ada+Todo stop", "Ada+Todo"],
+    ["@Chris Assistent stop", "Chris Assistent"],
+    ["@Rene\u0301 stop", "René"],
+    ["【@小助手】停止", "小助手"],
+    ["@🐝 Bee stop", "🐝 Bee"],
+    ["@Todo stop", "Todo"],
+    ["@Everyone Please stop", "Everyone Please"],
+    ["@everyone stop", "Ada"],
+    ["@all stop", "Ada"],
+  ])("keeps a complete allowed name usable: %s", (text, name) => {
+    expect(isStopCommand(text, name)).toBe(true);
+  });
+
   it("reads any other message as a message, including a quoted or coded stop", () => {
     for (const text of ["", "all right", "stop using tabs", "don't stop", "pause", "stop the build and run tests", "`stop`", "\"stop\"", "> stop",
       "why did it stop?", "it stopped", "never stop", "non-stop", "stop-loss at 5%", "cancel my 3pm", "please stop the server and restart it", "stop\nthen deploy"]) {

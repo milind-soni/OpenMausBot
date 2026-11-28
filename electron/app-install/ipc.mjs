@@ -41,7 +41,7 @@ export function createDesktopAppInstaller({ app, shell, nativeImage, env, platfo
     fs: fs.promises,
     shell,
     run: (file, args) => new Promise((resolve) => {
-      execFile(file, args, { timeout: 20_000 }, (error, stdout) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout ?? "") }));
+      execFile(file, args, { timeout: 20_000, windowsHide: true }, (error, stdout) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout ?? "") }));
     }),
     resizePng: (png, side) => {
       const image = nativeImage.createFromBuffer(Buffer.from(png));

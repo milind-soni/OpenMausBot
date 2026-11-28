@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { boatAccount, boatFetch, boatNameFor, boatRefusal, deadBoatOf, findBoat, requestRecordedBoatDeletion, SLEEPING_BOAT_STATES } from "../boat.ts";
 import { beginBoatCreate, discardBoatCreate, rememberCreatedBoat, resolveBoatCreate } from "../boat-create-idempotency.ts";
 import { relayBody } from "../boat-relay.ts";
-import { copyFromComputer, copyToComputer, type CopyOutcome } from "../cloud-computer-files.ts";
+import { copyFromComputer, copyToComputer, readFromComputerInline, writeToComputerInline, type CopyOutcome } from "../cloud-computer-files.ts";
 import type { AppConfig } from "../config.ts";
 
 const READY = new Set(["idle", "ready", "running"]);
@@ -42,15 +42,17 @@ export interface ComputerOps {
   dead(): string | null;
   /** Makes it (once: the create is journaled under one idempotency key) and names it. Throws the relay's refusal. */
   create(): Promise<{ id: string; state: string }>;
-  /** One resume. Throws the relay's refusal (with its limit) on anything but a 2xx or a 409. */
+  /** One resume. Throws SandboxGone when the relay says this sandbox can never resume, else the relay's refusal (with its
+   * limit) on anything but a 2xx or a 409. */
   resume(boxId: string): Promise<void>;
   state(boxId: string): Promise<string | null>;
   /** One bot's Chrome started on its profile, with this open's door secret; `home` is the sandbox's home folder. */
   /** `policy`: the Chrome policy that blocks file:// and Chrome's own pages could be written in the sandbox. */
   launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean; home: string | null; policy: boolean }>;
-  /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits. */
+  /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits.
+   * A sandbox that takes no direct connections is copied from through the provider's JSON file read (at most 5 MiB). */
   fetchFile(boxId: string, path: string, folder: string, to: string): Promise<CopyOutcome>;
-  /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload. */
+  /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload; likewise through the JSON file write. */
   sendFile(boxId: string, folder: string, from: string, path: string): Promise<CopyOutcome>;
   /** A deleted bot's profile, door secret and files in the sandbox, erased. */
   erase(boxId: string, key: string): Promise<void>;
@@ -153,6 +155,7 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     create,
     async resume(boxId) {
       const answer = await json(cfg(), `/sandboxes/${boxId}/resume`, { method: "POST" });
+      if (sandboxGone(answer.status, answer.body)) throw new SandboxGone();
       // 409: a wake already under way; it is waited for like this one.
       if (!answer.ok && answer.status !== 409) throw boatRefusal(answer.status, "waking the browser sandbox", answer.body, true);
     },
@@ -167,8 +170,18 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       const home = typeof answer?.home === "string" && /^\/[^\0\n]*$/.test(answer.home) && !answer.home.split("/").includes("..") ? answer.home.replace(/\/+$/, "") : null;
       return { chrome: answer?.chrome === true, home, policy: answer?.policy === true };
     },
-    fetchFile: (boxId, path, folder, to) => copyFromComputer(cfg(), boxId, folder, { path, to }, AbortSignal.timeout(10 * 60_000)),
-    sendFile: (boxId, folder, from, path) => copyToComputer(cfg(), boxId, folder, { from, path }, AbortSignal.timeout(10 * 60_000)),
+    // The link first, as on every sandbox before: on one that takes no direct connections the relay answers its 409
+    // `inbound_closed` itself, without asking the provider, and the JSON file call goes instead.
+    async fetchFile(boxId, path, folder, to) {
+      const signal = AbortSignal.timeout(10 * 60_000);
+      const linked = await copyFromComputer(cfg(), boxId, folder, { path, to }, signal);
+      return "error" in linked && linked.inboundClosed ? readFromComputerInline(cfg(), boxId, folder, { path, to }, signal) : linked;
+    },
+    async sendFile(boxId, folder, from, path) {
+      const signal = AbortSignal.timeout(10 * 60_000);
+      const linked = await copyToComputer(cfg(), boxId, folder, { from, path }, signal);
+      return "error" in linked && linked.inboundClosed ? writeToComputerInline(cfg(), boxId, folder, { from, path }, signal) : linked;
+    },
     async erase(boxId, key) {
       if (!HEX16.test(key)) throw new Error("bad browser profile key");
       await action(boxId, { action: "erase", key });
@@ -201,6 +214,15 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
 /** The provider silently takes a ttlSeconds that is not a number as an hour: only a whole number within the Admin's range goes. */
 export const ttlSecondsOf = (seconds: number): number => Math.min(1_800, Math.max(300, Math.round(Number.isFinite(seconds) ? seconds : 300)));
 
+/** The relay's word that a sandbox can never be resumed (one that keeps nothing after a stop): `410` with the code
+ * `browser_sandbox_gone`. Every other answer to a resume is what it was. */
+export const SANDBOX_GONE_CODE = "browser_sandbox_gone";
+export const sandboxGone = (status: number, body: any): boolean => status === 410 && (body?.code ?? body?.error?.code) === SANDBOX_GONE_CODE;
+
+/** The sandbox can never resume: it is deleted and a fresh one made at once, under the start already counted for it. Not a
+ * failure: nothing is held off for it. */
+export class SandboxGone extends Error {}
+
 /** Not a failure of the sandbox: the browser opens in the home, and nothing is counted against it. */
 export class StaysHome extends Error {
   readonly reason: "busy" | "budget";
@@ -231,12 +253,23 @@ export async function wakeSandbox(ops: ComputerOps, options: WakeOptions): Promi
     await ops.remove(broken);
     found = null;
   }
+  /** A sandbox the relay says can never resume goes the broken one's way: deleted, and a fresh one made. */
+  const replaced = async (gone: string): Promise<{ id: string; state: string }> => {
+    await ops.remove(gone);
+    return ops.create();
+  };
   const counted = async (box: { id: string; state: string } | null): Promise<{ id: string; state: string }> => {
     if (!options.mayStart()) throw new StaysHome("budget");
     await options.allowed();
     options.starting();
     if (!box) return ops.create();
-    await ops.resume(box.id);
+    try {
+      await ops.resume(box.id);
+    } catch (error) {
+      if (!(error instanceof SandboxGone)) throw error;
+      // Its resume started nothing: the create is the one start counted above.
+      return replaced(box.id);
+    }
     return box;
   };
   let started = false;
@@ -244,14 +277,21 @@ export async function wakeSandbox(ops: ComputerOps, options: WakeOptions): Promi
    * for a browser, so a stop the Admin made because the home was down is never undone by this; the newest request wins. */
   let takenBack = false;
   if (found?.state === "archiving") {
-    await ops.resume(found.id);
-    takenBack = true;
+    try {
+      await ops.resume(found.id);
+      takenBack = true;
+    } catch (error) {
+      if (!(error instanceof SandboxGone)) throw error;
+      // A take-back counts no start, but the create that replaces it is one.
+      await ops.remove(found.id);
+      found = await counted(null);
+    }
     started = true;
   } else if (!found || SLEEPING_BOAT_STATES.has(found.state)) {
     found = await counted(found);
     started = true;
   }
-  const id = found!.id;
+  let id = found!.id;
   const deadline = Date.now() + (options.budgetMs ?? 45_000);
   // Quick reads first: a resume after a short stop is ready in well under a second.
   for (let reads = 0; Date.now() < deadline; reads++) {
@@ -260,7 +300,7 @@ export async function wakeSandbox(ops: ComputerOps, options: WakeOptions): Promi
     if (state && READY.has(state)) return { id, started };
     if (state && TERMINAL.has(state)) break;
     // The take-back came too late (the machine went with the stop): one real, counted resume instead.
-    if (takenBack && state === "archived") { takenBack = false; await counted({ id, state }); }
+    if (takenBack && state === "archived") { takenBack = false; id = (await counted({ id, state })).id; }
     // Never a second start: a refused resume is billed as one too.
   }
   throw new Error("the browser sandbox did not become ready in time");

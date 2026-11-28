@@ -63,10 +63,11 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
     const env = saved(id);
     const mine = await requireOwnOrFlag(env);
     const info = mine ? null : await sharing().identity(env);
-    const grant = { folders: await validate(input?.folders), terminal: input?.terminal === true, computer: input?.computer === true };
+    // Edits on the home folder or the system drive are kept only because confirmServerAccess asks about them first.
+    const grant = { folders: await validate(input?.folders, { homeEdits: true }), terminal: input?.terminal === true, computer: input?.computer === true };
     if (!(await dialogs.confirmServerAccess(env, grant))) return null;
     saved(id);
-    return mine ? sharing().lendOwn(env, grant) : sharing().save(env, grant, info);
+    return mine ? sharing().lendOwn(env, grant, { homeEdits: true }) : sharing().save(env, grant, info, { homeEdits: true });
   }));
   /** Settings → Servers: each server of the person's own, and how lending to it is. */
   ipcMain.handle("sharing:servers", guard("sharing:servers", async () => {
@@ -123,6 +124,14 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
     if (fromPage && !(await allows(env))) return view(env);
     await sharing().lendOwn(env, firstGrant);
     return view(env);
+  });
+  /** Choose what it can use: This computer's Settings with that server's folders and terminal open, once it is lent. On a
+   * server's own page it is about that server only, as the switch is. */
+  ipcMain.handle("lend:choose", async (event, id) => {
+    const { env } = target(event, id);
+    if (!(await own(env)) || sharing().state(env.id).enabled !== true) return false;
+    openSettings(env.id);
+    return true;
   });
   /** macOS's Accessibility and Screen Recording, the one step the system itself asks for. */
   ipcMain.handle("lend:allow-screen", async (event, id) => {

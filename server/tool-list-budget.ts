@@ -8,7 +8,7 @@
 // annotations, shorter parameter descriptions, shorter tool descriptions, and last nested fields. No tool is left out,
 // no name or required field changes, and every call is still checked against the tool's own full schema.
 import { compactAdvertisedSchema } from "./advertised-schema.ts";
-import { schemaBytes } from "./tool-schema-profile.ts";
+import { itemsOf, schemaBytes } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 export type ListedTool = { name: string; description?: string; inputSchema?: unknown } & Json;
@@ -91,24 +91,33 @@ function withSchemaLevel(node: unknown, parameters: number, annotations: boolean
   return result;
 }
 
-/** A top-level field that holds an object, or a list of objects, as just its type and choices (a list keeps
- * `items: {type: "object"}`, which a Gemini endpoint requires of every array); any other field, and one with no `type` of
- * its own, as it was. */
-function collapsedField(property: unknown): unknown {
+function acceptsArray(type: unknown): boolean {
+  return type === "array" || (Array.isArray(type) && type.includes("array"));
+}
+
+/** A top-level field that holds an object, or a nested value, as just its type and choices. Gemini requires `items` on
+ * every array: a list of objects keeps `{type:"object"}`, and any other array keeps its item type (a string when that
+ * type cannot be named). A field that is not nested stays as it was, except an array that would otherwise go out with
+ * no `items`. A field with no `type` of its own stays as it was. */
+function collapsedField(property: unknown, root: Json): unknown {
   if (!isObject(property) || !("type" in property)) return property;
   const listOfObjects = isObject(property.items) && (isObject(property.items.properties) || isObject(property.items.additionalProperties));
   const nested = isObject(property.properties) || isObject(property.additionalProperties) || listOfObjects
     || Array.isArray(property.anyOf) || Array.isArray(property.oneOf) || Array.isArray(property.allOf);
-  if (!nested) return property;
+  if (!nested) {
+    if (acceptsArray(property.type) && !("items" in property)) return { ...property, items: itemsOf(property, root) };
+    return property;
+  }
   const kept: Json = Object.fromEntries(["type", "enum"].filter((key) => key in property).map((key) => [key, property[key]]));
-  return listOfObjects ? { ...kept, items: { type: "object" } } : kept;
+  if (listOfObjects) return { ...kept, items: { type: "object" } };
+  return acceptsArray(property.type) ? { ...kept, items: itemsOf(property, root) } : kept;
 }
 
 /** A schema with each top-level field collapsed as above; the field names and `required` as they were. The handler still
  * checks every nested field. */
 function withTopLevelFields(schema: unknown): unknown {
   if (!isObject(schema) || !isObject(schema.properties)) return schema;
-  return { ...schema, properties: Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => [name, collapsedField(property)])) };
+  return { ...schema, properties: Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => [name, collapsedField(property, schema)])) };
 }
 
 /** How much of each tool a list keeps: description lengths in characters (Infinity keeps all), whether schema

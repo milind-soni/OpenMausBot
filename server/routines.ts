@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts"; import { RunProgressSave } from "./routine-progress-save.ts";
+import { OwnedFile } from "./atomic.ts"; import { beginSaves, endSaves, saveSoon } from "./save-batch.ts"; import { RunProgressSave } from "./routine-progress-save.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-due.ts";
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
@@ -1015,6 +1015,9 @@ export class RoutineManager {
   async tick(): Promise<void> {
     if (this.closing || this.ticking) return;
     this.ticking = true;
+    // A queued run's wait crosses its next minute each pass it is seen so; those marks ride the pass's next whole write, together, not one per run (server/save-batch.ts).
+    let batched = false;
+    const openSaves = () => { if (!batched) { beginSaves(); batched = true; } }, closeSaves = () => { if (batched) { endSaves(); batched = false; } };
     try {
       const now = this.now(); this.gate.sweep((id) => this.runs.some((run) => run.id === id && run.status === "queued"));
       if (this.unreadable) {
@@ -1040,8 +1043,8 @@ export class RoutineManager {
       }
       const dueRoutines = this.routines.filter(isDue);
       const scheduledRuns: RoutineRun[] = [], countedSkips: RoutineRun[] = []; let lateStarts = 0;
-      const allocations: ResultsThreadAllocation[] = [];
-      const checks: Array<{ id: string; hold?: CheckHold }> = [];
+      const allocations: ResultsThreadAllocation[] = [], checks: Array<{ id: string; hold?: CheckHold }> = [];
+      openSaves();
       if (dueRoutines.length > 0) {
         this.commitMutation(() => {
           for (const routine of dueRoutines) {
@@ -1086,7 +1089,7 @@ export class RoutineManager {
       // Oldest first, by id: a rollback across awaits can replace the run objects, and the array with them.
       let indexed: RoutineRun[] | null = null, byId = new Map<string, RoutineRun>();
       for (const id of this.runs.map((run) => run.id)) {
-        if (this.closing) return;
+        if (this.closing) return; openSaves();
         if (indexed !== this.runs) [indexed, byId] = [this.runs, new Map(this.runs.map((run) => [run.id, run]))];
         const run = byId.get(id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
@@ -1097,9 +1100,9 @@ export class RoutineManager {
         if (definition?.schedule.type === "interval") {
           const latest = latestIntervalOccurrence(definition.schedule, now);
           if (latest !== null && latest > run.scheduledFor) {
+            // A stamp the app is shown is on disk when it is shown (reporting persists cards): these stamps save at once, not with the pass's waiting marks.
             run.scheduledFor = latest;
-            this.saveLater();
-            this.emitRun(run);
+            this.save(); this.emitRun(run);
           }
           const requiresCurrentDayOccurrence =
             definition.schedule.weekdays !== undefined || definition.schedule.window !== undefined;
@@ -1117,21 +1120,18 @@ export class RoutineManager {
           this.runChecks(checked.id, checkHold(this.runs, checked.id, now, run.id), run.id).catch((error) => console.error(`routines: the checks of ${checked.id} failed`, error));
           continue;
         }
-        const sameRoutineWorking = (triggerSource === "schedule" || run.sameConversation) && this.runs.some(other =>
-          other.id !== run.id && other.routineId === run.routineId && ["running", "waiting"].includes(other.status));
-        const held = sameRoutineWorking || this.runs.some((other) => other.routineId === run.routineId && this.slowStops.holds(other.threadId));
+        const held = (triggerSource === "schedule" || run.sameConversation) && this.runs.some(other =>
+          other.id !== run.id && other.routineId === run.routineId && (["running", "waiting"].includes(other.status) || this.options.turnLive?.(other) === true)) ||
+          this.runs.some((other) => other.routineId === run.routineId && this.slowStops.holds(other.threadId));
         const state = held ? "busy" : this.targetState(run);
         if (state === "busy") {
           if (run.deferredAt == null) {
             run.deferredAt = now;
-            this.saveLater();
-            this.emitRun(run);
+            this.save(); this.emitRun(run);
           }
           if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
             run.deferredNoticeAt = now;
-            this.saveLater();
-            this.emitRun(run);
-            this.options.onRunDeferred?.(cloneRun(run));
+            this.save(); this.emitRun(run); this.options.onRunDeferred?.(cloneRun(run));
           }
           const busy = busyWait(run, this.clock, triggerSource === "schedule" && !held && run.checkKey === undefined, now);
           if (busy.missed) this.failRun(Object.assign(run, busy.missed.codes), busy.missed.text, "missed");
@@ -1141,7 +1141,7 @@ export class RoutineManager {
         if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId, run);
         if (!this.ledger.ready(run)) continue; if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
-        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const startedBy = run.byPerson ? "manual" : triggerSource, capped = this.options.capText?.(run.botId, startedBy); if (capped) { if (startedBy === "manual") this.failRun(run, capped); else void this.cancelRun(run.id, capped); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { const again = wakeRetry(run, gated, definition, this.now()); if (again === true) { this.saveLater(); this.emitRun(run); } else this.failRun(run, again); continue; }
+        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const startedBy = run.byPerson ? "manual" : triggerSource, capped = this.options.capText?.(run.botId, startedBy); if (capped) { if (startedBy === "manual") this.failRun(run, capped); else void this.cancelRun(run.id, capped); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { const again = wakeRetry(run, gated, definition, this.now()); if (again === true) { this.save(); this.emitRun(run); } else this.failRun(run, again); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
@@ -1161,7 +1161,7 @@ export class RoutineManager {
         }
         Object.assign(run, { threadId: task.threadId, startedAt, status: "running" } satisfies Partial<RoutineRun>); this.clock.from(run, "workedMs", startedAt); delete run.workedMs; this.clock.stop(run, "busyMs", true);
         try { this.save(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
-        this.emitRun(run);
+        this.emitRun(run); closeSaves(); // the handoff yields: the start's write carried the pass's waiting marks, and later ones land at the pass's end
         try {
           const prompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
           if (!prompt) {
@@ -1197,7 +1197,7 @@ export class RoutineManager {
         }
       }
     } finally {
-      this.ticking = false; this.passedAt = this.now();
+      closeSaves(); this.ticking = false; this.passedAt = this.now();
     }
   }
 

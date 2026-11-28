@@ -217,6 +217,7 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  *   openPlace(home: "computer" | "cloud"): unknown,
  *   send(channel: string, value: unknown): void,
  *   changed(): void,
+ *   inPlace?: { ensure(): Promise<{ ok: boolean }>, close(): unknown } | null,
  *   now?(): number,
  *   setTimer?: typeof setInterval,
  *   clearTimer?: typeof clearInterval,
@@ -234,13 +235,15 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * own switch to that place, waking My Cloud as opening it always does. `send`: to the page on screen. `changed()`: the
  * list or the switch changed, so a page that draws it asks again. `address(home, botId)`: the address the link between
  * the two places gives that bot (electron/bot-link-main.mjs), or null while no link of this Cloud and account is on.
+ * `inPlace`: the session this computer's server opens a My Cloud bot in place with (place-chat-main.mjs): readied on a
+ * click from this computer's page, and let go whenever the lists are dropped.
  *
  * Security: My Cloud is never asked while it sleeps, since any request would wake it and run up its hours. It is asked
  * only right after the Admin said it is awake, at most once a minute, and only while the person is using the window. What
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, turnedOn = () => {}, commands = null, now = Date.now,
+export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, turnedOn = () => {}, commands = null, inPlace = null, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout, startQuietMs = START_QUIET_MS }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
@@ -251,7 +254,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
   let epoch = 0;
   // The first read of My Cloud waits until the app has been up START_QUIET_MS: as if it had been asked just before.
   const neverAsked = now() - CLOUD_EVERY_MS + startQuietMs;
-  let commandsSeen = null, saved = null, timer = null, pending = null, scope = null, cloudAskedAt = neverAsked, signIn = false, unheard = null;
+  let commandsSeen = null, saved = null, timer = null, pending = null, scope = null, cloudAskedAt = neverAsked, signIn = false, unheard = null, readying = 0;
   const placeShown = () => { const place = shown(); return place === "computer" || place === "cloud" ? place : null; };
 
   /** The file as last read or written: read once, then kept here. */
@@ -290,6 +293,8 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     aisWanted.clear();
     cloudAskedAt = neverAsked;
     signIn = false;
+    readying = 0;
+    try { void inPlace?.close(); } catch {}
     drop();
   }
   function drop() {
@@ -435,7 +440,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
 
   function otherOf(asking) {
     const home = otherHome(asking), known = kept.get(home);
-    const state = home === "cloud" && pending?.home === home && (cloud().asleep || known?.state !== "ready") ? "waking"
+    const state = home === "cloud" && (pending?.home === home || readying > 0) && (cloud().asleep || known?.state !== "ready") ? "waking"
       : home === "cloud" && cloud().asleep ? "asleep" : known?.state ?? "loading";
     return { home, state, bots: (known?.bots ?? []).map((row) => addressed(row)), ...(known?.sections?.length ? { sections: known.sections } : {}), ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
   }
@@ -532,6 +537,32 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       go(home, "desktop-notifications:open", { botId: row.id, threadId: row.threadId }, OPEN_WAIT_MS);
       return true;
     },
+    /** A row's click on this computer's page, where a My Cloud bot opens in this window: the session this computer's server
+     * forwards it with is readied (waking My Cloud first), with the row "waking" meanwhile; `fresh`, a new one in place of
+     * one My Cloud refused. `ok` false: the page opens it
+     * with `open` instead, on My Cloud's own page. Only a bot main listed itself, for this Cloud and account. */
+    async openInPlace(asking, botId, { fresh = false } = {}) {
+      sameScope();
+      if (asking !== "computer" || !active() || !inPlace) return { ok: false };
+      const row = kept.get("cloud")?.bots.find((bot) => bot.id === botId);
+      if (!row) return { ok: false };
+      const mine = epoch;
+      readying += 1;
+      tell();
+      try {
+        const ready = await inPlace.ensure({ fresh });
+        return { ok: mine === epoch && active() && ready?.ok === true };
+      } catch { return { ok: false }; }
+      finally { if (mine === epoch) { readying = Math.max(0, readying - 1); tell(); } }
+    },
+    /** Whether My Cloud is awake now, as the Admin says it (asked again when its word is old), for a bot open in place
+     * whose stream went quiet: never a request to My Cloud itself, which would wake it. This computer's page only. */
+    async cloudAwake(asking) {
+      sameScope();
+      if (asking !== "computer" || !active() || cloud().asleep) return false;
+      const answered = await powerChecked().catch(() => false);
+      return answered === true && active() && !cloud().asleep;
+    },
     /** The person moved bots in the one list (a drag or Alt+Up/Down, on either page): their entries replace the ones they
      * had. Nothing of either place's own server changes here. What this account has kept now. */
     arrange(asking, entries) {
@@ -619,6 +650,8 @@ export function installPlacesTogether({ ipcMain, asking, together, rail = () => 
     return together.set(page, value === true, { listOnly: from === "notice" });
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
+  ipcMain.handle("places-together:cloud-awake", (event) => together.cloudAwake(side(event)));
+  ipcMain.handle("places-together:open-in-place", (event, botId, fresh) => together.openInPlace(side(event), String(botId), { fresh: fresh === true }));
   ipcMain.handle("places-together:arrange", (event, entries) => together.arrange(side(event), entries));
   ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));
   ipcMain.handle("places-together:new-bot", (event) => together.newBot(side(event)));

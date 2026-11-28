@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { waitForExit } from "../testing/cleanup.ts";
+import { fitToolListForBudget, toolSchemaProfile } from "../tool-schema-profile.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +67,8 @@ function profiles(): Record<string, Profile> {
   // The plan's included app hosting reaches only a Cloud home the Admin wired for it; the fullest profile carries it.
   all["skills+shared+voice+x+team+images+hosting"] = { env: { ...all["skills+shared+voice+x+team+images"]!.env, OMB_APP_HOSTING: "1" } };
   all["default+hosting"] = { env: { ...all.default!.env, OMB_APP_HOSTING: "1" } };
-  // A Team Cloud with its board on mounts the three board tools, in a chat and in a room; never on the fullest profile.
+  // Every Team Cloud bot has the three board tools, in a chat and in a room. The Team profiles without them, the fullest
+  // one among them, still pin the rest of the list but no longer ship as they are: see the Gemini check below.
   all["skills+shared+voice+x+team+board"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_TEAM_BOARD: "1" } };
   all["default+room+board"] = { env: { ...all["default+room"]!.env, OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1" } };
   // A bot whose person turned groups off; the fullest profile has every group on.
@@ -78,6 +80,7 @@ const PROFILES = profiles();
 const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
+const CHIEF_SKILLS_TARGET = " A Chief of Staff may switch teammates' skills in one go (action teammates).";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
 const MAUSBOT_TOOLS = ["list_unread_notifications", "mark_notifications_read"];
 const BOARD_TOOLS = ["board_add", "board_list", "board_update"];
@@ -95,10 +98,10 @@ const BUDGET_BASELINE: Record<string, number> = {
   "voice": 62290,
   "shared": 63774,
   "shared+voice": 64555,
-  "skills": 63830,
-  "skills+voice": 64611,
-  "skills+shared": 66095,
-  "skills+shared+voice": 66876,
+  "skills": 65438,
+  "skills+voice": 66219,
+  "skills+shared": 67703,
+  "skills+shared+voice": 68484,
   "non-chief": 53136,
   "voice+non-chief": 53917,
   "shared+non-chief": 55401,
@@ -107,19 +110,19 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice+non-chief": 56238,
   "skills+shared+non-chief": 57722,
   "skills+shared+voice+non-chief": 58503,
-  "skills+shared+voice+cloud-home": 66632,
+  "skills+shared+voice+cloud-home": 68240,
   "skills+shared+voice+non-chief+cloud-home": 58259,
   "default+legacy-switches": 61509,
   "default+mausbot": 62160,
-  "skills+shared+voice+mausbot": 67527,
-  "skills+shared+voice+x": 70715,
-  "skills+shared+voice+x+team": 70715,
+  "skills+shared+voice+mausbot": 69135,
+  "skills+shared+voice+x": 72323,
+  "skills+shared+voice+x+team": 72323,
   "default+no-computer-pick": 60297,
   "default+room": 56857,
   "non-chief+room": 48309,
-  "skills+shared+voice+x+team+images": 72662,
+  "skills+shared+voice+x+team+images": 74270,
   "default+images": 63456,
-  "skills+shared+voice+x+team+images+hosting": 74525,
+  "skills+shared+voice+x+team+images+hosting": 76194,
   "default+hosting": 63372,
   "default+tools-off": 57192,
   "skills+shared+voice+x+team+board": 73047,
@@ -225,7 +228,7 @@ describe("agents proxy tools/list golden", () => {
     for (const [name, profile] of Object.entries(PROFILES)) {
       for (const tool of toolsOf(wires[name]!)) {
         if (profile.env.OMB_CLOUD_HOME === "1" && (tool.name === "select_computer" || OWN_CLOUD_TOOLS.includes(tool.name))) continue;
-        if (profile.env.OMB_CHIEF_OF_STAFF === "0" && CHIEF_TARGET_TOOLS.includes(tool.name)) continue;
+        if (profile.env.OMB_CHIEF_OF_STAFF === "0" && (CHIEF_TARGET_TOOLS.includes(tool.name) || tool.name === "skill_manage")) continue;
         if (profile.env.OMB_MAUSBOT === "1" && MAUSBOT_TOOLS.includes(tool.name)) continue;
         if (profile.env.OMB_TEAM_BOARD === "1" && BOARD_TOOLS.includes(tool.name)) continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
@@ -284,7 +287,7 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts the three board tools only on a Team Cloud with the board on, in a chat and in a room, and adds nothing else", () => {
+  it("mounts the three board tools where the harness says (every Team Cloud bot), in a chat and in a room, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
     expect(names(wires["skills+shared+voice+x+team+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["skills+shared+voice+x+team"]!));
     expect(names(wires["default+room+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["default+room"]!));
@@ -292,6 +295,15 @@ describe("agents proxy tools/list golden", () => {
       for (const tool of BOARD_TOOLS) expect(names(wires[name]!).includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_TEAM_BOARD === "1");
     }
   });
+
+  it("fits a Team Cloud's real fullest list, the board tools included, under Gemini's list budget with every name kept", async () => {
+    const tools = toolsOf(await toolsListWire(PROXY_SOURCE, { ...PROFILES[FULL]!.env, OMB_TEAM_BOARD: "1" })) as Array<Tool & { inputSchema?: unknown }>;
+    for (const tool of BOARD_TOOLS) expect(tools.map((one) => one.name)).toContain(tool);
+    const gemini = toolSchemaProfile("gemini")!;
+    const fitted = fitToolListForBudget(tools, gemini);
+    expect(Buffer.byteLength(JSON.stringify(fitted), "utf8")).toBeLessThanOrEqual(gemini.maxListBytes!);
+    expect(fitted.map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name));
+  }, 60_000);
 
   it("mounts generate_image and edit_image only when an image provider is set up, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
@@ -354,6 +366,14 @@ describe("agents proxy tools/list golden", () => {
           expect(forBotId, `${name}: ${chiefTool.name}`).toBeDefined();
           expect(browserProfile !== undefined, `${name}: ${chiefTool.name}`).toBe(chiefTool.name === "propose_profile");
           expected = { ...chiefTool, description: chiefTool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...chiefTool.inputSchema, properties } };
+        }
+        if (chiefTool.name === "skill_manage") {
+          const { changes, action, ...properties } = chiefTool.inputSchema.properties as Record<string, { enum?: string[] }>;
+          expect(changes, `${name}: skill_manage`).toBeDefined();
+          expect(action!.enum, `${name}: skill_manage`).toContain("teammates");
+          expect(chiefTool.description).toContain(CHIEF_SKILLS_TARGET);
+          const ownActions = { ...action, enum: action!.enum!.filter((option) => option !== "teammates") };
+          expected = { ...chiefTool, description: chiefTool.description.replace(CHIEF_SKILLS_TARGET, ""), inputSchema: { ...chiefTool.inputSchema, properties: { action: ownActions, ...properties } } };
         }
         expect(JSON.stringify(tools.get(chiefTool.name)), `${name}: ${chiefTool.name}`).toBe(JSON.stringify(expected));
       }
