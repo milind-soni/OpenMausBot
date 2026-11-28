@@ -41,7 +41,9 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
   // server's tools come ahead of composio's pack, and a tool budget's remainder reaches them first. A residual name
   // collision still keeps the built-in, the aggregation included.
   for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-    if (servers.some((existing) => existing.name === name) || name === "composio" || name === OWN_APPS_SERVER) continue;
+    if (servers.some((existing) => existing.name === name)
+      || (name === "composio" && turn.integrations?.composio)
+      || (name === OWN_APPS_SERVER && turn.integrations?.composioOwn)) continue;
     const apps = appMountFor(name, turn);
     if (apps && !("url" in server)) observedCommands.set(name, apps);
     const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) })

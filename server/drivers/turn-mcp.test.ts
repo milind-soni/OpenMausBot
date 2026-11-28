@@ -152,6 +152,12 @@ describe("where the connected-apps bridges mount", () => {
     expect(env(servers[4]!)[TOOL_LIMIT_ENV]).toBe("0");
   });
 
+  it("mounts custom servers when the corresponding app bridges are absent", () => {
+    const custom = { own_apps: composio, composio };
+    const servers = acpMcpServers(turn({ integrations: { custom } }));
+    expect(servers.map((server) => server.name)).toEqual(["own_apps", "composio"]);
+  });
+
   it("a name collision still keeps the composio bridge over a server of the person's with the same name", () => {
     const base = turn();
     const servers = acpMcpServers({ ...base, integrations: { ...base.integrations!, composio,
