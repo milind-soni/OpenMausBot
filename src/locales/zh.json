@@ -161,6 +161,8 @@
   "html.frameTitle": "{name} 的预览",
   "html.openInBrowser": "在浏览器中打开 {name}",
   "html.openFailed": "无法在浏览器中打开这个页面。",
+  "pdf.loadFailed": "无法打开此 PDF。请检查网络连接后重试。",
+  "pdf.refused": "无法打开此 PDF：{reason}",
   "markdown.preview": "预览：{name}",
   "markdown.loading": "正在打开文件…",
   "markdown.tooLarge": "此文件太大，无法在应用内预览（2 MB）。请下载原始文件查看。",

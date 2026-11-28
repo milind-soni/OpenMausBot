@@ -143,6 +143,8 @@
   "html.frameTitle": "{name} 的預覽",
   "html.openInBrowser": "在你的瀏覽器中開啟 {name}",
   "html.openFailed": "無法在你的瀏覽器中開啟這個頁面。",
+  "pdf.loadFailed": "無法開啟此 PDF。請檢查網路連線後再試一次。",
+  "pdf.refused": "無法開啟此 PDF：{reason}",
   "markdown.preview": "預覽：{name}",
   "markdown.loading": "正在開啟檔案…",
   "markdown.tooLarge": "此檔案太大，無法在 App 內預覽（2 MB）。請下載原始檔案查看。",

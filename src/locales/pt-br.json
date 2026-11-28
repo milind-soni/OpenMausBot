@@ -142,6 +142,8 @@
   "html.frameTitle": "Prévia de {name}",
   "html.openInBrowser": "Abrir {name} no navegador",
   "html.openFailed": "Não foi possível abrir esta página no navegador.",
+  "pdf.loadFailed": "Não foi possível abrir este PDF. Verifique sua conexão e tente novamente.",
+  "pdf.refused": "Não foi possível abrir este PDF: {reason}",
   "markdown.preview": "Prévia: {name}",
   "markdown.loading": "Abrindo arquivo…",
   "markdown.tooLarge": "Este arquivo é grande demais para a prévia no app (2 MB). Baixe o original para vê-lo.",

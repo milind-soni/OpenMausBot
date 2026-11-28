@@ -7,15 +7,13 @@ import { useFileBesideChat } from "@/lib/file-preview";
 import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/table-data";
 import { t } from "@/lib/i18n";
 
-/** A preview limit, not a download limit: chunked responses are bounded too. Text that is not UTF-8 is refused, unless
- * `fallback` names a single-byte encoding to read it in instead; a NUL byte (UTF-16, binary) is refused even
- * then, since such an encoding would only show it as garbage. */
-export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES, fallback?: string): Promise<string> {
+/** The whole body. A preview limit, not a download limit: chunked responses are bounded too. */
+export async function readResponseBytes(response: Response, signal: AbortSignal, maxBytes: number): Promise<Uint8Array> {
   if (Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel().catch(() => {}); throw new Error("size"); // A body that already errored must not hide "size".
   }
   const reader = response.body?.getReader();
-  if (!reader) return "";
+  if (!reader) return new Uint8Array();
   const parts: Uint8Array[] = [];
   let size = 0;
   try {
@@ -28,7 +26,13 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
       parts.push(part.value);
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-  const bytes = new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer());
+  return new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer());
+}
+
+/** Text that is not UTF-8 is refused, unless `fallback` names a single-byte encoding to read it in instead; a NUL
+ * byte (UTF-16, binary) is refused even then, since such an encoding would only show it as garbage. */
+export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES, fallback?: string): Promise<string> {
+  const bytes = await readResponseBytes(response, signal, maxBytes);
   // NUL is valid UTF-8, so UTF-16 without a byte order mark would pass the UTF-8 check: look for it first.
   if (fallback && bytes.includes(0)) throw new Error("encoding");
   try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (error) {

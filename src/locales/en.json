@@ -161,6 +161,8 @@
   "html.frameTitle": "Preview of {name}",
   "html.openInBrowser": "Open {name} in your browser",
   "html.openFailed": "Could not open this page in your browser.",
+  "pdf.loadFailed": "Could not open this PDF. Check your connection and try again.",
+  "pdf.refused": "Could not open this PDF: {reason}",
   "markdown.preview": "Preview: {name}",
   "markdown.loading": "Opening file…",
   "markdown.tooLarge": "This file is too large for an in-app preview (2 MB). Download the original to view it.",

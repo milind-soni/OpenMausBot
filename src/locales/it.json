@@ -161,6 +161,8 @@
   "html.frameTitle": "Anteprima di {name}",
   "html.openInBrowser": "Aperto {name} nel tuo browser",
   "html.openFailed": "Non è possibile aprire questa pagina nel browser.",
+  "pdf.loadFailed": "Non riesco ad aprire questo PDF. Controlla la connessione e riprova.",
+  "pdf.refused": "Non riesco ad aprire questo PDF: {reason}",
   "markdown.preview": "Anteprima: {name}",
   "markdown.loading": "Apertura del file…",
   "markdown.tooLarge": "Questo file è troppo grande per l’anteprima nell’app (2 MB). Scarica l’originale per vederlo.",
