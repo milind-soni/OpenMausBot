@@ -1,5 +1,5 @@
 import { lstatSync, readlinkSync, type Stats } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseStoredConfig } from "./config.ts";
 import { inSecretFolder } from "./secret-folder.ts";
 
@@ -106,3 +106,29 @@ export const examplePaths = (paths: readonly string[]): string => `${paths.slice
 
 /** Python's bytecode cache, written again the next time the code runs. */
 export const bytecodeCache = (name: string, stat: Stats): boolean => name === "__pycache__" && (stat.isDirectory() || stat.isSymbolicLink());
+
+/** `path` relative to `folder`, or undefined when it is not inside it. */
+export function pathUnder(folder: string, path: string): string | undefined {
+  const rel = relative(folder, path);
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? undefined : rel;
+}
+
+/** A top-level item of the data folder that links to another place (a folder moved to another drive, a Windows
+ * junction): the backup follows it, and what is under its target counts as under its name. */
+export type FollowedTopLevelLink = { name: string; target: string };
+
+/** Where `target` is in the data folder `root`, also through a followed top-level link; undefined when outside both. */
+export function dataRelativePath(root: string, followed: readonly FollowedTopLevelLink[], target: string): string | undefined {
+  const rel = pathUnder(root, target);
+  if (rel !== undefined) return rel;
+  for (const link of followed) {
+    const inside = pathUnder(link.target, target);
+    if (inside !== undefined) return inside ? join(link.name, inside) : link.name;
+  }
+  return undefined;
+}
+
+/** True when a new top-level link points at or above a place already followed, which would carry it twice. */
+export function carriedTwice(followed: readonly FollowedTopLevelLink[], target: string): boolean {
+  return followed.some((link) => pathUnder(target, link.target) !== undefined);
+}

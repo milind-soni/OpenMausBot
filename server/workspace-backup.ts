@@ -15,7 +15,7 @@ import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { cjkSearchText } from "./cjk-search.ts";
-import { browserProfileFolder, bytecodeCache, dataEngineSpillPath, examplePaths, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, installedDependencyFolder, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { browserProfileFolder, bytecodeCache, carriedTwice, dataEngineSpillPath, dataRelativePath, examplePaths, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, installedDependencyFolder, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig, type FollowedTopLevelLink } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
 import { DATA_TABLES, foldLegacySidecars, LEGACY_SIDECARS, LIVE_DATABASE_SIDECARS, SNAPSHOT_DATABASES, snapshotDatabases, tooLargeError } from "./workspace-backup-databases.ts";
@@ -332,23 +332,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   let skippedWorkLinks = 0;
   let copiedLinks = 0;
   const leftLinks: string[] = [], leftProfiles: string[] = [];
-  // A top-level item linked to another place (a folder moved to another drive, a Windows junction) is followed, and
-  // what is under where it points counts as under its name here.
-  const moved: { name: string; target: string }[] = [];
+  const moved: FollowedTopLevelLink[] = [];
   try {
     const root = realpathSync(dataDir);
-    const under = (folder: string, path: string) => {
-      const rel = relative(folder, path);
-      return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? undefined : rel;
-    };
-    const dataRelative = (target: string) => {
-      const rel = under(root, target);
-      if (rel !== undefined) return rel;
-      for (const link of moved) {
-        const inside = under(link.target, target);
-        if (inside !== undefined) return inside ? join(link.name, inside) : link.name;
-      }
-    };
     await snapshotDatabases(root, snapshot);
     const teamPrivate = teamPrivateThreads({ starters: join(root, "thread-starters.json"), groups: join(root, "groups.json"), bots: join(root, "bots.json") });
     const privacy = teamPrivate && { ...teamPrivate, attachments: teamPrivateAttachments(root, join(snapshot, SNAPSHOT_DATABASES["messages.db"]!), teamPrivate) };
@@ -389,13 +375,10 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           // named in the backup's note; anywhere else it still stops the backup.
           const leave = path.startsWith("workspaces/");
           try { target = realpathSync(source); } catch { if (leave) { leftLinks.push(path); continue; } throw new Error(`Cannot back up dangling symbolic link: ${path}`); }
-          const rel = dataRelative(target);
+          const rel = dataRelativePath(root, moved, target);
           const followed = rel === undefined && !prefix;
           if (!followed) {
-            if (rel === undefined) {
-              if (leave) { leftLinks.push(path); continue; }
-              throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`);
-            }
+            if (rel === undefined) { if (leave) { leftLinks.push(path); continue; } throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`); }
             const portableRel = rel.replaceAll("\\", "/");
             // Only the app's disposable native-discovery links may be omitted; any other link is user data.
             if (/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) &&
@@ -411,14 +394,10 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           if (chain.some((folder) => folder === target || folder.startsWith(`${target}${sep}`))) {
             throw userErrorThrown("serverError.backup.recursiveLink", { path });
           }
-          // A second top-level link into a place already followed would carry it twice.
-          if (followed && moved.some((link) => under(target, link.target) !== undefined)) {
-            throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
-          }
+          if (followed && carriedTwice(moved, target)) throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
           source = target;
           stat = lstatSync(source);
-          if (followed) moved.push({ name, target });
-          else copiedLinks++;
+          if (followed) moved.push({ name, target }); else copiedLinks++;
         }
         if (entries.length >= MAX_WORKSPACE_BACKUP_FILES) throw new Error("The workspace exceeds the 100,000-entry backup limit.");
         const caseTwin = foldedPaths.get(path.toLowerCase());
