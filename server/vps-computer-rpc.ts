@@ -173,7 +173,7 @@ function openChild(botId: string, target: VpsTarget): Child {
   let handshakeDone = false;
   const touch = () => {
     if (idle) clearTimeout(idle);
-    idle = setTimeout(() => dropChild(botId), CHILD_IDLE_MS);
+    idle = setTimeout(() => { if (children.get(botId)?.proc === proc) dropChild(botId); }, CHILD_IDLE_MS);
     idle.unref?.();
   };
   const stop = () => {
@@ -203,7 +203,7 @@ function openChild(botId: string, target: VpsTarget): Child {
   proc.stdout?.on("end", () => outbound.flush());
   const rpc = (method: string, params: unknown) => new Promise<Record<string, unknown>>((resolve, reject) => {
     if (proc.exitCode !== null || proc.signalCode !== null) return reject(new Error(CONNECTION_LOST));
-    if (idle) clearTimeout(idle);
+    touch();
     const id = `omb-vps-${++sequence}`;
     pending.set(id, { resolve, reject });
     proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
