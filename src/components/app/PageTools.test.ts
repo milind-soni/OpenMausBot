@@ -174,7 +174,7 @@ describe("a bot's page in the chat", () => {
     await render(row(payload()));
     await click("Share", card());
     await settle();
-    expect(posts("/app/publish")).toEqual([{ rev: 0 }]);
+    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "public" }]);
     await render(row(payload(), LIVE));
     expect(card().querySelector("[data-page-link]")?.textContent).toContain(LINK);
     expect(button("Copy link", card())).toBeDefined();
@@ -216,7 +216,7 @@ describe("a bot's page in the chat", () => {
     expect(card().querySelector("[data-page-link]")?.textContent).toContain("Published for you");
     await click("Only you", card());
     await settle();
-    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "owner" }, { rev: 0 }]);
+    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "owner" }, { rev: 0, visibility: "public" }]);
   });
 
   it("shows publish_page's link on the page it published", async () => {

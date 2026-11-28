@@ -126,7 +126,7 @@ export type PagePublishOutcome = { ok: true; card: PublishedPageCard } | { ok: f
 export async function publishAppPage(threadId: string, messageId: string, rev: number, visibility?: PublishedPageVisibility): Promise<PagePublishOutcome> {
   try {
     const body = await api<{ card: PublishedPageCard }>(`${appDocumentPath(threadId, messageId)}/publish`, {
-      method: "POST", body: JSON.stringify(visibility === "owner" ? { rev, visibility } : { rev }) });
+      method: "POST", body: JSON.stringify(visibility === undefined ? { rev } : { rev, visibility }) });
     return { ok: true, card: body.card };
   } catch (error) {
     if (!(error instanceof ApiError)) return { ok: false, error: OFFLINE_ERROR.message };
