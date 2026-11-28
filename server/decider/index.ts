@@ -132,7 +132,8 @@ export interface DeciderKeyFallback {
 const KEY_FIELDS = ["key", "workersAiToken", "openrouterKey", "customKey"] as const;
 
 /** Jobs merge per job, because saveConfig replaces a section's nested objects whole. Saving any key switches the helper
- * models and their jobs on; clearing the last key with nothing to fall back on switches them off. */
+ * models and their jobs on; clearing the last key with nothing to fall back on switches them off. A save that ends switched on
+ * also lifts a `provider: "off"`, which Settings has no control for. */
 export function deciderSavePatch(
   patch: Partial<DeciderConfig>,
   current: DeciderConfig | undefined,
@@ -159,6 +160,7 @@ export function deciderSavePatch(
   } else if (patch.jobs) {
     next.jobs = { ...current?.jobs, ...patch.jobs };
   }
+  if (next.enabled === true && current?.provider === "off" && patch.provider === undefined) next.provider = undefined;
   if (next.enabled === true && !saving && !ownAfter && !fallbackHere) {
     return { ok: false, ...userError("serverError.decider.keyRequired") };
   }

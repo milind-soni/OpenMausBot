@@ -78,6 +78,28 @@ describe("decider config", () => {
     expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
   });
 
+  it("switching on, or saving a key, lifts a provider set to off, so a saved Workers AI token decides again", () => {
+    const off = { enabled: true, provider: "off" as const, workersAiToken: "cf-token-config-0123456789", workersAiAccountId: "0123456789abcdef0123456789abcdef" };
+    for (const save of [{ enabled: true }, { workersAiToken: "cf-token-config-new-0123456789" }]) {
+      writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ decider: off }));
+      expect(describeDecider(loadConfig())).toMatchObject({ provider: "workersai", configured: true, enabled: false });
+      const planned = deciderSavePatch(save, loadConfig().decider);
+      if (!planned.ok) throw new Error(planned.error);
+      saveConfig({ decider: planned.patch });
+      const disk = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
+      expect(disk.decider.provider).toBeUndefined();
+      expect(describeDecider(loadConfig())).toMatchObject({ provider: "workersai", configured: true, enabled: true });
+    }
+  });
+
+  it("switching off, saving a key with the switch off, or a job change keeps a provider set to off", () => {
+    const off = { provider: "off" as const, workersAiAccountId: "0123456789abcdef0123456789abcdef" };
+    expect(deciderSavePatch({ enabled: false }, off)).toEqual({ ok: true, patch: { enabled: false } });
+    expect(deciderSavePatch({ workersAiToken: "cf-token-config-new-0123456789", enabled: false }, off)).not.toHaveProperty("patch.provider");
+    expect(deciderSavePatch({ jobs: { roomRouting: false } }, off)).toMatchObject({ ok: true, patch: { jobs: { roomRouting: false } } });
+    expect(deciderSavePatch({ provider: "jev", enabled: true, key: KEY }, off)).toMatchObject({ ok: true, patch: { provider: "jev" } });
+  });
+
   it("the OpenRouter key is its own: env wins over the file, a save keeps env in step, the engine's key is untouched", () => {
     writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ decider: { provider: "openrouter", openrouterKey: "" }, openrouter: { key: "engine-key" } }));
     process.env.OMB_OPENROUTER_DECIDER_KEY = OR_KEY;
