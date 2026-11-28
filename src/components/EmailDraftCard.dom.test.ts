@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { Message } from "@/state/store";
-import { draftRevision } from "../../shared/email-draft";
 
 const posted = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>);
 /** What a press waits for before the server answers. */
@@ -44,16 +43,12 @@ function type(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 
 describe("the Gmail draft card", () => {
-  it("shows the draft and sends it only after the person confirms", async () => {
+  it("shows the draft with Edit and Open in Gmail, and no Send", async () => {
     await shown();
     const text = container.textContent ?? "";
     for (const part of ["Gmail draft", "ana@example.com", "cy@example.com", "Launch", "Ready to go."]) expect(text).toContain(part);
-    await click("Send");
+    expect([...container.querySelectorAll("button")].map((one) => one.textContent)).toEqual(["Edit", "Open in Gmail"]);
     expect(posted).toEqual([]);
-    expect(document.body.textContent).toContain("It goes to ana@example.com, cy@example.com now, from your Gmail.");
-    const confirm = [...document.querySelectorAll("button")].filter((one) => one.textContent === "Send").at(-1)!;
-    await act(async () => { confirm.click(); });
-    expect(posted).toEqual([{ path: "/api/email-draft", body: { threadId: "t1", messageId: "card-1", action: "send", revision: draftRevision(draft.emailDraft!) } }]);
   });
 
   it("saves an edit with each address on its own", async () => {
@@ -67,13 +62,12 @@ describe("the Gmail draft card", () => {
     } } }]);
   });
 
-  it("offers no Edit or Send once sent, or in a room's view-only copy", async () => {
+  it("offers no Edit once sent, or in a room's view-only copy", async () => {
     await shown({ ...draft, emailDraft: { ...draft.emailDraft!, sentAt: 5 } });
     expect(container.textContent).toContain("Sent from Gmail");
-    expect(buttonNamed("Send")).toBeUndefined();
     expect(buttonNamed("Edit")).toBeUndefined();
     await shown(draft, true);
-    expect(buttonNamed("Send")).toBeUndefined();
+    expect(buttonNamed("Edit")).toBeUndefined();
     expect(buttonNamed("Open in Gmail")).toBeDefined();
   });
 

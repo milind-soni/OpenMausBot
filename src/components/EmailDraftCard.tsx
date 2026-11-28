@@ -3,8 +3,7 @@ import { useState } from "react";
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { api, type Message } from "@/state/store";
-import { draftRevision, EMAIL_DRAFT_PATH, splitAddresses, type EmailDraftCardData, type EmailDraftEdit } from "../../shared/email-draft";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { EMAIL_DRAFT_PATH, splitAddresses, type EmailDraftCardData, type EmailDraftEdit } from "../../shared/email-draft";
 
 const GMAIL_DRAFTS = "https://mail.google.com/mail/#drafts";
 
@@ -60,31 +59,27 @@ function Field({ label, value, onChange, multiline, disabled }: { label: string;
 export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: string; message: Message; viewOnly?: boolean }) {
   const card = message.emailDraft!;
   const [editing, setEditing] = useState<Fields | null>(null);
-  // What the confirmation shows, and so what Send names: a draft changed since then is refused, never sent unseen.
-  const [confirming, setConfirming] = useState<EmailDraftCardData | null>(null);
-  const [pending, setPending] = useState<"save" | "send" | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const live = !viewOnly && Boolean(threadId) && !card.sentAt;
-  const recipients = [...card.to, ...card.cc, ...card.bcc];
-  // A card sent meanwhile (the bot sent it) drops what was being edited or confirmed: it only shows what was sent.
+  // A card sent meanwhile (the bot sent it) drops what was being edited: it only shows what was sent.
   const [sentAt, setSentAt] = useState(card.sentAt);
   if (sentAt !== card.sentAt) {
     setSentAt(card.sentAt);
     setEditing(null);
-    setConfirming(null);
   }
 
-  const press = async (action: "save" | "send", what: { draft: EmailDraftEdit } | { revision: string }): Promise<boolean> => {
-    setPending(action);
+  const save = async (draft: EmailDraftEdit): Promise<boolean> => {
+    setSaving(true);
     setError(null);
     try {
-      await api(EMAIL_DRAFT_PATH, { method: "POST", body: JSON.stringify({ threadId, messageId: message.id, action, ...what }) });
+      await api(EMAIL_DRAFT_PATH, { method: "POST", body: JSON.stringify({ threadId, messageId: message.id, action: "save", draft }) });
       return true;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
       return false;
     } finally {
-      setPending(null);
+      setSaving(false);
     }
   };
 
@@ -96,16 +91,16 @@ export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: str
       {editing && live ? (
         <form className="flex flex-col gap-2" onSubmit={(event) => {
           event.preventDefault();
-          void press("save", { draft: editOf(editing) }).then((saved) => { if (saved) setEditing(null); });
+          void save(editOf(editing)).then((saved) => { if (saved) setEditing(null); });
         }}>
-          <Field label={t("chat.emailDraft.to")} value={editing.to} onChange={(to) => setEditing({ ...editing, to })} disabled={pending !== null} />
-          <Field label={t("chat.emailDraft.cc")} value={editing.cc} onChange={(cc) => setEditing({ ...editing, cc })} disabled={pending !== null} />
-          <Field label={t("chat.emailDraft.bcc")} value={editing.bcc} onChange={(bcc) => setEditing({ ...editing, bcc })} disabled={pending !== null} />
-          <Field label={t("chat.emailDraft.subject")} value={editing.subject} onChange={(subject) => setEditing({ ...editing, subject })} disabled={pending !== null} />
-          <Field label={t("chat.emailDraft.body")} value={editing.body} onChange={(body) => setEditing({ ...editing, body })} multiline disabled={pending !== null} />
+          <Field label={t("chat.emailDraft.to")} value={editing.to} onChange={(to) => setEditing({ ...editing, to })} disabled={saving} />
+          <Field label={t("chat.emailDraft.cc")} value={editing.cc} onChange={(cc) => setEditing({ ...editing, cc })} disabled={saving} />
+          <Field label={t("chat.emailDraft.bcc")} value={editing.bcc} onChange={(bcc) => setEditing({ ...editing, bcc })} disabled={saving} />
+          <Field label={t("chat.emailDraft.subject")} value={editing.subject} onChange={(subject) => setEditing({ ...editing, subject })} disabled={saving} />
+          <Field label={t("chat.emailDraft.body")} value={editing.body} onChange={(body) => setEditing({ ...editing, body })} multiline disabled={saving} />
           <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={pending !== null} className={`${button} ui-button-primary`}>{t(pending === "save" ? "common.saving" : "common.save")}</button>
-            <button type="button" disabled={pending !== null} onClick={() => { setEditing(null); setError(null); }} className={button}>{t("common.cancel")}</button>
+            <button type="submit" disabled={saving} className={`${button} ui-button-primary`}>{t(saving ? "common.saving" : "common.save")}</button>
+            <button type="button" disabled={saving} onClick={() => { setEditing(null); setError(null); }} className={button}>{t("common.cancel")}</button>
           </div>
         </form>
       ) : (
@@ -116,22 +111,12 @@ export function EmailDraftCard({ threadId, message, viewOnly }: { threadId?: str
           <Line label={t("chat.emailDraft.subject")} value={card.subject || t("chat.emailDraft.noSubject")} />
           <p dir="auto" className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words border-t border-hairline/45 pt-2 text-[14px] leading-relaxed text-ink">{draftBodyText(card)}</p>
           <div className="flex flex-wrap gap-2">
-            {live && !card.html && <button type="button" disabled={pending !== null} onClick={() => setEditing(fieldsOf(card))} className={button}>{t("chat.emailDraft.edit")}</button>}
-            {live && <button type="button" disabled={pending !== null || recipients.length === 0} onClick={() => setConfirming(card)} className={`${button} ui-button-primary`}>{t(pending === "send" ? "chat.emailDraft.sending" : "chat.emailDraft.send")}</button>}
+            {live && !card.html && <button type="button" disabled={saving} onClick={() => setEditing(fieldsOf(card))} className={button}>{t("chat.emailDraft.edit")}</button>}
             {!card.sentAt && <button type="button" onClick={() => void openExternalLink(card.url ?? GMAIL_DRAFTS)} className={button}>{t("chat.emailDraft.openInGmail")}</button>}
           </div>
         </>
       )}
       {error && <p role="alert" dir="auto" className="text-[13px] text-danger">{error}</p>}
-      <ConfirmDialog
-        open={confirming !== null}
-        title={t("chat.emailDraft.confirmTitle")}
-        body={t("chat.emailDraft.confirmBody", { to: confirming ? [...confirming.to, ...confirming.cc, ...confirming.bcc].join(", ") : "" })}
-        tone="neutral"
-        confirmLabel={t("chat.emailDraft.send")}
-        onCancel={() => setConfirming(null)}
-        onConfirm={() => { const shown = confirming; setConfirming(null); if (shown) void press("send", { revision: draftRevision(shown) }); }}
-      />
     </div>
   );
 }
